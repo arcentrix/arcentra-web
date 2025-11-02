@@ -1,0 +1,22 @@
+.DS_Store
+node_modules
+.turbo
+*.log
+.next
+dist
+dist-ssr
+*.local
+.cache
+server/dist
+public/dist
+storybook-static/
+tsconfig.tsbuildinfo
+
+# 环境变量文件
+.env
+.env.local
+.env.development
+.env.production
+
+# 保留示例文件
+!.env.example
