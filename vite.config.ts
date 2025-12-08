@@ -4,7 +4,6 @@ import { resolve } from 'node:path'
 import { PluginOption } from 'vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 
-// https://vitejs.dev/config/
 export default defineConfig(({ command, mode }) => {
   const plugins: PluginOption[] = [react()]
 
@@ -19,8 +18,6 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins,
-    // 支持反向代理部署：可通过 VITE_BASE_PATH 环境变量配置子路径
-    // 例如：VITE_BASE_PATH=/app/ pnpm build
     base: process.env.VITE_BASE_PATH || '/',
     resolve: {
       alias: {
@@ -30,8 +27,6 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: 5173,
       proxy: {
-        // API 代理配置，开发环境将 /api 请求转发到后端
-        // 前端: /api/v1/users/login -> 后端: http://localhost:8080/api/v1/users/login
         '/api': {
           target: process.env.VITE_API_URL || 'http://localhost:8080',
           changeOrigin: true,
@@ -42,8 +37,27 @@ export default defineConfig(({ command, mode }) => {
       sourcemap: mode === 'analysis',
       rollupOptions: {
         output: {
+          // ---- 分离 React 核心 into vendor chunk ----
           manualChunks: {
             react: ['react', 'react-dom', 'react-router-dom'],
+          },
+
+          // ---- 新增：将图片单独放到 images 目录 ----
+          assetFileNames: (assetInfo) => {
+            const ext = assetInfo.name?.split('.').pop()?.toLowerCase()
+
+            // 图片类资源统一放到 images/
+            if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '')) {
+              return 'images/[name]-[hash][extname]'
+            }
+
+            // 字体
+            if (['woff', 'woff2', 'ttf', 'eot'].includes(ext || '')) {
+              return 'fonts/[name]-[hash][extname]'
+            }
+
+            // 其他静态资源保留 assets/
+            return 'assets/[name]-[hash][extname]'
           },
         },
       },
