@@ -11,17 +11,23 @@ export const client = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // 支持 cookie 认证，用于 OAuth2 登录后后端设置 cookie 的情况
 })
 
 // 请求拦截器 - 添加 Token
 client.interceptors.request.use(
-  (config) => {
+  async (config) => {
     const state = authStore.getState()
     const token = state.accessToken
     
+    // 后端支持 Authorization header 和 cookie 二选一
+    // 如果有 token，使用 Authorization header
+    // 如果没有 token，不添加 Authorization header，让后端从 cookie 中读取
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // 如果没有 token，不添加 Authorization header
+    // cookie 会自动通过 withCredentials: true 发送到后端
     
     return config
   },
