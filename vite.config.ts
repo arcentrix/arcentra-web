@@ -69,8 +69,24 @@ export default defineConfig(({ command, mode }) => {
               if (req.headers.cookie) {
                 proxyReq.setHeader('Cookie', req.headers.cookie)
               }
+              if (req?.url?.startsWith('/api/v1/users/fetch') || req?.url?.startsWith('/api/v1/users/refresh') || req?.url?.startsWith('/api/v1/users/logout')) {
+                const cookieHeader = req.headers.cookie || ''
+                const accessTokenCookie = cookieHeader
+                  .split(';')
+                  .map((item) => item.trim())
+                  .find((item) => item.startsWith('accessToken='))
+                if (accessTokenCookie) {
+                  const tokenValue = accessTokenCookie.slice('accessToken='.length)
+                  if (tokenValue) {
+                    proxyReq.setHeader('Authorization', `Bearer ${tokenValue}`)
+                  }
+                }
+              }
             })
             proxy.on('proxyRes', (proxyRes, req, _res) => {
+              if (req?.url?.startsWith('/api/v1/identity/callback')) {
+                const setCookieHeaders = proxyRes.headers['set-cookie']
+              }
               // 确保后端设置的 Cookie 被正确返回
               const setCookieHeaders = proxyRes.headers['set-cookie']
               if (setCookieHeaders) {

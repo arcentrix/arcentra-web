@@ -26,7 +26,7 @@ const Login: FC<LoginProps> = () => {
         <div className='absolute inset-0 flex items-center justify-center p-10'>
           <div className='max-w-md space-y-4 text-center'>
             <blockquote className='space-y-2'>
-              <p className='text-2xl font-semibold'>&ldquo;A Cloud Native CI/CD platform&rdquo;</p>
+              <p className='text-2xl font-semibold'>&ldquo;A Cloud-native CI/CD architecture hub and automation platform&rdquo;</p>
               <footer className='text-sm text-muted-foreground'>— Arcentra Team</footer>
             </blockquote>
           </div>

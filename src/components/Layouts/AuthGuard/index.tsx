@@ -1,6 +1,6 @@
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import authStore from '@/store/auth'
 import userStore from '@/store/user'
 import storage from '@/lib/storage'
@@ -11,11 +11,18 @@ interface AuthGuardProps {}
 
 const AuthGuard: FC<AuthGuardProps> = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const auth = authStore.useState()
   const [isChecking, setIsChecking] = useState(false)
 
   useEffect(() => {
     const checkAuth = async () => {
+      const pathname = location.pathname || window.location.pathname
+      const isPublicPath = (path: string) =>
+        path === '/login' || path === '/register' || path.startsWith('/auth/callback')
+      if (isPublicPath(pathname)) {
+        return
+      }
       if (auth.initialized) {
         return
       }
@@ -26,8 +33,11 @@ const AuthGuard: FC<AuthGuardProps> = () => {
       }
 
       setIsChecking(true)
-
       try {
+        const currentPath = window.location.pathname
+        if (isPublicPath(currentPath)) {
+          return
+        }
         // 首先尝试从 cookie 中读取 token（后端可能在 cookie 中设置了 token）
         const { getAllCookies } = await import('@/lib/utils')
         const allCookies = getAllCookies()
@@ -51,10 +61,12 @@ const AuthGuard: FC<AuthGuardProps> = () => {
         ]
         
         let cookieToken: string | null = null
+        let matchedCookieName: string | null = null
         for (const name of possibleTokenNames) {
           const token = getCookie(name) || allCookies[name]
           if (token) {
             cookieToken = token
+            matchedCookieName = name
             if (import.meta.env.DEV) {
               console.log(`Token found in cookie: ${name}`)
             }
@@ -68,6 +80,7 @@ const AuthGuard: FC<AuthGuardProps> = () => {
             const lowerName = name.toLowerCase()
             if ((lowerName.includes('token') || lowerName.includes('auth')) && value) {
               cookieToken = value
+              matchedCookieName = name
               if (import.meta.env.DEV) {
                 console.log(`Token found in cookie (by pattern): ${name}`)
               }
@@ -75,7 +88,6 @@ const AuthGuard: FC<AuthGuardProps> = () => {
             }
           }
         }
-
         if (cookieToken) {
           // 如果从 cookie 中读取到 token，设置到 authStore
           const tokens = {
@@ -175,7 +187,7 @@ const AuthGuard: FC<AuthGuardProps> = () => {
     }
 
     checkAuth()
-  }, [navigate, auth.initialized, isChecking])
+  }, [navigate, auth.initialized, isChecking, location.pathname])
 
   if (auth.initialized) return <Outlet />
   return null

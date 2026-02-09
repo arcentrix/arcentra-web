@@ -16,12 +16,14 @@ export function clearLocalAuth() {
  * 必须等待后端成功响应（code === 200）后才清除本地数据
  */
 export async function logout() {
-  // 调用后端登出接口，axios 拦截器会检查 code === 200
-  // 如果 code !== 200，会抛出异常
-  await Apis.user.logout()
-  
-  // 只有后端成功响应（code === 200）后才清除本地数据
-  clearLocalAuth()
+  try {
+    // 调用后端登出接口，axios 拦截器会检查 code === 200
+    // 如果 code !== 200，会抛出异常
+    await Apis.user.logout()
+  } finally {
+    // 为避免注销失败导致前端卡死，始终清除本地状态
+    clearLocalAuth()
+  }
 }
 
 /**

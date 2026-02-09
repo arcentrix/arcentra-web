@@ -47,11 +47,19 @@ export const client = axios.create({
   withCredentials: true, // 支持 cookie 认证，用于 OAuth2 登录后后端设置 cookie 的情况
 })
 
+let hasLoggedClientBaseUrl = false
+
 // 请求拦截器 - 添加 Token
 client.interceptors.request.use(
   async (config) => {
     const state = authStore.getState()
     const token = state.accessToken
+    if (!hasLoggedClientBaseUrl) {
+      hasLoggedClientBaseUrl = true
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/ecab8bd1-0f3c-403b-93c7-5ea1e58d10da',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'pre-fix',hypothesisId:'H10',location:'api/client/index.ts:58',message:'api client base url',data:{baseURL:client.defaults.baseURL,requestUrl:config.url||'',origin:window.location.origin,withCredentials:client.defaults.withCredentials},timestamp:Date.now()})}).catch(()=>{})
+      // #endregion
+    }
     
     // 后端支持 Authorization header 和 cookie 二选一
     // 如果有 token，使用 Authorization header
@@ -79,7 +87,15 @@ client.interceptors.response.use(
       const apiResponse = data as ApiClientResponse
       return apiResponse.detail !== undefined ? apiResponse.detail : (response.data as any).data
     }
-    if (isDev()) console.warn('[RESPONSE ERROR]', data)
+    if (isDev()) {
+      const pathname = window.location.pathname || ''
+      const isPublicRoute = pathname === '/login' || pathname === '/register' || pathname.startsWith('/auth/callback')
+      const errMsg = (data as ApiClientErrorResponse).errMsg || ''
+      const suppress = isPublicRoute && (data.code === 4405 || errMsg.includes('Token cannot be empty') || errMsg.includes('Invalid token'))
+      if (!suppress) {
+        console.warn('[RESPONSE ERROR]', data)
+      }
+    }
 
     // Token 相关错误，自动登出并跳转
     if (data.code === 4401 || data.code === 4403 || data.code === 4406) {

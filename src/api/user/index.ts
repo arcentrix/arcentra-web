@@ -36,7 +36,7 @@ function updateUserInfo(userId: string, data: { fullName?: string; email?: strin
 
 // 登出
 function logout() {
-  return post<{ msg: string }>('/users/logout', {})
+  return post<{ msg: string }>('/users/logout', {}, { silence: true })
 }
 
 // 刷新 token

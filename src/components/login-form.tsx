@@ -45,8 +45,13 @@ export function LoginForm({
   const handleOAuth2Login = async (provider: 'github' | 'google' | 'slack') => {
     try {
       setIsLoading(true)
+      Object.keys(sessionStorage)
+        .filter((key) => key.startsWith('OAUTH_BACKEND_REDIRECTED'))
+        .forEach((key) => sessionStorage.removeItem(key))
+      sessionStorage.removeItem('OAUTH_INTENT')
       const redirectUri = `${window.location.origin}/auth/callback/${provider}`
       const url = Apis.auth.getAuthorizeUrl(provider, redirectUri)
+      sessionStorage.setItem('OAUTH_INTENT', JSON.stringify({ provider, ts: Date.now() }))
       window.location.href = url
     } catch (error) {
       toast.error((error as Error).message)

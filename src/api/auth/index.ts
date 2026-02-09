@@ -1,4 +1,4 @@
-import { post, get } from '../client'
+import { post } from '../client'
 import type { 
   LoginRequest, 
   LoginResponse, 
@@ -35,19 +35,46 @@ function getAuthorizeUrl(provider: string, redirectUri: string) {
   const params = new URLSearchParams({
     redirect_uri: redirectUri,
   })
+  // 兼容不同后端参数命名
+  params.append('redirectUri', redirectUri)
   const baseUrl = import.meta.env.VITE_API_CLIENT_URL || '/api/v1'
   return `${baseUrl}/identity/authorize/${provider}?${params.toString()}`
 }
 
 // 处理回调 - 由 AuthCallback 页面调用
-function handleCallback(provider: string, code: string, state?: string) {
+async function handleCallback(provider: string, code: string, state?: string) {
   const params = new URLSearchParams({ code })
   if (state) params.append('state', state)
-  
-  return get<LoginResponse>(
-    `/identity/callback/${provider}?${params.toString()}`,
-    { silence: true },
-  )
+  const apiBase = import.meta.env.VITE_API_CLIENT_URL || '/api/v1'
+  const normalizedBase = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase
+  const url = `${normalizedBase}/identity/callback/${provider}?${params.toString()}`
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      redirect: 'manual',
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    })
+    const contentType = response.headers.get('content-type') || ''
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error('OAuth callback redirected')
+    }
+
+    if (!contentType.includes('application/json')) {
+      throw new Error('OAuth callback returned non-JSON response')
+    }
+
+    const json = await response.json()
+    if (json?.code && json.code !== 200) {
+      throw new Error(json.errMsg || 'OAuth callback failed')
+    }
+    return json?.detail !== undefined ? json.detail : json?.data ?? json
+  } catch (error) {
+    throw error
+  }
 }
 
 function register(data: RegisterRequest) {

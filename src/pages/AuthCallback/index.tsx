@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { toast } from '@/lib/toast'
 import { AlertCircle } from 'lucide-react'
@@ -12,16 +12,20 @@ export function AuthCallback() {
   const location = useLocation()
   const { type } = useParams<{ type: 'oauth2' | 'oidc' }>()
   const [error, setError] = useState<string>('')
+  const hasHandledRef = useRef(false)
 
   useEffect(() => {
     const handleCallback = async () => {
+      const params = new URLSearchParams(location.search)
+      if (hasHandledRef.current) {
+        return
+      }
+      hasHandledRef.current = true
       try {
         // 从 URL 获取授权码
-        const params = new URLSearchParams(location.search)
         const code = params.get('code')
         const errorParam = params.get('error')
         const errorDescription = params.get('error_description')
-
         if (errorParam) {
           throw new Error(errorDescription || errorParam)
         }
@@ -35,17 +39,23 @@ export function AuthCallback() {
           throw new Error('Provider type not specified')
         }
 
-        const state = params.get('state')
-        const response = await Apis.auth.handleCallback(type, code, state || undefined)
+        const state = params.get('state') || 'no-state'
+        const backendRedirectKey = `OAUTH_BACKEND_REDIRECTED:${state}`
+        if (!sessionStorage.getItem(backendRedirectKey)) {
+          sessionStorage.setItem(backendRedirectKey, `${Date.now()}`)
+          const redirectUrl = `/api/v1/identity/callback/${type}?${params.toString()}`
+          window.location.href = redirectUrl
+          return
+        }
 
-        // 保存用户信息和 token
+        const userInfo = await Apis.user.getUserInfo()
         userStore.updateState((state) => {
-          state.userinfo = response.userinfo
-          state.role = response.role
+          state.userinfo = userInfo
+          state.role = (userInfo as any).role || 'user'
         })
-        authStore.setTokens(response.token)
-
-        // 跳转到主页
+        authStore.updateState((state) => {
+          state.initialized = true
+        })
         toast.success('Login successful!', 'Welcome back to Arcentra.')
         navigate('/')
       } catch (error) {
