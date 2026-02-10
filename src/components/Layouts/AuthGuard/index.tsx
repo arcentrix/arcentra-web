@@ -61,12 +61,10 @@ const AuthGuard: FC<AuthGuardProps> = () => {
         ]
         
         let cookieToken: string | null = null
-        let matchedCookieName: string | null = null
         for (const name of possibleTokenNames) {
           const token = getCookie(name) || allCookies[name]
           if (token) {
             cookieToken = token
-            matchedCookieName = name
             if (import.meta.env.DEV) {
               console.log(`Token found in cookie: ${name}`)
             }
@@ -80,7 +78,6 @@ const AuthGuard: FC<AuthGuardProps> = () => {
             const lowerName = name.toLowerCase()
             if ((lowerName.includes('token') || lowerName.includes('auth')) && value) {
               cookieToken = value
-              matchedCookieName = name
               if (import.meta.env.DEV) {
                 console.log(`Token found in cookie (by pattern): ${name}`)
               }
