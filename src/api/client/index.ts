@@ -56,9 +56,6 @@ client.interceptors.request.use(
     const token = state.accessToken
     if (!hasLoggedClientBaseUrl) {
       hasLoggedClientBaseUrl = true
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/ecab8bd1-0f3c-403b-93c7-5ea1e58d10da',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'pre-fix',hypothesisId:'H10',location:'api/client/index.ts:58',message:'api client base url',data:{baseURL:client.defaults.baseURL,requestUrl:config.url||'',origin:window.location.origin,withCredentials:client.defaults.withCredentials},timestamp:Date.now()})}).catch(()=>{})
-      // #endregion
     }
     
     // 后端支持 Authorization header 和 cookie 二选一
@@ -83,9 +80,9 @@ client.interceptors.response.use(
     const data: ApiClientResponse | ApiClientErrorResponse = response.data
 
     if (data.code === 200) {
-      // 支持 detail 和 data 两种字段名
+      // 仅使用 detail 字段
       const apiResponse = data as ApiClientResponse
-      return apiResponse.detail !== undefined ? apiResponse.detail : (response.data as any).data
+      return apiResponse.detail
     }
     if (isDev()) {
       const pathname = window.location.pathname || ''
