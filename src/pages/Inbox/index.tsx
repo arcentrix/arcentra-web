@@ -3,7 +3,21 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Check, CheckCheck, Trash2, Filter, Search, Circle } from 'lucide-react';
+import {
+  Bell,
+  Check,
+  CheckCheck,
+  Trash2,
+  Filter,
+  Search,
+  Circle,
+  Workflow,
+  Rocket,
+  ClipboardList,
+  Lock,
+  Pin,
+  type LucideIcon,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,13 +95,16 @@ const mockNotifications: Notification[] = [
 ];
 
 // 通知类型配置
-const notificationTypeConfig: Record<NotificationType, { label: string; color: string; icon: string }> = {
-  system: { label: '系统通知', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300', icon: '🔔' },
-  pipeline: { label: '流水线', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300', icon: '⚙️' },
-  deployment: { label: '部署', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300', icon: '🚀' },
-  task: { label: '任务', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300', icon: '📋' },
-  security: { label: '安全', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300', icon: '🔒' },
-  other: { label: '其他', color: 'bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300', icon: '📌' },
+const notificationTypeConfig: Record<
+  NotificationType,
+  { label: string; color: string; icon: LucideIcon }
+> = {
+  system: { label: '系统通知', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300', icon: Bell },
+  pipeline: { label: '流水线', color: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300', icon: Workflow },
+  deployment: { label: '部署', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300', icon: Rocket },
+  task: { label: '任务', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300', icon: ClipboardList },
+  security: { label: '安全', color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300', icon: Lock },
+  other: { label: '其他', color: 'bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300', icon: Pin },
 };
 
 export default function InboxPage() {
@@ -275,11 +292,17 @@ export default function InboxPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部类型</SelectItem>
-                {Object.entries(notificationTypeConfig).map(([type, config]) => (
-                  <SelectItem key={type} value={type}>
-                    {config.icon} {config.label}
-                  </SelectItem>
-                ))}
+                {Object.entries(notificationTypeConfig).map(([type, config]) => {
+                  const Icon = config.icon;
+                  return (
+                    <SelectItem key={type} value={type}>
+                      <span className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        {config.label}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -327,8 +350,11 @@ export default function InboxPage() {
 
                         {/* 通知图标 */}
                         <div className="flex-shrink-0 mt-0.5">
-                          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center text-lg">
-                            {typeConfig.icon}
+                          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                            {(() => {
+                              const Icon = typeConfig.icon;
+                              return <Icon className="h-5 w-5 text-muted-foreground" />;
+                            })()}
                           </div>
                         </div>
 
