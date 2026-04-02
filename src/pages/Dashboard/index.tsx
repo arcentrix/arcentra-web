@@ -15,6 +15,7 @@ import {
   Zap,
   Server,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -223,10 +224,10 @@ const Dashboard: FC<DashboardProps> = () => {
                     <CardDescription>Latest 10 pipeline runs across all projects</CardDescription>
                   </div>
                   <Button asChild className='ml-auto gap-1' size='sm' variant='outline'>
-                    <a href='#'>
+                    <Link to='/projects'>
                       View All
                       <ArrowUpRight className='h-4 w-4' />
-                    </a>
+                    </Link>
                   </Button>
                 </CardHeader>
                 <CardContent>
@@ -245,7 +246,7 @@ const Dashboard: FC<DashboardProps> = () => {
                         <TableCell className='font-medium'>Build & Deploy</TableCell>
                         <TableCell>web-app</TableCell>
                         <TableCell>
-                          <Badge variant='default' className='bg-green-500'>
+                          <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
                             <CheckCircle2 className='mr-1 h-3 w-3' />
                             Success
                           </Badge>
@@ -294,7 +295,7 @@ const Dashboard: FC<DashboardProps> = () => {
                         <TableCell className='font-medium'>Integration Test</TableCell>
                         <TableCell>web-app</TableCell>
                         <TableCell>
-                          <Badge variant='default' className='bg-green-500'>
+                          <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
                             <CheckCircle2 className='mr-1 h-3 w-3' />
                             Success
                           </Badge>
@@ -310,7 +311,7 @@ const Dashboard: FC<DashboardProps> = () => {
                         <TableCell className='font-medium'>E2E Tests</TableCell>
                         <TableCell>web-app</TableCell>
                         <TableCell>
-                          <Badge variant='outline' className='text-yellow-600 border-yellow-600'>
+                          <Badge variant='outline' className='bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'>
                             <Pause className='mr-1 h-3 w-3' />
                             Queued
                           </Badge>
@@ -339,7 +340,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>web-app</p>
                       <p className='text-sm text-muted-foreground'>42 runs • 95.2% success</p>
                     </div>
-                    <Badge variant='default' className='bg-green-500'>
+                    <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
                       Healthy
                     </Badge>
                   </div>
@@ -348,7 +349,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>api-service</p>
                       <p className='text-sm text-muted-foreground'>38 runs • 87.5% success</p>
                     </div>
-                    <Badge variant='outline' className='text-yellow-600 border-yellow-600'>
+                    <Badge variant='outline' className='bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'>
                       Warning
                     </Badge>
                   </div>
@@ -357,7 +358,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>mobile-app</p>
                       <p className='text-sm text-muted-foreground'>29 runs • 96.5% success</p>
                     </div>
-                    <Badge variant='default' className='bg-green-500'>
+                    <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
                       Healthy
                     </Badge>
                   </div>
@@ -366,14 +367,16 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>data-pipeline</p>
                       <p className='text-sm text-muted-foreground'>15 runs • 73.3% success</p>
                     </div>
-                    <Badge variant='destructive'>Critical</Badge>
+                    <Badge variant='outline' className='bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800'>
+                      Critical
+                    </Badge>
                   </div>
                   <div className='flex items-center justify-between space-x-4'>
                     <div className='flex-1 space-y-1'>
                       <p className='text-sm font-medium leading-none'>infrastructure</p>
                       <p className='text-sm text-muted-foreground'>8 runs • 100% success</p>
                     </div>
-                    <Badge variant='default' className='bg-green-500'>
+                    <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
                       Healthy
                     </Badge>
                   </div>

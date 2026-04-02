@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ToastContainer } from 'react-toastify'
+import { useTheme } from '@/hooks/use-theme'
 import AuthGuard from '@/components/Layouts/AuthGuard'
 import DefaultLayouts from '@/components/Layouts/default'
 import SidebarLayoutWrapper from '@/components/Layouts/sidebar-layout'
@@ -35,6 +36,8 @@ import Inbox from './Inbox'
 import 'react-toastify/dist/ReactToastify.css'
 
 function App() {
+  const { resolvedTheme } = useTheme()
+
   return (
     <>
       <BrowserRouter>
@@ -87,7 +90,7 @@ function App() {
         pauseOnFocusLoss
         draggable
         pauseOnHover
-        theme='light'
+        theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
         icon={false}
         toastClassName='border rounded-lg shadow-lg text-sm'
       />

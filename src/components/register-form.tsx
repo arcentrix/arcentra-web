@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { toast } from '@/lib/toast'
 import { Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -63,16 +63,16 @@ export function RegisterForm({
       <form onSubmit={onSubmit}>
         <FieldGroup>
           <div className='flex flex-col items-center gap-2 text-center'>
-            <a href='/' className='flex flex-col items-center gap-2 font-medium'>
+            <Link to='/' className='flex flex-col items-center gap-2 font-medium'>
               <div className='flex size-10 items-center justify-center rounded-md'>
                 <img alt='Arcentra' src={APP_LOGO} className='size-8 object-contain' />
               </div>
               <span className='sr-only'>Arcentra</span>
-            </a>
+            </Link>
             <h1 className='text-xl font-bold'>Welcome to Arcentra</h1>
             <FieldDescription>
               Already have an account?{' '}
-              <a href='/login' className='underline underline-offset-4'>Sign in</a>
+              <Link to='/login' className='underline underline-offset-4'>Sign in</Link>
             </FieldDescription>
           </div>
 
@@ -116,8 +116,9 @@ export function RegisterForm({
               <button
                 type='button'
                 onClick={() => setShowPassword(!showPassword)}
-                className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
+                className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer transition-colors'
                 disabled={isLoading}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? (
                   <EyeOff className='h-4 w-4' />
@@ -146,8 +147,9 @@ export function RegisterForm({
               <button
                 type='button'
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
+                className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer transition-colors'
                 disabled={isLoading}
+                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
               >
                 {showConfirmPassword ? (
                   <EyeOff className='h-4 w-4' />

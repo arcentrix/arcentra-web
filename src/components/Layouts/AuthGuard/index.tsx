@@ -187,7 +187,25 @@ const AuthGuard: FC<AuthGuardProps> = () => {
   }, [navigate, auth.initialized, isChecking, location.pathname])
 
   if (auth.initialized) return <Outlet />
-  return null
+
+  return (
+    <div className='flex min-h-screen items-center justify-center'>
+      <div className='flex flex-col items-center gap-2'>
+        <svg
+          className='h-6 w-6 animate-spin text-muted-foreground'
+          fill='none'
+          stroke='currentColor'
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          strokeWidth='2'
+          viewBox='0 0 24 24'
+        >
+          <path d='M21 12a9 9 0 1 1-6.219-8.56' />
+        </svg>
+        <span className='text-sm text-muted-foreground'>Loading...</span>
+      </div>
+    </div>
+  )
 }
 
 export default AuthGuard

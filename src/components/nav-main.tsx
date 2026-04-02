@@ -95,25 +95,25 @@ function NavItem({
     }
   }, [location.pathname, item.items])
 
-  // 如果有子菜单且有有效的URL，则分离点击和展开行为
-  if (item.items && item.items.length > 0 && item.url && item.url !== '#') {
-    // 检查当前路径是否匹配菜单项或其子项
-    const isCurrentPath = location.pathname === item.url || 
-      item.items.some(subItem => {
-        if (location.pathname === subItem.url) return true
-        if (subItem.items) {
-          return subItem.items.some(child => location.pathname === child.url)
-        }
-        return false
-      })
-    
-    // 如果当前路径匹配，自动展开
-    useEffect(() => {
-      if (isCurrentPath) {
-        setIsOpen(true)
+  const hasValidSubItems = !!(item.items && item.items.length > 0 && item.url && item.url !== '#')
+  const isCurrentPath = hasValidSubItems && (
+    location.pathname === item.url ||
+    item.items!.some(subItem => {
+      if (location.pathname === subItem.url) return true
+      if (subItem.items) {
+        return subItem.items.some(child => location.pathname === child.url)
       }
-    }, [isCurrentPath])
+      return false
+    })
+  )
 
+  useEffect(() => {
+    if (isCurrentPath) {
+      setIsOpen(true)
+    }
+  }, [isCurrentPath])
+
+  if (hasValidSubItems) {
     return (
       <li>
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>

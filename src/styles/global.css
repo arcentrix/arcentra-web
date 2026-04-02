@@ -169,11 +169,11 @@ body {
 }
 
 .Toastify__progress-bar {
-  @apply h-1 bg-gray-200;
+  @apply h-1 bg-muted;
 }
 
 .Toastify__progress-bar--success {
-  @apply bg-black;
+  @apply bg-foreground;
 }
 
 .Toastify__progress-bar--error {

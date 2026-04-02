@@ -17,7 +17,7 @@ const Overview: FC = () => {
   ]
 
   return (
-    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
+    <div className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
@@ -37,7 +37,7 @@ const Overview: FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {projects.map((project) => (
           <Link key={project.id} to={`/projects/${project.id}`} className="group">
-            <Card className="h-full transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-primary/50 cursor-pointer">
+            <Card className="h-full transition-all duration-200 hover:shadow-md hover:border-primary/50 cursor-pointer">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Frame className="h-5 w-5 text-blue-500" />

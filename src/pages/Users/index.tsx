@@ -181,13 +181,13 @@ export default function UsersPage() {
         const Icon = role.isBuiltin === 1 ? Crown : Shield
         const getColorClass = () => {
           if (role.priority >= 50) {
-            return 'bg-rose-50 text-rose-600 border border-rose-200'
+            return 'bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800'
           } else if (role.priority >= 40) {
-            return 'bg-amber-50 text-amber-600 border border-amber-200'
+            return 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'
           } else if (role.priority >= 30) {
-            return 'bg-sky-50 text-sky-600 border border-sky-200'
+            return 'bg-sky-50 text-sky-600 border border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800'
           } else {
-            return 'bg-gray-100 text-gray-600 border border-gray-200'
+            return 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
           }
         }
         
@@ -199,61 +199,52 @@ export default function UsersPage() {
         )
       }
       
-      // 如果找不到角色对象，直接显示 roleName
       return (
-        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200'>
+        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
           <Shield className='mr-1 h-3 w-3' />
           {user.roleName}
         </Badge>
       )
     }
 
-    // 如果没有 roleName，回退到通过 role 字段查找
     const roleValue = user.role
     if (!roleValue) {
       return (
-        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200'>
+        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
           <Shield className='mr-1 h-3 w-3' />
           Unknown
         </Badge>
       )
     }
 
-    // 尝试通过 roleId 匹配
     let role = roles.find((r) => r.roleId === roleValue)
-    
-    // 如果没找到，尝试通过 name 匹配
     if (!role) {
       role = roles.find((r) => r.name === roleValue)
     }
-    
-    // 如果还是没找到，尝试不区分大小写匹配
     if (!role) {
       role = roles.find((r) => r.roleId.toLowerCase() === roleValue.toLowerCase() || r.name.toLowerCase() === roleValue.toLowerCase())
     }
     
     if (!role) {
       return (
-        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200'>
+        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
           <Shield className='mr-1 h-3 w-3' />
           {roleValue}
         </Badge>
       )
     }
 
-    // 根据角色类型选择图标
     const Icon = role.isBuiltin === 1 ? Crown : Shield
     
-    // 统一使用柔和配色
     const getColorClass = () => {
       if (role.priority >= 50) {
-        return 'bg-rose-50 text-rose-600 border border-rose-200' // 高优先级（所有者）
+        return 'bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800'
       } else if (role.priority >= 40) {
-        return 'bg-amber-50 text-amber-600 border border-amber-200' // 中高优先级（管理员/维护者）
+        return 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'
       } else if (role.priority >= 30) {
-        return 'bg-sky-50 text-sky-600 border border-sky-200' // 中等优先级（开发者）
+        return 'bg-sky-50 text-sky-600 border border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800'
       } else {
-        return 'bg-gray-100 text-gray-600 border border-gray-200' // 低优先级（报告者等）
+        return 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
       }
     }
 
@@ -269,12 +260,12 @@ export default function UsersPage() {
     if (!status) return null
     
     const variants: Record<string, { label: string; className: string }> = {
-      pending: { label: 'Pending', className: 'bg-amber-50 text-amber-600 border border-amber-200' },
-      accepted: { label: 'Accepted', className: 'bg-emerald-50 text-emerald-600 border border-emerald-200' },
-      expired: { label: 'Expired', className: 'bg-gray-100 text-gray-500 border border-gray-200' },
-      revoked: { label: 'Revoked', className: 'bg-rose-50 text-rose-600 border border-rose-200' },
+      pending: { label: 'Pending', className: 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800' },
+      accepted: { label: 'Accepted', className: 'bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800' },
+      expired: { label: 'Expired', className: 'bg-gray-100 text-gray-500 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
+      revoked: { label: 'Revoked', className: 'bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800' },
     }
-    const variant = variants[status] || { label: status, className: 'bg-gray-100 text-gray-600 border border-gray-200' }
+    const variant = variants[status] || { label: status, className: 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' }
     return (
       <Badge variant='outline' className={variant.className}>
         {variant.label}
@@ -411,12 +402,12 @@ export default function UsersPage() {
                           <TableCell>{getRoleBadge(user)}</TableCell>
                           <TableCell>
                             {user.isEnabled === 1 ? (
-                              <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border border-emerald-200'>
+                              <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
                                 <Power className='mr-1 h-3 w-3' />
                                 Enabled
                               </Badge>
                             ) : (
-                              <Badge variant='outline' className='bg-gray-100 text-gray-500 border border-gray-200'>
+                              <Badge variant='outline' className='bg-gray-100 text-gray-500 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
                                 <PowerOff className='mr-1 h-3 w-3' />
                                 Disabled
                               </Badge>
@@ -441,17 +432,17 @@ export default function UsersPage() {
                           </TableCell>
                           <TableCell className='text-right'>
                             <div className='flex items-center justify-end gap-2'>
-                              <Button size='sm' variant='ghost' onClick={() => handleToggleStatus(user)}>
+                              <Button size='sm' variant='ghost' onClick={() => handleToggleStatus(user)} aria-label={user.isEnabled === 1 ? 'Disable user' : 'Enable user'}>
                                 {user.isEnabled === 1 ? (
                                   <PowerOff className='h-4 w-4' />
                                 ) : (
                                   <Power className='h-4 w-4' />
                                 )}
                               </Button>
-                              <Button size='sm' variant='ghost' onClick={() => handleResetPassword(user)}>
+                              <Button size='sm' variant='ghost' onClick={() => handleResetPassword(user)} aria-label='Reset password'>
                                 <Lock className='h-4 w-4' />
                               </Button>
-                              <Button size='sm' variant='ghost' onClick={() => handleEdit(user)}>
+                              <Button size='sm' variant='ghost' onClick={() => handleEdit(user)} aria-label='Edit user'>
                                 <Edit className='h-4 w-4' />
                               </Button>
                             </div>
