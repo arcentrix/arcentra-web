@@ -30,3 +30,12 @@ export interface RegisterRequest {
 export interface RegisterResponse {
   message?: string
 }
+
+export interface IdentityProvider {
+  name: string
+  providerType: string
+  description: string
+  priority: number
+  authUrl: string
+  loginMode: string
+}

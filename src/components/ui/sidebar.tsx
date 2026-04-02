@@ -88,7 +88,13 @@ const Sidebar = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(({
   const { open, onOpenChange } = useSidebar()
 
   const sidebar = (
-    <div className={cn('flex h-full flex-col border-r bg-background', className)} ref={ref}>
+    <div
+      className={cn(
+        'flex h-full flex-col border-r bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/95',
+        className,
+      )}
+      ref={ref}
+    >
       {children}
     </div>
   )

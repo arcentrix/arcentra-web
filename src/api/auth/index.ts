@@ -1,10 +1,11 @@
-import { post } from '../client'
+import { get, post } from '../client'
 import type { 
   LoginRequest, 
   LoginResponse, 
   RegisterRequest, 
   RegisterResponse,
-  LDAPLoginRequest
+  LDAPLoginRequest,
+  IdentityProvider,
 } from './types'
 
 function login(data: LoginRequest) {
@@ -88,10 +89,15 @@ function register(data: RegisterRequest) {
   )
 }
 
+function getAvailableProviders() {
+  return get<IdentityProvider[]>('/identity/providers/available', { silence: true })
+}
+
 export default {
   login,
   loginWithLDAP,
   getAuthorizeUrl,
   handleCallback,
   register,
+  getAvailableProviders,
 }

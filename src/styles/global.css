@@ -102,7 +102,7 @@
 }
 
 body {
-  font-family: 'Geist', sans-serif;
+  font-family: 'Inter', 'Geist', sans-serif;
 }
 
 /* Toast 自定义样式 - 使用 Alert 组件样式 */

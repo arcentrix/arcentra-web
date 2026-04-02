@@ -15,21 +15,27 @@ const Field = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEleme
 )
 Field.displayName = 'Field'
 
-const FieldLabel = React.forwardRef<
-  HTMLLabelElement,
-  React.LabelHTMLAttributes<HTMLLabelElement>
->(({ className, ...props }, ref) => {
-  return (
-    <label
-      ref={ref}
-      className={cn(
-        'text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
-        className,
-      )}
-      {...props}
-    />
-  )
-})
+interface FieldLabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> {
+  required?: boolean
+}
+
+const FieldLabel = React.forwardRef<HTMLLabelElement, FieldLabelProps>(
+  ({ className, children, required, ...props }, ref) => {
+    return (
+      <label
+        ref={ref}
+        className={cn(
+          'text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+          className,
+        )}
+        {...props}
+      >
+        {children}
+        {required && <span className='ml-0.5 text-destructive'>*</span>}
+      </label>
+    )
+  },
+)
 FieldLabel.displayName = 'FieldLabel'
 
 const FieldDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
