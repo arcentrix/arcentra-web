@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate, Link } from 'react-router-dom'
 import { toast } from '@/lib/toast'
@@ -68,8 +68,14 @@ export function LoginForm({
     reset: resetLdap,
   } = useForm<{ username: string; password: string }>()
   const navigate = useNavigate()
+  const hasFetchedProvidersRef = useRef(false)
 
   useEffect(() => {
+    if (hasFetchedProvidersRef.current) {
+      return
+    }
+    hasFetchedProvidersRef.current = true
+
     Apis.auth.listLoginProviders()
       .then((data) => {
         const filtered = data.filter((p) => SUPPORTED_PROVIDER_TYPES.has(p.providerType))
@@ -88,6 +94,15 @@ export function LoginForm({
     navigate('/')
   }
 
+  // 后端约定 authUrl 始终是相对路径（如 /identity/authorize/github），统一拼接 API base
+  const buildAuthorizeUrl = (authUrl: string, redirectUri: string) => {
+    const apiBase = import.meta.env.VITE_API_CLIENT_URL || '/api/v1'
+    const normalizedBase = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase
+    const path = authUrl.startsWith('/') ? authUrl : `/${authUrl}`
+    const params = new URLSearchParams({ redirect_uri: redirectUri, redirectUri })
+    return `${normalizedBase}${path}?${params.toString()}`
+  }
+
   const startOAuthRedirect = (provider: IdentityProvider) => {
     try {
       setIsLoading(true)
@@ -98,11 +113,7 @@ export function LoginForm({
       sessionStorage.removeItem('OAUTH_INTENT')
 
       const redirectUri = `${window.location.origin}/auth/callback/${providerName}`
-      const baseUrl = import.meta.env.VITE_API_CLIENT_URL || '/api/v1'
-      const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-      const authPath = provider.authUrl.replace(/^\/api\/v1/, '')
-      const params = new URLSearchParams({ redirect_uri: redirectUri, redirectUri })
-      const url = `${normalizedBase}${authPath}?${params.toString()}`
+      const url = buildAuthorizeUrl(provider.authUrl, redirectUri)
 
       sessionStorage.setItem('OAUTH_INTENT', JSON.stringify({ provider: providerName, ts: Date.now() }))
       window.location.href = url
@@ -169,19 +180,13 @@ export function LoginForm({
   return (
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <form onSubmit={onSubmit}>
-        <FieldGroup>
-          <div className='flex flex-col items-center gap-2 text-center'>
-            <Link to='/' className='flex flex-col items-center gap-2 font-medium'>
-              <div className='flex size-10 items-center justify-center rounded-md'>
-                <img alt='Arcentra' src={APP_LOGO} className='size-8 object-contain' />
-              </div>
+        <FieldGroup className='space-y-5'>
+          <div className='flex flex-col items-center gap-4 pb-2 text-center'>
+            <Link to='/' className='flex items-center font-medium'>
+              <img alt='Arcentra' src={APP_LOGO} className='h-7 w-auto dark:invert' />
               <span className='sr-only'>Arcentra</span>
             </Link>
-            <h1 className='text-xl font-bold'>Welcome to Arcentra</h1>
-            <FieldDescription>
-              Don&apos;t have an account?{' '}
-              <Link to='/register' className='underline underline-offset-4'>Sign up</Link>
-            </FieldDescription>
+            <h1 className='text-lg font-semibold tracking-tight'>Welcome back</h1>
           </div>
 
           <Field>
@@ -204,10 +209,10 @@ export function LoginForm({
               <FieldLabel htmlFor='password'>Password</FieldLabel>
               <button
                 type='button'
-                className='ml-auto text-sm underline-offset-4 hover:underline cursor-pointer text-muted-foreground hover:text-foreground transition-colors'
+                className='ml-auto text-xs underline-offset-4 hover:underline cursor-pointer text-muted-foreground hover:text-foreground transition-colors'
                 onClick={() => { /* TODO: implement forgot password */ }}
               >
-                Forgot your password?
+                Forgot password?
               </button>
             </div>
             <div className='relative'>
@@ -237,11 +242,20 @@ export function LoginForm({
             </div>
           </Field>
 
-          <Field>
+          <Field className='space-y-3'>
             <Button type='submit' disabled={isLoading} className='w-full'>
               {isLoading ? <Icons.Spinner className='mr-2 h-4 w-4 animate-spin' /> : null}
               Login
             </Button>
+            <FieldDescription className='text-center text-xs'>
+              Don&apos;t have an account?{' '}
+              <Link
+                to='/register'
+                className='font-medium text-foreground underline-offset-4 hover:underline'
+              >
+                Sign up
+              </Link>
+            </FieldDescription>
           </Field>
 
           {providers.length > 0 && (
@@ -266,11 +280,6 @@ export function LoginForm({
           )}
         </FieldGroup>
       </form>
-      <FieldDescription className='px-6 text-center'>
-        By clicking continue, you agree to our{' '}
-        <a href='#' className='underline underline-offset-4'>Terms of Service</a> and{' '}
-        <a href='#' className='underline underline-offset-4'>Privacy Policy</a>.
-      </FieldDescription>
 
       <Dialog
         open={!!ldapProvider}

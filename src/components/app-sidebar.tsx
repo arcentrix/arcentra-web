@@ -3,6 +3,7 @@ import {
   Frame,
   Rabbit,
   Settings2,
+  Workflow,
   Zap,
   BookOpen,
   Brain,
@@ -22,16 +23,14 @@ import {
   SidebarItem,
   SidebarLabel,
 } from '@/components/ui/sidebar'
-import { APP_LOGO } from '@/constants/assets'
+import { DEFAULT_USER_AVATAR } from '@/constants/assets'
 
 export function AppSidebar() {
-  const logo = () => <img alt='Arcentra' src={APP_LOGO} />
-
   const data = {
     organizations: [
       {
         name: 'Arcentra',
-        logo,
+        logo: Workflow,
         plan: 'Enterprise',
       },
       {
@@ -49,7 +48,7 @@ export function AppSidebar() {
     user: {
       name: 'User',
       email: 'user@example.com',
-      avatar: APP_LOGO,
+      avatar: DEFAULT_USER_AVATAR,
     },
     navMain: [
       {

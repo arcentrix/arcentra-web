@@ -3,14 +3,14 @@
  */
 
 import { useOrganizationStore } from "@/store/organization"
-import { APP_LOGO } from '@/constants/assets'
+import { APP_LOGO_ICON } from '@/constants/assets'
 
 export function OrgHeaderDisplay() {
   const { currentOrganization } = useOrganizationStore()
   
   // 获取显示的组织信息
   const displayName = currentOrganization?.name || 'Arcentra'
-  const displayLogo = currentOrganization?.logo || APP_LOGO
+  const displayLogo = currentOrganization?.logo || APP_LOGO_ICON
   
   return (
     <div className="flex items-center gap-2">
