@@ -33,6 +33,7 @@ import { AuthCallback } from './AuthCallback'
 import LLMDialogueChat from './LLMDialogue/Chat'
 import LLMDialogueHistory from './LLMDialogue/History'
 import Inbox from './Inbox'
+import NotFound from './NotFound'
 import 'react-toastify/dist/ReactToastify.css'
 
 function App() {
@@ -77,6 +78,7 @@ function App() {
             <Route element={<Login />} path='/login' />
             <Route element={<Register />} path='/register' />
             <Route element={<AuthCallback />} path='/auth/callback/:type' />
+            <Route element={<NotFound />} path='*' />
           </Route>
         </Routes>
       </BrowserRouter>

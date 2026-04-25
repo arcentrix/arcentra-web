@@ -30,6 +30,7 @@ const routeTitleMap: Record<string, string> = {
   '/settings/notifications': 'Notifications',
   '/identity-integration': 'Identity',
   '/settings/system-info': 'System Information',
+  '/inbox': 'Inbox',
   '/workspace/:workspaceName/chat': 'Chat',
   '/workspace/:workspaceName/history': 'History',
 }
@@ -41,6 +42,15 @@ const mainMenuItems = [
   { title: 'Access', url: '/access' },
   { title: 'Settings', url: '/settings' },
 ]
+
+const flatRouteToMenu: Record<string, { parent: string; parentUrl: string }> = {
+  '/users': { parent: 'Access', parentUrl: '/access' },
+  '/roles': { parent: 'Access', parentUrl: '/access' },
+  '/identity-integration': { parent: 'Settings', parentUrl: '/settings' },
+  '/general-settings': { parent: 'Settings', parentUrl: '/settings' },
+  '/settings/notifications': { parent: 'Settings', parentUrl: '/settings' },
+  '/settings/system-info': { parent: 'Settings', parentUrl: '/settings' },
+}
 
 // Agent 名称缓存，避免重复请求
 const agentNameCache = new Map<string, string>()
@@ -151,16 +161,27 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
       return items
     }
 
-    // 查找匹配的一级菜单
-    let matchedMenu = mainMenuItems.find((menu) => pathname.startsWith(menu.url))
-
-    // 特殊处理：General Settings 属于 Settings 菜单
-    if (pathname === '/general-settings') {
-      matchedMenu = mainMenuItems.find((menu) => menu.url === '/settings')
+    // 如果是 inbox 或其他独立页面
+    if (pathname === '/inbox') {
+      return [{ title: 'Inbox' }]
     }
 
-    // 如果没有匹配的一级菜单，返回空数组（不显示面包屑）
+    // 检查是否为需要映射到父菜单的扁平路由
+    const flatMapping = flatRouteToMenu[pathname]
+    if (flatMapping) {
+      const pageTitle = routeTitleMap[pathname]
+      items.push({ title: flatMapping.parent, url: flatMapping.parentUrl })
+      if (pageTitle) items.push({ title: pageTitle })
+      return items
+    }
+
+    // 查找匹配的一级菜单
+    const matchedMenu = mainMenuItems.find((menu) => pathname.startsWith(menu.url))
+
+    // 如果没有匹配的一级菜单，显示路径作为标题
     if (!matchedMenu) {
+      const pageTitle = routeTitleMap[pathname]
+      if (pageTitle) return [{ title: pageTitle }]
       return []
     }
 

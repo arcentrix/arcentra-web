@@ -14,11 +14,21 @@ import {
   FieldSeparator,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Apis } from '@/api'
 import userStore from '@/store/user'
 import authStore from '@/store/auth'
 import { APP_LOGO } from '@/constants/assets'
 import type { IdentityProvider } from '@/api/auth/types'
+
+const SUPPORTED_PROVIDER_TYPES = new Set(['oauth', 'oidc', 'ldap'])
 
 const providerIcons: Record<string, React.ReactNode> = {
   github: <Icons.GitHub className='size-4' />,
@@ -48,19 +58,37 @@ export function LoginForm({
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [showPassword, setShowPassword] = useState<boolean>(false)
   const [providers, setProviders] = useState<IdentityProvider[]>([])
+  const [ldapProvider, setLdapProvider] = useState<IdentityProvider | null>(null)
+  const [ldapLoading, setLdapLoading] = useState<boolean>(false)
+  const [showLdapPassword, setShowLdapPassword] = useState<boolean>(false)
   const { register, handleSubmit } = useForm()
+  const {
+    register: registerLdap,
+    handleSubmit: handleLdapSubmit,
+    reset: resetLdap,
+  } = useForm<{ username: string; password: string }>()
   const navigate = useNavigate()
 
   useEffect(() => {
-    Apis.auth.getAvailableProviders()
+    Apis.auth.listLoginProviders()
       .then((data) => {
-        const sorted = [...data].sort((a, b) => a.priority - b.priority)
+        const filtered = data.filter((p) => SUPPORTED_PROVIDER_TYPES.has(p.providerType))
+        const sorted = [...filtered].sort((a, b) => a.priority - b.priority)
         setProviders(sorted)
       })
       .catch(() => {})
   }, [])
 
-  const handleProviderLogin = (provider: IdentityProvider) => {
+  const applyLoginSession = (response: Awaited<ReturnType<typeof Apis.auth.login>>) => {
+    userStore.updateState((state) => {
+      state.userinfo = response.userinfo
+      state.role = response.role
+    })
+    authStore.setTokens(response.token)
+    navigate('/')
+  }
+
+  const startOAuthRedirect = (provider: IdentityProvider) => {
     try {
       setIsLoading(true)
       const providerName = provider.name
@@ -84,6 +112,26 @@ export function LoginForm({
     }
   }
 
+  const openLdapDialog = (provider: IdentityProvider) => {
+    resetLdap({ username: '', password: '' })
+    setShowLdapPassword(false)
+    setLdapProvider(provider)
+  }
+
+  const handleProviderLogin = (provider: IdentityProvider) => {
+    switch (provider.providerType) {
+      case 'oauth':
+      case 'oidc':
+        startOAuthRedirect(provider)
+        return
+      case 'ldap':
+        openLdapDialog(provider)
+        return
+      default:
+        toast.error(`Unsupported provider type: ${provider.providerType}`)
+    }
+  }
+
   const onSubmit = handleSubmit(async (data) => {
     setIsLoading(true)
 
@@ -93,17 +141,28 @@ export function LoginForm({
         password: data.password,
         authMethod: 'standard',
       })
-
-      userStore.updateState((state) => {
-        state.userinfo = response.userinfo
-        state.role = response.role
-      })
-      authStore.setTokens(response.token)
-      navigate('/')
+      applyLoginSession(response)
     } catch (error) {
       toast.error((error as Error).message)
     } finally {
       setIsLoading(false)
+    }
+  })
+
+  const onLdapSubmit = handleLdapSubmit(async (data) => {
+    if (!ldapProvider) return
+    setLdapLoading(true)
+    try {
+      const response = await Apis.auth.loginWithLDAP(ldapProvider.name, {
+        username: data.username,
+        password: data.password,
+      })
+      applyLoginSession(response)
+      setLdapProvider(null)
+    } catch (error) {
+      toast.error((error as Error).message)
+    } finally {
+      setLdapLoading(false)
     }
   })
 
@@ -195,6 +254,7 @@ export function LoginForm({
                     variant='outline'
                     type='button'
                     disabled={isLoading}
+                    title={provider.description || undefined}
                     onClick={() => handleProviderLogin(provider)}
                   >
                     {getProviderIcon(provider.name, provider.providerType)}
@@ -211,6 +271,88 @@ export function LoginForm({
         <a href='#' className='underline underline-offset-4'>Terms of Service</a> and{' '}
         <a href='#' className='underline underline-offset-4'>Privacy Policy</a>.
       </FieldDescription>
+
+      <Dialog
+        open={!!ldapProvider}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLdapProvider(null)
+            setShowLdapPassword(false)
+          }
+        }}
+      >
+        <DialogContent className='sm:max-w-md'>
+          <DialogHeader>
+            <DialogTitle className='flex items-center gap-2'>
+              <Network className='size-4' />
+              Sign in with {ldapProvider?.name}
+            </DialogTitle>
+            {ldapProvider?.description ? (
+              <DialogDescription>{ldapProvider.description}</DialogDescription>
+            ) : (
+              <DialogDescription>Enter your directory credentials to continue.</DialogDescription>
+            )}
+          </DialogHeader>
+          <form onSubmit={onLdapSubmit}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor='ldap-username'>Username</FieldLabel>
+                <Input
+                  {...registerLdap('username', { required: true })}
+                  id='ldap-username'
+                  type='text'
+                  autoCapitalize='none'
+                  autoComplete='username'
+                  autoCorrect='off'
+                  disabled={ldapLoading}
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor='ldap-password'>Password</FieldLabel>
+                <div className='relative'>
+                  <Input
+                    {...registerLdap('password', { required: true })}
+                    id='ldap-password'
+                    type={showLdapPassword ? 'text' : 'password'}
+                    autoComplete='current-password'
+                    disabled={ldapLoading}
+                    required
+                    className='pr-10'
+                  />
+                  <button
+                    type='button'
+                    onClick={() => setShowLdapPassword(!showLdapPassword)}
+                    className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer transition-colors'
+                    disabled={ldapLoading}
+                    aria-label={showLdapPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showLdapPassword ? (
+                      <EyeOff className='h-4 w-4' />
+                    ) : (
+                      <Eye className='h-4 w-4' />
+                    )}
+                  </button>
+                </div>
+              </Field>
+            </FieldGroup>
+            <DialogFooter className='mt-6'>
+              <Button
+                type='button'
+                variant='outline'
+                disabled={ldapLoading}
+                onClick={() => setLdapProvider(null)}
+              >
+                Cancel
+              </Button>
+              <Button type='submit' disabled={ldapLoading}>
+                {ldapLoading ? <Icons.Spinner className='mr-2 h-4 w-4 animate-spin' /> : null}
+                Sign in
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

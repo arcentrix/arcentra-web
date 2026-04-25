@@ -35,6 +35,36 @@ http://<前端域名>/auth/callback/<provider>
 
 - `/api/v1/identity/callback/github?code=...&state=...`
 
+### 2.3 登录页渠道列表（公开）
+
+登录页通过以下无鉴权接口拉取「已启用」且可登录的渠道：
+
+```
+GET /api/v1/identity/login/providers
+```
+
+响应示例：
+
+```json
+{
+  "detail": [
+    {
+      "name": "github",
+      "providerType": "oauth",
+      "priority": 10,
+      "authUrl": "/identity/authorize/github",
+      "description": "",
+      "loginMode": ""
+    }
+  ]
+}
+```
+
+- `authUrl` 规则：`oauth` / `oidc` → `/identity/authorize/<name>`；`ldap` → `/identity/ldap/login/<name>`。
+- 未实现前端跳转的类型（如 `saml`）不会出现在列表中，避免登录页点到 404。
+- 该接口仅返回展示用字段，不包含 `config`、密钥或 `providerId`。
+- 管理后台的渠道管理仍使用需鉴权的 `/identity/providers`，与此接口区分。
+
 ### 3. 登录流程（简化）
 
 1. 前端点击登录 → 调用后端授权入口：

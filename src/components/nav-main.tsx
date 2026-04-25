@@ -348,20 +348,126 @@ function NestedNavItem({
   )
 }
 
+type SearchResult = {
+  title: string
+  teaser: string
+  url: string
+  category?: 'workspace' | 'project' | 'documentation'
+}
+
+function SearchResultsList({
+  results,
+  query,
+  onSelect,
+}: {
+  results: SearchResult[]
+  query: string
+  onSelect: () => void
+}) {
+  const filtered = query.trim()
+    ? results.filter(r =>
+        r.title.toLowerCase().includes(query.toLowerCase()) ||
+        r.teaser.toLowerCase().includes(query.toLowerCase())
+      )
+    : results
+
+  const projectResults = filtered.filter(r => r.category === 'workspace' || r.category === 'project' || !r.category)
+  const docResults = filtered.filter(r => r.category === 'documentation')
+
+  if (filtered.length === 0) {
+    return (
+      <div className='px-2.5 py-6 text-center text-sm text-muted-foreground'>
+        No results found.
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {projectResults.length > 0 && (
+        <>
+          {projectResults.map((result) =>
+            result.url.startsWith('http') ? (
+              <a
+                key={result.title}
+                className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block cursor-pointer'
+                href={result.url}
+                target='_blank'
+                rel='noopener noreferrer'
+                onClick={onSelect}
+              >
+                <div className='font-medium'>{result.title}</div>
+                <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
+              </a>
+            ) : (
+              <Link
+                key={result.title}
+                className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
+                to={result.url}
+                onClick={onSelect}
+              >
+                <div className='font-medium'>{result.title}</div>
+                <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
+              </Link>
+            )
+          )}
+        </>
+      )}
+      {docResults.length > 0 && (
+        <>
+          {projectResults.length > 0 && <Separator className='my-1.5' />}
+          <div className='px-2.5 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+            Documentation
+          </div>
+          {docResults.map((result) => (
+            <a
+              key={result.title}
+              className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block cursor-pointer'
+              href={result.url}
+              target='_blank'
+              rel='noopener noreferrer'
+              onClick={onSelect}
+            >
+              <div className='font-medium'>{result.title}</div>
+              <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
+            </a>
+          ))}
+        </>
+      )}
+      {!query.trim() && (
+        <>
+          <Separator className='my-1.5' />
+          <Link
+            className='rounded-md px-2.5 py-1 text-muted-foreground outline-none ring-ring hover:text-foreground focus-visible:ring-2 block'
+            to='/projects'
+            onClick={onSelect}
+          >
+            See all projects
+          </Link>
+          <a
+            className='rounded-md px-2.5 py-1 text-muted-foreground outline-none ring-ring hover:text-foreground focus-visible:ring-2 block cursor-pointer'
+            href='https://docs.arcentra.io/'
+            target='_blank'
+            rel='noopener noreferrer'
+            onClick={onSelect}
+          >
+            Browse all documentation
+          </a>
+        </>
+      )}
+    </>
+  )
+}
+
 function SidebarSearch({
   results,
 }: {
-  results: {
-    title: string
-    teaser: string
-    url: string
-    category?: 'workspace' | 'project' | 'documentation'
-  }[]
+  results: SearchResult[]
 }) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
 
-  // 监听快捷键 Cmd+K / Ctrl+K
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
@@ -374,107 +480,50 @@ function SidebarSearch({
     return () => document.removeEventListener('keydown', down)
   }, [])
 
+  useEffect(() => {
+    if (!open) setQuery('')
+  }, [open])
+
+  const handleSelect = () => setOpen(false)
+
+  const triggerContent = (
+    <>
+      <Search className='h-4 w-4 shrink-0' />
+      <div className='flex flex-1 overflow-hidden'>
+        <div className='line-clamp-1 pr-6'>Search</div>
+      </div>
+      <KbdGroup className='hidden sm:inline-flex'>
+        <Kbd>⌘</Kbd>
+        <span className='text-muted-foreground'>+</span>
+        <Kbd>K</Kbd>
+      </KbdGroup>
+    </>
+  )
+
+  const triggerClass = 'min-w-8 flex h-8 w-full flex-1 items-center gap-2 overflow-hidden rounded-md px-1.5 text-sm font-medium outline-none ring-ring transition-all hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground cursor-pointer'
+
+  const searchInput = (
+    <div className='border-b p-2.5'>
+      <Input
+        className='h-8 rounded-sm shadow-none focus-visible:ring-0'
+        placeholder='Search projects, workspaces, and docs...'
+        type='search'
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+    </div>
+  )
+
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerTrigger className='min-w-8 flex h-8 w-full flex-1 items-center gap-2 overflow-hidden rounded-md px-1.5 text-sm font-medium outline-none ring-ring transition-all hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground cursor-pointer'>
-          <Search className='h-4 w-4 shrink-0' />
-          <div className='flex flex-1 overflow-hidden'>
-            <div className='line-clamp-1 pr-6'>Search</div>
-          </div>
-          <KbdGroup className='hidden sm:inline-flex'>
-            <Kbd>⌘</Kbd>
-            <span className='text-muted-foreground'>+</span>
-            <Kbd>K</Kbd>
-          </KbdGroup>
+        <DrawerTrigger className={triggerClass}>
+          {triggerContent}
         </DrawerTrigger>
         <DrawerContent>
-          <form>
-            <div className='border-b p-2.5'>
-              <Input
-                className='h-8 rounded-sm shadow-none focus-visible:ring-0'
-                placeholder='Search projects, workspaces, and docs...'
-                type='search'
-              />
-            </div>
-          </form>
+          {searchInput}
           <div className='grid gap-1 p-1.5 text-sm max-h-[400px] overflow-y-auto'>
-            {(() => {
-              const projectResults = results.filter(r => r.category === 'workspace' || r.category === 'project' || !r.category)
-              const docResults = results.filter(r => r.category === 'documentation')
-              
-              return (
-                <>
-                  {projectResults.length > 0 && (
-                    <>
-                      {projectResults.map((result) => (
-                        result.url.startsWith('http') ? (
-              <a
-                            key={result.title}
-                            className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
-                href={result.url}
-                            target='_blank'
-                            rel='noopener noreferrer'
-                            onClick={() => setOpen(false)}
-                          >
-                            <div className='font-medium'>{result.title}</div>
-                            <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
-                          </a>
-                        ) : (
-                          <Link
-                            key={result.title}
-                            className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
-                            to={result.url}
-                            onClick={() => setOpen(false)}
-                          >
-                            <div className='font-medium'>{result.title}</div>
-                            <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
-                          </Link>
-                        )
-                      ))}
-                    </>
-                  )}
-                  {docResults.length > 0 && (
-                    <>
-                      {projectResults.length > 0 && <Separator className='my-1.5' />}
-                      <div className='px-2.5 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-                        Documentation
-                      </div>
-                      {docResults.map((result) => (
-                        <a
-                key={result.title}
-                          className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
-                          href={result.url}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          onClick={() => setOpen(false)}
-              >
-                <div className='font-medium'>{result.title}</div>
-                <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
-              </a>
-            ))}
-                    </>
-                  )}
-            <Separator className='my-1.5' />
-                  <Link
-                    className='rounded-md px-2.5 py-1 text-muted-foreground outline-none ring-ring hover:text-foreground focus-visible:ring-2 block'
-                    to='/projects'
-                    onClick={() => setOpen(false)}
-            >
-                    See all projects
-                  </Link>
-                  <a
-                    className='rounded-md px-2.5 py-1 text-muted-foreground outline-none ring-ring hover:text-foreground focus-visible:ring-2 block'
-                    href='https://docs.arcentra.io/'
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    onClick={() => setOpen(false)}
-                  >
-                    Browse all documentation
-                  </a>
-                </>
-              )
-            })()}
+            <SearchResultsList results={results} query={query} onSelect={handleSelect} />
           </div>
         </DrawerContent>
       </Drawer>
@@ -483,100 +532,13 @@ function SidebarSearch({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className='min-w-8 flex h-8 w-full flex-1 items-center gap-2 overflow-hidden rounded-md px-1.5 text-sm font-medium outline-none ring-ring transition-all hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground cursor-pointer'>
-        <Search className='h-4 w-4 shrink-0' />
-        <div className='flex flex-1 overflow-hidden'>
-          <div className='line-clamp-1 pr-6'>Search</div>
-        </div>
-        <KbdGroup className='hidden sm:inline-flex'>
-          <Kbd>⌘</Kbd>
-          <span className='text-muted-foreground'>+</span>
-          <Kbd>K</Kbd>
-        </KbdGroup>
+      <PopoverTrigger className={triggerClass}>
+        {triggerContent}
       </PopoverTrigger>
       <PopoverContent align='start' className='w-96 p-0' side='right' sideOffset={4}>
-        <form>
-          <div className='border-b p-2.5'>
-            <Input className='h-8 rounded-sm shadow-none focus-visible:ring-0' placeholder='Search projects, workspaces, and docs...' type='search' />
-          </div>
-        </form>
+        {searchInput}
         <div className='grid gap-1 p-1.5 text-sm max-h-[400px] overflow-y-auto'>
-          {(() => {
-            const projectResults = results.filter(r => r.category === 'workspace' || r.category === 'project' || !r.category)
-            const docResults = results.filter(r => r.category === 'documentation')
-            
-            return (
-              <>
-                {projectResults.length > 0 && (
-                  <>
-                    {projectResults.map((result) => (
-                      result.url.startsWith('http') ? (
-            <a
-                          key={result.title}
-                          className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
-              href={result.url}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          onClick={() => setOpen(false)}
-                        >
-                          <div className='font-medium'>{result.title}</div>
-                          <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
-                        </a>
-                      ) : (
-                        <Link
-                          key={result.title}
-                          className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
-                          to={result.url}
-                          onClick={() => setOpen(false)}
-                        >
-                          <div className='font-medium'>{result.title}</div>
-                          <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
-                        </Link>
-                      )
-                    ))}
-                  </>
-                )}
-                {docResults.length > 0 && (
-                  <>
-                    {projectResults.length > 0 && <Separator className='my-1.5' />}
-                    <div className='px-2.5 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-                      Documentation
-                    </div>
-                    {docResults.map((result) => (
-                      <a
-              key={result.title}
-                        className='rounded-md p-2.5 outline-none ring-ring hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 block'
-                        href={result.url}
-                        target='_blank'
-                        rel='noopener noreferrer'
-                        onClick={() => setOpen(false)}
-            >
-              <div className='font-medium'>{result.title}</div>
-              <div className='line-clamp-2 text-muted-foreground'>{result.teaser}</div>
-            </a>
-          ))}
-                  </>
-                )}
-          <Separator className='my-1.5' />
-                <Link
-                  className='rounded-md px-2.5 py-1 text-muted-foreground outline-none ring-ring hover:text-foreground focus-visible:ring-2 block'
-                  to='/projects'
-                  onClick={() => setOpen(false)}
-          >
-                  See all projects
-                </Link>
-                <a
-                  className='rounded-md px-2.5 py-1 text-muted-foreground outline-none ring-ring hover:text-foreground focus-visible:ring-2 block'
-                  href='https://docs.arcentra.io/'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  onClick={() => setOpen(false)}
-                >
-                  Browse all documentation
-                </a>
-              </>
-            )
-          })()}
+          <SearchResultsList results={results} query={query} onSelect={handleSelect} />
         </div>
       </PopoverContent>
     </Popover>

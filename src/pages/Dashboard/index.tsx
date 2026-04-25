@@ -19,8 +19,8 @@ import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Apis } from '@/api'
 
 interface DashboardProps {}
@@ -53,16 +53,6 @@ const Dashboard: FC<DashboardProps> = () => {
                 Trigger Pipeline
               </Button>
             </div>
-
-            {/* Tabs */}
-            <Tabs className='w-full' defaultValue='overview'>
-              <TabsList>
-                <TabsTrigger value='overview'>Overview</TabsTrigger>
-                <TabsTrigger value='efficiency'>Efficiency</TabsTrigger>
-                <TabsTrigger value='quality'>Quality</TabsTrigger>
-                <TabsTrigger value='teams'>Teams</TabsTrigger>
-              </TabsList>
-            </Tabs>
 
             {/* 1. 总览卡片 - Pipeline 状态 */}
             <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-4'>
@@ -162,7 +152,10 @@ const Dashboard: FC<DashboardProps> = () => {
                 </CardHeader>
                 <CardContent>
                   {loadingStats ? (
-                    <div className='text-2xl font-bold'>Loading...</div>
+                    <div className='space-y-2'>
+                      <Skeleton className='h-7 w-20' />
+                      <Skeleton className='h-4 w-32' />
+                    </div>
                   ) : agentStats ? (
                     <>
                       <div className='text-2xl font-bold'>
@@ -246,7 +239,7 @@ const Dashboard: FC<DashboardProps> = () => {
                         <TableCell className='font-medium'>Build & Deploy</TableCell>
                         <TableCell>web-app</TableCell>
                         <TableCell>
-                          <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
+                          <Badge variant='success'>
                             <CheckCircle2 className='mr-1 h-3 w-3' />
                             Success
                           </Badge>
@@ -295,7 +288,7 @@ const Dashboard: FC<DashboardProps> = () => {
                         <TableCell className='font-medium'>Integration Test</TableCell>
                         <TableCell>web-app</TableCell>
                         <TableCell>
-                          <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
+                          <Badge variant='success'>
                             <CheckCircle2 className='mr-1 h-3 w-3' />
                             Success
                           </Badge>
@@ -311,7 +304,7 @@ const Dashboard: FC<DashboardProps> = () => {
                         <TableCell className='font-medium'>E2E Tests</TableCell>
                         <TableCell>web-app</TableCell>
                         <TableCell>
-                          <Badge variant='outline' className='bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'>
+                          <Badge variant='warning'>
                             <Pause className='mr-1 h-3 w-3' />
                             Queued
                           </Badge>
@@ -340,7 +333,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>web-app</p>
                       <p className='text-sm text-muted-foreground'>42 runs • 95.2% success</p>
                     </div>
-                    <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
+                    <Badge variant='success'>
                       Healthy
                     </Badge>
                   </div>
@@ -349,7 +342,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>api-service</p>
                       <p className='text-sm text-muted-foreground'>38 runs • 87.5% success</p>
                     </div>
-                    <Badge variant='outline' className='bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'>
+                    <Badge variant='warning'>
                       Warning
                     </Badge>
                   </div>
@@ -358,7 +351,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>mobile-app</p>
                       <p className='text-sm text-muted-foreground'>29 runs • 96.5% success</p>
                     </div>
-                    <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
+                    <Badge variant='success'>
                       Healthy
                     </Badge>
                   </div>
@@ -367,7 +360,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>data-pipeline</p>
                       <p className='text-sm text-muted-foreground'>15 runs • 73.3% success</p>
                     </div>
-                    <Badge variant='outline' className='bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800'>
+                    <Badge variant='critical'>
                       Critical
                     </Badge>
                   </div>
@@ -376,7 +369,7 @@ const Dashboard: FC<DashboardProps> = () => {
                       <p className='text-sm font-medium leading-none'>infrastructure</p>
                       <p className='text-sm text-muted-foreground'>8 runs • 100% success</p>
                     </div>
-                    <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
+                    <Badge variant='success'>
                       Healthy
                     </Badge>
                   </div>

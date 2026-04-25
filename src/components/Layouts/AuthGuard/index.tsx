@@ -190,9 +190,9 @@ const AuthGuard: FC<AuthGuardProps> = () => {
 
   return (
     <div className='flex min-h-screen items-center justify-center'>
-      <div className='flex flex-col items-center gap-2'>
+      <div className='flex flex-col items-center gap-3'>
         <svg
-          className='h-6 w-6 animate-spin text-muted-foreground'
+          className='h-8 w-8 animate-spin text-primary'
           fill='none'
           stroke='currentColor'
           strokeLinecap='round'
@@ -202,7 +202,6 @@ const AuthGuard: FC<AuthGuardProps> = () => {
         >
           <path d='M21 12a9 9 0 1 1-6.219-8.56' />
         </svg>
-        <span className='text-sm text-muted-foreground'>Loading...</span>
       </div>
     </div>
   )

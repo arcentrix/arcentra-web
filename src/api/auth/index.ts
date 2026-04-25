@@ -89,8 +89,8 @@ function register(data: RegisterRequest) {
   )
 }
 
-function getAvailableProviders() {
-  return get<IdentityProvider[]>('/identity/providers/available', { silence: true })
+function listLoginProviders() {
+  return get<IdentityProvider[]>('/identity/login/providers', { silence: true })
 }
 
 export default {
@@ -99,5 +99,5 @@ export default {
   getAuthorizeUrl,
   handleCallback,
   register,
-  getAvailableProviders,
+  listLoginProviders,
 }

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Skeleton } from '@/components/ui/skeleton'
 import { UserManagementDialog } from '@/components/user-management-dialog'
 import { ResetPasswordDialog } from '@/components/reset-password-dialog'
 import { DataTablePagination } from '@/components/data-table-pagination'
@@ -171,87 +172,36 @@ export default function UsersPage() {
   // 使用后端分页，直接使用返回的用户列表
   const totalPages = Math.ceil(totalCount / pageSize)
 
+  const getRoleVariant = (priority: number): 'critical' | 'warning' | 'info' | 'secondary' => {
+    if (priority >= 50) return 'critical'
+    if (priority >= 40) return 'warning'
+    if (priority >= 30) return 'info'
+    return 'secondary'
+  }
+
   const getRoleBadge = (user: User) => {
-    // 优先使用 API 返回的 roleName
-    if (user.roleName) {
-      // 尝试通过 roleName 找到对应的角色对象以获取图标和颜色
-      const role = roles.find((r) => r.name === user.roleName || r.displayName === user.roleName)
-      
-      if (role) {
-        const Icon = role.isBuiltin === 1 ? Crown : Shield
-        const getColorClass = () => {
-          if (role.priority >= 50) {
-            return 'bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800'
-          } else if (role.priority >= 40) {
-            return 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'
-          } else if (role.priority >= 30) {
-            return 'bg-sky-50 text-sky-600 border border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800'
-          } else {
-            return 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
-          }
-        }
-        
-        return (
-          <Badge variant='outline' className={getColorClass()}>
-            <Icon className='mr-1 h-3 w-3' />
-            {user.roleName}
-          </Badge>
-        )
-      }
-      
-      return (
-        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
-          <Shield className='mr-1 h-3 w-3' />
-          {user.roleName}
-        </Badge>
-      )
-    }
-
+    const roleName = user.roleName
     const roleValue = user.role
-    if (!roleValue) {
-      return (
-        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
-          <Shield className='mr-1 h-3 w-3' />
-          Unknown
-        </Badge>
-      )
-    }
 
-    let role = roles.find((r) => r.roleId === roleValue)
-    if (!role) {
-      role = roles.find((r) => r.name === roleValue)
-    }
-    if (!role) {
-      role = roles.find((r) => r.roleId.toLowerCase() === roleValue.toLowerCase() || r.name.toLowerCase() === roleValue.toLowerCase())
-    }
-    
-    if (!role) {
-      return (
-        <Badge variant='outline' className='bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
-          <Shield className='mr-1 h-3 w-3' />
-          {roleValue}
-        </Badge>
-      )
-    }
-
-    const Icon = role.isBuiltin === 1 ? Crown : Shield
-    
-    const getColorClass = () => {
-      if (role.priority >= 50) {
-        return 'bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800'
-      } else if (role.priority >= 40) {
-        return 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800'
-      } else if (role.priority >= 30) {
-        return 'bg-sky-50 text-sky-600 border border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800'
-      } else {
-        return 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
+    const findRole = () => {
+      if (roleName) {
+        return roles.find((r) => r.name === roleName || r.displayName === roleName)
       }
+      if (!roleValue) return undefined
+      return roles.find((r) => r.roleId === roleValue)
+        || roles.find((r) => r.name === roleValue)
+        || roles.find((r) => r.roleId.toLowerCase() === roleValue.toLowerCase() || r.name.toLowerCase() === roleValue.toLowerCase())
     }
+
+    const role = findRole()
+    const displayName = roleName || roleValue || 'Unknown'
+    const Icon = role?.isBuiltin === 1 ? Crown : Shield
+    const variant = role ? getRoleVariant(role.priority) : 'secondary'
 
     return (
-      <Badge variant='outline' className={getColorClass()}>
+      <Badge variant={variant}>
         <Icon className='mr-1 h-3 w-3' />
-        {role.name}
+        {role?.name || displayName}
       </Badge>
     )
   }
@@ -259,16 +209,16 @@ export default function UsersPage() {
   const getInvitationStatusBadge = (status?: string) => {
     if (!status) return null
     
-    const variants: Record<string, { label: string; className: string }> = {
-      pending: { label: 'Pending', className: 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800' },
-      accepted: { label: 'Accepted', className: 'bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800' },
-      expired: { label: 'Expired', className: 'bg-gray-100 text-gray-500 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
-      revoked: { label: 'Revoked', className: 'bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950 dark:text-rose-400 dark:border-rose-800' },
+    const variantMap: Record<string, { label: string; variant: 'warning' | 'success' | 'secondary' | 'critical' }> = {
+      pending: { label: 'Pending', variant: 'warning' },
+      accepted: { label: 'Accepted', variant: 'success' },
+      expired: { label: 'Expired', variant: 'secondary' },
+      revoked: { label: 'Revoked', variant: 'critical' },
     }
-    const variant = variants[status] || { label: status, className: 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' }
+    const mapped = variantMap[status] || { label: status, variant: 'secondary' as const }
     return (
-      <Badge variant='outline' className={variant.className}>
-        {variant.label}
+      <Badge variant={mapped.variant}>
+        {mapped.label}
       </Badge>
     )
   }
@@ -337,8 +287,18 @@ export default function UsersPage() {
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <div className='flex items-center justify-center py-8'>
-                    <p className='text-muted-foreground'>Loading...</p>
+                  <div className='space-y-4 py-4'>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className='flex items-center gap-4'>
+                        <Skeleton className='h-8 w-8 rounded-full' />
+                        <div className='flex-1 space-y-2'>
+                          <Skeleton className='h-4 w-[200px]' />
+                          <Skeleton className='h-3 w-[160px]' />
+                        </div>
+                        <Skeleton className='h-6 w-[80px] rounded-full' />
+                        <Skeleton className='h-6 w-[60px] rounded-full' />
+                      </div>
+                    ))}
                   </div>
                 ) : users.length === 0 ? (
                   <div className='flex flex-col items-center justify-center py-12'>
@@ -402,12 +362,12 @@ export default function UsersPage() {
                           <TableCell>{getRoleBadge(user)}</TableCell>
                           <TableCell>
                             {user.isEnabled === 1 ? (
-                              <Badge variant='outline' className='bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'>
+                              <Badge variant='success'>
                                 <Power className='mr-1 h-3 w-3' />
                                 Enabled
                               </Badge>
                             ) : (
-                              <Badge variant='outline' className='bg-gray-100 text-gray-500 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'>
+                              <Badge variant='secondary'>
                                 <PowerOff className='mr-1 h-3 w-3' />
                                 Disabled
                               </Badge>

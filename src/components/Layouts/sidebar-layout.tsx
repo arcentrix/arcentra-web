@@ -11,13 +11,13 @@ const SidebarLayoutWrapper: FC<SidebarLayoutWrapperProps> = () => {
     <SidebarLayout defaultOpen>
       <AppSidebar />
       <main className='flex flex-1 flex-col p-2 transition-all duration-300 ease-in-out overflow-hidden'>
-        <div className='h-full rounded-md overflow-hidden flex flex-col'>
+        <div className='h-full rounded-md flex flex-col'>
           <div className='flex items-center gap-4 p-4 shrink-0'>
             <SidebarTrigger />
             <Breadcrumb />
           </div>
-          <div className='flex-1 min-h-0 overflow-hidden'>
-          <Outlet />
+          <div className='flex-1 min-h-0 overflow-y-auto'>
+            <Outlet />
           </div>
         </div>
       </main>
