@@ -19,9 +19,13 @@ interface BreadcrumbProps {
 
 // 路由到页面标题的映射
 const routeTitleMap: Record<string, string> = {
-  '/': 'Dashboard',
-  '/projects': 'Overview',
-  '/agents': 'Overview',
+  '/': 'Overview',
+  '/projects': 'Projects',
+  '/build': 'Build',
+  '/deploy': 'Deploy',
+  '/observe': 'Observe',
+  '/secure': 'Secure',
+  '/agents': 'Agents',
   '/users': 'Users',
   '/roles': 'Roles',
   '/access': 'Access',
@@ -35,17 +39,21 @@ const routeTitleMap: Record<string, string> = {
   '/workspace/:workspaceName/history': 'History',
 }
 
-// 一级菜单配置
+// 一级菜单配置（与 AppDock 保持一致）
 const mainMenuItems = [
   { title: 'Projects', url: '/projects' },
+  { title: 'Build', url: '/build' },
+  { title: 'Deploy', url: '/deploy' },
   { title: 'Agents', url: '/agents' },
-  { title: 'Access', url: '/access' },
+  { title: 'Observe', url: '/observe' },
+  { title: 'Secure', url: '/secure' },
   { title: 'Settings', url: '/settings' },
 ]
 
 const flatRouteToMenu: Record<string, { parent: string; parentUrl: string }> = {
-  '/users': { parent: 'Access', parentUrl: '/access' },
-  '/roles': { parent: 'Access', parentUrl: '/access' },
+  '/access': { parent: 'Secure', parentUrl: '/secure' },
+  '/users': { parent: 'Secure', parentUrl: '/secure' },
+  '/roles': { parent: 'Secure', parentUrl: '/secure' },
   '/identity-integration': { parent: 'Settings', parentUrl: '/settings' },
   '/general-settings': { parent: 'Settings', parentUrl: '/settings' },
   '/settings/notifications': { parent: 'Settings', parentUrl: '/settings' },
@@ -131,9 +139,9 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
   const generateBreadcrumbs = (): BreadcrumbItem[] => {
     const items: BreadcrumbItem[] = []
 
-    // Dashboard 页面
+    // Overview / Dashboard 页面
     if (pathname === '/') {
-      return [{ title: 'Dashboard' }]
+      return [{ title: 'Overview' }]
     }
 
     // 如果是 workspace 页面（需要在匹配一级菜单之前处理）

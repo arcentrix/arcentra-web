@@ -6,7 +6,6 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Sheet,
   SheetContent,
@@ -14,36 +13,43 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import type { SettingItem, SettingValue } from '@/api/general-settings/types'
+import type { SettingItem } from '@/api/general-settings/types'
+import type { SettingsGroup } from './groups'
 import { cn } from '@/lib/utils'
 
 const SENSITIVE_KEYWORDS = ['secret', 'key', 'salt', 'password', 'token']
 
-function isSensitiveField(fieldName: string) {
-  const lower = fieldName.toLowerCase()
-  return SENSITIVE_KEYWORDS.some((kw) => lower.includes(kw))
+function isSensitiveLabel(label: string) {
+  const l = label.toLowerCase()
+  return SENSITIVE_KEYWORDS.some((kw) => l.includes(kw))
 }
 
-type FieldType = 'string' | 'number' | 'boolean' | 'json'
+function getByPath(obj: Record<string, unknown> | undefined, path?: string): unknown {
+  if (!obj) return undefined
+  if (!path) return obj
+  return obj[path]
+}
 
-function detectType(value: unknown): FieldType {
+function detectType(value: unknown): 'string' | 'number' | 'boolean' {
   if (typeof value === 'boolean') return 'boolean'
   if (typeof value === 'number') return 'number'
-  if (typeof value === 'string') return 'string'
-  return 'json'
+  return 'string'
 }
 
-interface GeneralSettingsSheetProps {
+interface GroupEditSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  setting: SettingItem | null
-  onSubmit: (value: SettingValue) => Promise<void> | void
+  group: SettingsGroup | null
+  settingsByName: Map<string, SettingItem>
+  /** 提交一组 setting 的更新；上层负责发起 N 个 PUT */
+  onSubmit: (updates: Array<{ name: string; value: Record<string, unknown> }>) => Promise<void>
 }
 
-export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
+export const GroupEditSheet: FC<GroupEditSheetProps> = ({
   open,
   onOpenChange,
-  setting,
+  group,
+  settingsByName,
   onSubmit,
 }) => {
   const [draft, setDraft] = useState<Record<string, unknown>>({})
@@ -51,20 +57,22 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
 
+  const initialState = useMemo(() => {
+    if (!group) return {}
+    const next: Record<string, unknown> = {}
+    group.fields.forEach((field, idx) => {
+      const item = settingsByName.get(field.settingName)
+      next[`f${idx}`] = getByPath(item?.value, field.path)
+    })
+    return next
+  }, [group, settingsByName])
+
   useEffect(() => {
-    if (!open || !setting) return
-    setDraft({ ...setting.value })
+    if (!open || !group) return
+    setDraft(initialState)
     setErrors({})
     setRevealed({})
-  }, [open, setting])
-
-  const fields = useMemo(() => {
-    if (!setting) return [] as Array<{ key: string; type: FieldType }>
-    return Object.entries(setting.value).map(([key, value]) => ({
-      key,
-      type: detectType(value),
-    }))
-  }, [setting])
+  }, [open, group, initialState])
 
   const handleChange = (key: string, value: unknown) => {
     setDraft((prev) => ({ ...prev, [key]: value }))
@@ -76,49 +84,53 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
     }
   }
 
-  const validateAndBuild = (): SettingValue | null => {
-    const result: SettingValue = {}
-    const nextErrors: Record<string, string> = {}
+  const handleSave = async () => {
+    if (!group) return
 
-    for (const { key, type } of fields) {
+    // 1. 校验
+    const nextErrors: Record<string, string> = {}
+    group.fields.forEach((field, idx) => {
+      const key = `f${idx}`
+      const original = getByPath(settingsByName.get(field.settingName)?.value, field.path)
+      const type = detectType(original)
       const raw = draft[key]
       if (type === 'number') {
         const n = typeof raw === 'number' ? raw : Number(raw)
         if (raw === '' || raw === null || raw === undefined || Number.isNaN(n)) {
           nextErrors[key] = 'Must be a number'
-          continue
         }
-        result[key] = n
-      } else if (type === 'boolean') {
-        result[key] = Boolean(raw)
-      } else if (type === 'json') {
-        if (typeof raw === 'string') {
-          try {
-            result[key] = JSON.parse(raw)
-          } catch {
-            nextErrors[key] = 'Invalid JSON'
-            continue
-          }
-        } else {
-          result[key] = raw
-        }
-      } else {
-        result[key] = typeof raw === 'string' ? raw : String(raw ?? '')
       }
-    }
-
+    })
     setErrors(nextErrors)
-    return Object.keys(nextErrors).length === 0 ? result : null
-  }
+    if (Object.keys(nextErrors).length > 0) return
 
-  const handleSave = async () => {
-    if (!setting) return
-    const next = validateAndBuild()
-    if (!next) return
+    // 2. 把每个 field 的草稿值合并回所属 SettingItem.value
+    const updatedValueByName = new Map<string, Record<string, unknown>>()
+    group.fields.forEach((field, idx) => {
+      const key = `f${idx}`
+      const item = settingsByName.get(field.settingName)
+      if (!item) return
+      const current = updatedValueByName.get(field.settingName) ?? { ...item.value }
+      let v = draft[key]
+      const original = getByPath(item.value, field.path)
+      const type = detectType(original)
+      if (type === 'number') v = Number(v)
+      if (type === 'boolean') v = Boolean(v)
+
+      if (field.path) {
+        current[field.path] = v
+      } else {
+        updatedValueByName.set(field.settingName, v as Record<string, unknown>)
+        return
+      }
+      updatedValueByName.set(field.settingName, current)
+    })
 
     setLoading(true)
     try {
-      await onSubmit(next)
+      await onSubmit(
+        Array.from(updatedValueByName.entries()).map(([name, value]) => ({ name, value })),
+      )
     } finally {
       setLoading(false)
     }
@@ -131,43 +143,49 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
         className='flex w-[460px] max-w-[calc(100vw-64px)] flex-col gap-0 p-0 sm:max-w-[460px]'
       >
         <SheetHeader className='shrink-0 space-y-1 border-b px-6 py-5 text-left'>
-          <SheetTitle className='font-mono text-base'>{setting?.name ?? 'Setting'}</SheetTitle>
+          <SheetTitle>{group?.title ?? 'Edit settings'}</SheetTitle>
           <SheetDescription className='text-[13px]'>
-            Edit the value of this configuration item. Field types are inferred from the
-            current data.
+            {group?.description}
           </SheetDescription>
         </SheetHeader>
 
         <div className='flex-1 overflow-y-auto'>
           <ScrollArea className='h-full'>
             <div className='space-y-5 px-6 py-6'>
-              {fields.length === 0 && (
+              {!group && (
                 <div className='rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground'>
-                  This setting has no editable fields.
+                  No group selected.
                 </div>
               )}
 
-              {fields.map(({ key, type }) => {
+              {group?.fields.map((field, idx) => {
+                const key = `f${idx}`
                 const value = draft[key]
                 const error = errors[key]
-                const sensitive = isSensitiveField(key) && type === 'string'
+                const original = getByPath(
+                  settingsByName.get(field.settingName)?.value,
+                  field.path,
+                )
+                const type = detectType(original)
+                const sensitive = isSensitiveLabel(field.label) && type === 'string'
 
                 return (
-                  <div key={key} className='space-y-1.5'>
+                  <div key={`${field.settingName}-${field.path ?? '_'}`} className='space-y-1.5'>
                     <Label
-                      htmlFor={`field-${key}`}
-                      className='flex items-center justify-between gap-2 text-[13px]'
+                      htmlFor={`field-${idx}`}
+                      className='flex items-baseline justify-between gap-2 text-[13px]'
                     >
-                      <span className='font-mono'>{key}</span>
-                      <span className='text-[10px] uppercase tracking-wide text-muted-foreground'>
-                        {type}
-                      </span>
+                      <span>{field.label}</span>
+                      <code className='font-mono text-[10px] text-muted-foreground'>
+                        {field.settingName}
+                        {field.path ? `.${field.path}` : ''}
+                      </code>
                     </Label>
 
                     {type === 'boolean' && (
                       <div className='flex items-center gap-2 rounded-md border px-3 py-2'>
                         <Switch
-                          id={`field-${key}`}
+                          id={`field-${idx}`}
                           checked={Boolean(value)}
                           onCheckedChange={(checked) => handleChange(key, checked)}
                         />
@@ -178,20 +196,30 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
                     )}
 
                     {type === 'number' && (
-                      <Input
-                        id={`field-${key}`}
-                        type='number'
-                        value={value === undefined || value === null ? '' : String(value)}
-                        onChange={(e) =>
-                          handleChange(key, e.target.value === '' ? '' : Number(e.target.value))
-                        }
-                      />
+                      <div className='flex items-center gap-2'>
+                        <Input
+                          id={`field-${idx}`}
+                          type='number'
+                          value={value === undefined || value === null ? '' : String(value)}
+                          onChange={(e) =>
+                            handleChange(
+                              key,
+                              e.target.value === '' ? '' : Number(e.target.value),
+                            )
+                          }
+                        />
+                        {field.suffix && (
+                          <span className='shrink-0 text-xs text-muted-foreground'>
+                            {field.suffix}
+                          </span>
+                        )}
+                      </div>
                     )}
 
                     {type === 'string' && (
                       <div className='relative'>
                         <Input
-                          id={`field-${key}`}
+                          id={`field-${idx}`}
                           type={sensitive && !revealed[key] ? 'password' : 'text'}
                           value={typeof value === 'string' ? value : String(value ?? '')}
                           onChange={(e) => handleChange(key, e.target.value)}
@@ -216,20 +244,9 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
                       </div>
                     )}
 
-                    {type === 'json' && (
-                      <Textarea
-                        id={`field-${key}`}
-                        rows={6}
-                        className='font-mono text-xs'
-                        value={
-                          typeof value === 'string'
-                            ? value
-                            : JSON.stringify(value ?? null, null, 2)
-                        }
-                        onChange={(e) => handleChange(key, e.target.value)}
-                      />
+                    {field.description && (
+                      <p className='text-xs text-muted-foreground'>{field.description}</p>
                     )}
-
                     {error && <p className='text-xs text-destructive'>{error}</p>}
                   </div>
                 )
@@ -248,7 +265,7 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
           >
             Cancel
           </Button>
-          <Button type='button' disabled={loading || !setting} onClick={handleSave}>
+          <Button type='button' disabled={loading || !group} onClick={handleSave}>
             {loading ? 'Saving…' : 'Save changes'}
           </Button>
         </div>

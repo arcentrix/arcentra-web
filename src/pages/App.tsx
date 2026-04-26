@@ -3,7 +3,7 @@ import { ToastContainer } from 'react-toastify'
 import { useTheme } from '@/hooks/use-theme'
 import AuthGuard from '@/components/Layouts/AuthGuard'
 import DefaultLayouts from '@/components/Layouts/default'
-import SidebarLayoutWrapper from '@/components/Layouts/sidebar-layout'
+import DockLayout from '@/components/Layouts/dock-layout'
 import Login from './Login'
 import Register from './Register'
 import Dashboard from './Dashboard'
@@ -21,6 +21,10 @@ import ProjectSettings from './Project/Settings'
 import ProjectMembers from './Project/Members'
 import AgentsOverview from './Models/Agents/Overview'
 import AgentsDetail from './Models/Agents/Detail'
+import Build from './Build'
+import Deploy from './Deploy'
+import Observe from './Observe'
+import Secure from './Secure'
 import Identity from './Identity'
 import Users from './Users'
 import Roles from './Roles'
@@ -45,8 +49,12 @@ function App() {
         <Routes>
           <Route element={<DefaultLayouts />}>
             <Route element={<AuthGuard />}>
-              <Route element={<SidebarLayoutWrapper />}>
+              <Route element={<DockLayout />}>
                 <Route element={<Dashboard />} index path='/' />
+                <Route element={<Build />} path='/build' />
+                <Route element={<Deploy />} path='/deploy' />
+                <Route element={<Observe />} path='/observe' />
+                <Route element={<Secure />} path='/secure' />
                 <Route element={<ProjectsOverview />} path='/projects' />
                 <Route element={<ProjectDetail />} path='/projects/:projectId'>
                   <Route index element={<ProjectDetailOverview />} />

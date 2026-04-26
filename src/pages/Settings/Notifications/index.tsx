@@ -3,7 +3,23 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Bell, Plus, Mail, MessageSquare, Webhook, FileText, Edit, Trash2, Search, Power, PowerOff } from 'lucide-react';
+import {
+  Bell,
+  Plus,
+  Mail,
+  MessageSquare,
+  Webhook,
+  FileText,
+  Edit,
+  Trash2,
+  Search,
+  Power,
+  PowerOff,
+  AlertTriangle,
+  Clock,
+  GitMerge,
+  Send,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -262,30 +278,95 @@ export default function NotificationsPage() {
     );
   };
 
+  const activeChannelCount = channelsList.filter((c) => c.status === 'active').length
+  const inactiveChannelCount = channelsList.length - activeChannelCount
+  const templateCount = templatesList.length
+  const ruleCount: number = 0 // TODO: replace with real Apis.notifications.listRules() when backend ready
+
+  const headerActionLabel =
+    activeTab === 'channels' ? 'Add Channel' :
+    activeTab === 'templates' ? 'Create Template' :
+    activeTab === 'rules' ? 'New Rule' : null
+
+  const headerAction = () => {
+    if (activeTab === 'channels') return handleCreateChannel()
+    if (activeTab === 'templates') return handleCreateTemplate()
+    // rules: not wired yet
+  }
+
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <Bell className="h-8 w-8 text-green-500" />
             Notifications
           </h2>
           <p className="text-muted-foreground mt-1">
-            Manage notification channels and templates
+            Manage notification channels, templates and routing rules.
           </p>
         </div>
-        <Button
-          onClick={activeTab === 'channels' ? handleCreateChannel : handleCreateTemplate}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          {activeTab === 'channels' ? 'Add Channel' : 'Create Template'}
-        </Button>
+        {headerActionLabel && (
+          <Button onClick={headerAction} disabled={activeTab === 'rules'}>
+            <Plus className="mr-2 h-4 w-4" />
+            {headerActionLabel}
+          </Button>
+        )}
+      </div>
+
+      {/* Top overview cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Channels</CardTitle>
+            <Power className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{activeChannelCount}</div>
+            <p className="text-xs text-muted-foreground">
+              {inactiveChannelCount} inactive · {channelsList.length} total
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Failed Deliveries</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-rose-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">0</div>
+            <p className="text-xs text-muted-foreground">In the last 24h</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Templates</CardTitle>
+            <FileText className="h-4 w-4 text-sky-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{templateCount}</div>
+            <p className="text-xs text-muted-foreground">
+              {ruleCount} routing rule{ruleCount === 1 ? '' : 's'}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Last Sent</CardTitle>
+            <Clock className="h-4 w-4 text-violet-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">—</div>
+            <p className="text-xs text-muted-foreground">Awaiting events</p>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="channels">Channels</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
+          <TabsTrigger value="rules">Rules</TabsTrigger>
         </TabsList>
 
         <TabsContent value="channels" className="space-y-4">
@@ -529,6 +610,37 @@ export default function NotificationsPage() {
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="rules" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GitMerge className="h-5 w-5" />
+                Routing Rules
+              </CardTitle>
+              <CardDescription>
+                Map platform events to notification channels and templates.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-12 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
+                  <Send className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div>
+                  <div className="text-base font-medium">No routing rules yet</div>
+                  <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                    Define which events trigger which channels — for example, send pipeline
+                    failures to a Slack channel, or notify owners of production deployments.
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Rules API is not yet available. This tab is reserved for future configuration.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

@@ -3,7 +3,18 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Info, Search, ChevronRight, ArrowUpCircle } from 'lucide-react';
+import {
+  Info,
+  Search,
+  ChevronRight,
+  ArrowUpCircle,
+  GitBranch,
+  Cpu,
+  Package,
+  Tag,
+  Puzzle,
+  Download,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -204,55 +215,105 @@ export default function SystemInfoPage() {
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <Info className="h-8 w-8 text-purple-500" />
             System Information
           </h2>
           <p className="text-muted-foreground mt-1">
-            View system version, status, and runtime information
+            View version, runtime environment and installed plugins.
           </p>
         </div>
+        {versionInfo && (
+          <Button size="sm" variant="outline" className="gap-1.5">
+            <ArrowUpCircle className="h-4 w-4" />
+            Check for upgrade
+          </Button>
+        )}
       </div>
 
-      {/* System Information - 压缩版 Key-Value Grid */}
+      {/* Top overview cards */}
+      {versionInfo && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Version</CardTitle>
+              <Tag className="h-4 w-4 text-sky-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">v{versionInfo.version}</div>
+              <p className="text-xs text-muted-foreground">Latest stable release</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Build</CardTitle>
+              <GitBranch className="h-4 w-4 text-emerald-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{versionInfo.gitBranch}</div>
+              <p className="text-xs text-muted-foreground font-mono">
+                {versionInfo.gitCommit.substring(0, 7)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Runtime</CardTitle>
+              <Cpu className="h-4 w-4 text-violet-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{versionInfo.platform}</div>
+              <p className="text-xs text-muted-foreground">Detected at boot</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Plugins</CardTitle>
+              <Package className="h-4 w-4 text-amber-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{plugins.length}</div>
+              <p className="text-xs text-muted-foreground">
+                {plugins.length === 0 ? 'None installed' : 'Installed plugins'}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Runtime detail */}
       {versionInfo && (
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-semibold">System Information</CardTitle>
-              <Button size="sm" variant="outline" className="h-8 text-xs">
-                <ArrowUpCircle className="h-3 w-3 mr-1.5" />
-                Upgrade
-              </Button>
-            </div>
+            <CardTitle className="text-base font-semibold">Runtime</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3">
+            <dl className="grid gap-x-8 gap-y-3 md:grid-cols-2">
               <div className="flex items-center gap-3">
-                <span className="text-[13px] text-muted-foreground min-w-[100px]">Version</span>
-                <span className="text-[13px] font-medium">{versionInfo.version}</span>
+                <dt className="text-[13px] text-muted-foreground min-w-[110px]">Version</dt>
+                <dd className="text-[13px] font-medium">{versionInfo.version}</dd>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[13px] text-muted-foreground min-w-[100px]">Git Branch</span>
-                <span className="text-[13px] font-medium">{versionInfo.gitBranch}</span>
+                <dt className="text-[13px] text-muted-foreground min-w-[110px]">Build Time</dt>
+                <dd className="text-[13px] font-medium font-mono">{versionInfo.buildTime}</dd>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[13px] text-muted-foreground min-w-[100px]">Git Commit</span>
-                <span className="text-[13px] font-medium font-mono">
+                <dt className="text-[13px] text-muted-foreground min-w-[110px]">Git Branch</dt>
+                <dd className="text-[13px] font-medium">{versionInfo.gitBranch}</dd>
+              </div>
+              <div className="flex items-center gap-3">
+                <dt className="text-[13px] text-muted-foreground min-w-[110px]">Git Commit</dt>
+                <dd className="text-[13px] font-medium font-mono">
                   {versionInfo.gitCommit.substring(0, 7)}
-                </span>
+                </dd>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[13px] text-muted-foreground min-w-[100px]">Build Time</span>
-                <span className="text-[13px] font-medium">{versionInfo.buildTime}</span>
+              <div className="flex items-center gap-3 md:col-span-2">
+                <dt className="text-[13px] text-muted-foreground min-w-[110px]">Platform</dt>
+                <dd className="text-[13px] font-medium">{versionInfo.platform}</dd>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[13px] text-muted-foreground min-w-[100px]">Platform</span>
-                <span className="text-[13px] font-medium">{versionInfo.platform}</span>
-              </div>
-            </div>
+            </dl>
           </CardContent>
         </Card>
       )}
@@ -349,11 +410,36 @@ export default function SystemInfoPage() {
                     </div>
                   ))}
                 </div>
+              ) : searchTerm || filterType !== 'all' || filterStatus !== 'all' ? (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-12 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                    <Search className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    No plugins match your filters.
+                  </div>
+                </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground text-sm">
-                  {searchTerm || filterType !== 'all' || filterStatus !== 'all'
-                    ? 'No plugins found matching your filters'
-                    : 'No plugins installed'}
+                <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-12 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
+                    <Puzzle className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <div className="text-base font-medium">No plugins installed</div>
+                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                      Extend Arcentra with source, build, deploy and notification plugins.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="gap-1.5">
+                      <Puzzle className="h-3.5 w-3.5" />
+                      Browse plugins
+                    </Button>
+                    <Button size="sm" className="gap-1.5">
+                      <Download className="h-3.5 w-3.5" />
+                      Install manually
+                    </Button>
+                  </div>
                 </div>
               )}
             </TabsContent>
