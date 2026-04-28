@@ -3,24 +3,24 @@
  * TODO: 实现组织状态管理逻辑
  */
 
-import { create } from 'zustand'
-import type { Organization } from '@/models/organization'
+import { create } from "zustand";
+import type { Organization } from "@/models/organization";
 
 interface OrganizationState {
   // 当前选中的组织
-  currentOrganization: Organization | null
+  currentOrganization: Organization | null;
   // 用户的所有组织
-  organizations: Organization[]
+  organizations: Organization[];
   // 加载状态
-  loading: boolean
+  loading: boolean;
   // 错误信息
-  error: string | null
+  error: string | null;
 
   // Actions
-  setCurrentOrganization: (org: Organization | null) => void
-  setOrganizations: (orgs: Organization[]) => void
-  setLoading: (loading: boolean) => void
-  setError: (error: string | null) => void
+  setCurrentOrganization: (org: Organization | null) => void;
+  setOrganizations: (orgs: Organization[]) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
 
   // TODO: 实现以下方法
   // fetchOrganizations: () => Promise<void>
@@ -41,5 +41,4 @@ export const useOrganizationStore = create<OrganizationState>((set) => ({
   setError: (error) => set({ error }),
 
   // TODO: 实现 API 集成方法
-}))
-
+}));

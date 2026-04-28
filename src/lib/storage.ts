@@ -1,11 +1,11 @@
-import { isNil } from 'lodash-es'
+import { isNil } from "lodash-es";
 
-type StorageKeys = 'LOGIN_FALLBACK_URL' | 'USER_INFO' | 'TOKENS'
+type StorageKeys = "LOGIN_FALLBACK_URL" | "USER_INFO" | "TOKENS";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyData = any
+type AnyData = any;
 
-const DEFAULT_CACHE_TIME = 60 * 60 * 24 * 7 // 1 week
+const DEFAULT_CACHE_TIME = 60 * 60 * 24 * 7; // 1 week
 
 class WebStorage<Keys = StorageKeys> {
   constructor(
@@ -14,7 +14,7 @@ class WebStorage<Keys = StorageKeys> {
   ) {}
 
   private getKey(key: Keys) {
-    return `${this.prefixKey}${key}`.toUpperCase()
+    return `${this.prefixKey}${key}`.toUpperCase();
   }
 
   set(key: Keys, value: AnyData, expire: number | null = DEFAULT_CACHE_TIME) {
@@ -22,38 +22,38 @@ class WebStorage<Keys = StorageKeys> {
       value,
       time: !isNil(expire) ? Date.now() : null,
       expire: !isNil(expire) ? new Date().getTime() + expire * 1000 : null,
-    })
-    this.storage.setItem(this.getKey(key), stringData)
+    });
+    this.storage.setItem(this.getKey(key), stringData);
   }
 
   get(key: Keys, def: AnyData = null): AnyData {
-    const val = this.storage.getItem(this.getKey(key))
-    if (!val) return def
+    const val = this.storage.getItem(this.getKey(key));
+    if (!val) return def;
 
     try {
-      const data = JSON.parse(val)
-      const { value, expire } = data
+      const data = JSON.parse(val);
+      const { value, expire } = data;
       if (isNil(expire) || expire >= new Date().getTime()) {
-        return value
+        return value;
       }
-      this.remove(key)
+      this.remove(key);
     } catch (e) {
-      return def
+      return def;
     }
   }
 
   remove(key: Keys) {
-    this.storage.removeItem(this.getKey(key))
+    this.storage.removeItem(this.getKey(key));
   }
 
   /**
    * Delete all caches of this instance
    */
   clear(): void {
-    this.storage.clear()
+    this.storage.clear();
   }
 }
 
-const arcentraWebStorage = new WebStorage(localStorage, 'ARCADE_')
+const arcentraWebStorage = new WebStorage(localStorage, "ARCADE_");
 
-export default arcentraWebStorage
+export default arcentraWebStorage;

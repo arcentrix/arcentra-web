@@ -2,7 +2,7 @@
  * Notifications 通知管理页面 - 管理通知渠道和模板
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo } from "react";
 import {
   Bell,
   Plus,
@@ -19,74 +19,102 @@ import {
   Clock,
   GitMerge,
   Send,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { NotificationChannelDialog, type Channel } from '@/components/notification-channel-dialog';
-import { NotificationTemplateDialog, type Template } from '@/components/notification-template-dialog';
-import { toast } from '@/lib/toast';
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  NotificationChannelDialog,
+  type Channel,
+} from "@/components/notification-channel-dialog";
+import {
+  NotificationTemplateDialog,
+  type Template,
+} from "@/components/notification-template-dialog";
+import { toast } from "@/lib/toast";
 
 // 模拟数据
 let channels: Channel[] = [
   {
-    id: '1',
-    name: 'Email Channel',
-    type: 'email',
-    status: 'active',
-    description: 'Send notifications via email',
+    id: "1",
+    name: "Email Channel",
+    type: "email",
+    status: "active",
+    description: "Send notifications via email",
     config: {
-      smtp: 'smtp.example.com',
+      smtp: "smtp.example.com",
       port: 587,
     },
   },
   {
-    id: '2',
-    name: 'Slack Channel',
-    type: 'slack',
-    status: 'active',
-    description: 'Send notifications to Slack workspace',
+    id: "2",
+    name: "Slack Channel",
+    type: "slack",
+    status: "active",
+    description: "Send notifications to Slack workspace",
     config: {
-      webhook: 'https://hooks.slack.com/services/...',
+      webhook: "https://hooks.slack.com/services/...",
     },
   },
   {
-    id: '3',
-    name: 'Webhook Channel',
-    type: 'webhook',
-    status: 'inactive',
-    description: 'Send notifications via webhook',
+    id: "3",
+    name: "Webhook Channel",
+    type: "webhook",
+    status: "inactive",
+    description: "Send notifications via webhook",
     config: {
-      url: 'https://api.example.com/webhook',
+      url: "https://api.example.com/webhook",
     },
   },
 ];
 
 let templates: Template[] = [
   {
-    id: '1',
-    name: 'Pipeline Success',
-    channel: 'email',
-    title: 'Pipeline {{.PipelineName}} completed successfully',
-    content: 'Your pipeline {{.PipelineName}} has completed successfully at {{.Timestamp}}.',
+    id: "1",
+    name: "Pipeline Success",
+    channel: "email",
+    title: "Pipeline {{.PipelineName}} completed successfully",
+    content:
+      "Your pipeline {{.PipelineName}} has completed successfully at {{.Timestamp}}.",
   },
   {
-    id: '2',
-    name: 'Pipeline Failure',
-    channel: 'slack',
-    title: 'Pipeline {{.PipelineName}} failed',
-    content: 'Pipeline {{.PipelineName}} failed at stage {{.StageName}}. Error: {{.ErrorMessage}}',
+    id: "2",
+    name: "Pipeline Failure",
+    channel: "slack",
+    title: "Pipeline {{.PipelineName}} failed",
+    content:
+      "Pipeline {{.PipelineName}} failed at stage {{.StageName}}. Error: {{.ErrorMessage}}",
   },
   {
-    id: '3',
-    name: 'Deployment Notification',
-    channel: 'webhook',
-    title: 'Deployment {{.DeploymentName}} completed',
-    content: 'Deployment {{.DeploymentName}} to {{.Environment}} completed successfully.',
+    id: "3",
+    name: "Deployment Notification",
+    channel: "webhook",
+    title: "Deployment {{.DeploymentName}} completed",
+    content:
+      "Deployment {{.DeploymentName}} to {{.Environment}} completed successfully.",
   },
 ];
 
@@ -97,18 +125,19 @@ const channelIcons = {
 };
 
 export default function NotificationsPage() {
-  const [activeTab, setActiveTab] = useState('channels');
+  const [activeTab, setActiveTab] = useState("channels");
   const [channelDialogOpen, setChannelDialogOpen] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
   const [channelsList, setChannelsList] = useState<Channel[]>(channels);
   const [templatesList, setTemplatesList] = useState<Template[]>(templates);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [templateSearchTerm, setTemplateSearchTerm] = useState('');
-  const [templateFilterChannel, setTemplateFilterChannel] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState<string>("all");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [templateSearchTerm, setTemplateSearchTerm] = useState("");
+  const [templateFilterChannel, setTemplateFilterChannel] =
+    useState<string>("all");
 
   const handleCreateChannel = () => {
     setEditingChannel(null);
@@ -121,22 +150,27 @@ export default function NotificationsPage() {
   };
 
   const handleDeleteChannel = async (channelId: string) => {
-    if (confirm('Are you sure you want to delete this channel?')) {
+    if (confirm("Are you sure you want to delete this channel?")) {
       setChannelsList(channelsList.filter((ch) => ch.id !== channelId));
-      toast.success('Channel deleted successfully');
+      toast.success("Channel deleted successfully");
     }
   };
 
   const handleChannelSubmit = async (data: Channel) => {
     // 模拟 API 调用
     await new Promise((resolve) => setTimeout(resolve, 500));
-    
+
     if (editingChannel) {
       setChannelsList(
-        channelsList.map((ch) => (ch.id === editingChannel.id ? { ...data, id: ch.id } : ch))
+        channelsList.map((ch) =>
+          ch.id === editingChannel.id ? { ...data, id: ch.id } : ch,
+        ),
       );
     } else {
-      setChannelsList([...channelsList, { ...data, id: Date.now().toString() }]);
+      setChannelsList([
+        ...channelsList,
+        { ...data, id: Date.now().toString() },
+      ]);
     }
   };
 
@@ -151,73 +185,91 @@ export default function NotificationsPage() {
   };
 
   const handleDeleteTemplate = async (templateId: string) => {
-    if (confirm('Are you sure you want to delete this template?')) {
+    if (confirm("Are you sure you want to delete this template?")) {
       setTemplatesList(templatesList.filter((t) => t.id !== templateId));
-      toast.success('Template deleted successfully');
+      toast.success("Template deleted successfully");
     }
   };
 
   const handleTemplateSubmit = async (data: Template) => {
     // 模拟 API 调用
     await new Promise((resolve) => setTimeout(resolve, 500));
-    
+
     if (editingTemplate) {
       setTemplatesList(
-        templatesList.map((t) => (t.id === editingTemplate.id ? { ...data, id: t.id } : t))
+        templatesList.map((t) =>
+          t.id === editingTemplate.id ? { ...data, id: t.id } : t,
+        ),
       );
     } else {
-      setTemplatesList([...templatesList, { ...data, id: Date.now().toString() }]);
+      setTemplatesList([
+        ...templatesList,
+        { ...data, id: Date.now().toString() },
+      ]);
     }
   };
 
   const handleToggleChannel = async (channel: Channel) => {
-    const newStatus = channel.status === 'active' ? 'inactive' : 'active';
+    const newStatus = channel.status === "active" ? "inactive" : "active";
     setChannelsList(
       channelsList.map((ch) =>
-        ch.id === channel.id ? { ...ch, status: newStatus } : ch
-      )
+        ch.id === channel.id ? { ...ch, status: newStatus } : ch,
+      ),
     );
-    toast.success(`Channel ${newStatus === 'active' ? 'enabled' : 'disabled'}`);
+    toast.success(`Channel ${newStatus === "active" ? "enabled" : "disabled"}`);
   };
 
   // 筛选逻辑
   const filteredChannels = useMemo(() => {
     return channelsList.filter((channel) => {
       // 按类型筛选
-      if (filterType !== 'all' && channel.type !== filterType) {
+      if (filterType !== "all" && channel.type !== filterType) {
         return false;
       }
-      
+
       // 按状态筛选
-      if (filterStatus === 'active' && channel.status !== 'active') {
+      if (filterStatus === "active" && channel.status !== "active") {
         return false;
       }
-      if (filterStatus === 'inactive' && channel.status !== 'inactive') {
+      if (filterStatus === "inactive" && channel.status !== "inactive") {
         return false;
       }
-      
+
       // 按名称或描述搜索
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
           channel.name.toLowerCase().includes(term) ||
-          (channel.description && channel.description.toLowerCase().includes(term))
+          (channel.description &&
+            channel.description.toLowerCase().includes(term))
         );
       }
-      
+
       return true;
     });
   }, [channelsList, filterType, filterStatus, searchTerm]);
 
   const getChannelTypeBadge = (type: string) => {
     const variants: Record<string, { label: string; className: string }> = {
-      email: { label: 'Email', className: 'bg-blue-50 text-blue-600 border border-blue-200' },
-      slack: { label: 'Slack', className: 'bg-purple-50 text-purple-600 border border-purple-200' },
-      webhook: { label: 'Webhook', className: 'bg-green-50 text-green-600 border border-green-200' },
+      email: {
+        label: "Email",
+        className: "bg-blue-50 text-blue-600 border border-blue-200",
+      },
+      slack: {
+        label: "Slack",
+        className: "bg-purple-50 text-purple-600 border border-purple-200",
+      },
+      webhook: {
+        label: "Webhook",
+        className: "bg-green-50 text-green-600 border border-green-200",
+      },
     };
-    const variant = variants[type] || { label: type.toUpperCase(), className: 'bg-gray-100 text-gray-600 border border-gray-200' };
+    const variant = variants[type] || {
+      label: type.toUpperCase(),
+      className: "bg-gray-100 text-gray-600 border border-gray-200",
+    };
     return (
-      <Badge variant='outline' className={variant.className}>
+      <Badge variant="outline" className={variant.className}>
         {variant.label}
       </Badge>
     );
@@ -225,20 +277,28 @@ export default function NotificationsPage() {
 
   const getChannelConfigDisplay = (channel: Channel) => {
     switch (channel.type) {
-      case 'email':
+      case "email":
         return channel.config.smtp && channel.config.port
           ? `${channel.config.smtp}:${channel.config.port}`
-          : '-';
-      case 'slack':
+          : "-";
+      case "slack":
         return channel.config.webhook ? (
-          <span className="font-mono text-xs truncate max-w-xs">{channel.config.webhook}</span>
-        ) : '-';
-      case 'webhook':
+          <span className="font-mono text-xs truncate max-w-xs">
+            {channel.config.webhook}
+          </span>
+        ) : (
+          "-"
+        );
+      case "webhook":
         return channel.config.url ? (
-          <span className="font-mono text-xs truncate max-w-xs">{channel.config.url}</span>
-        ) : '-';
+          <span className="font-mono text-xs truncate max-w-xs">
+            {channel.config.url}
+          </span>
+        ) : (
+          "-"
+        );
       default:
-        return '-';
+        return "-";
     }
   };
 
@@ -246,10 +306,13 @@ export default function NotificationsPage() {
   const filteredTemplates = useMemo(() => {
     return templatesList.filter((template) => {
       // 按渠道筛选
-      if (templateFilterChannel !== 'all' && template.channel !== templateFilterChannel) {
+      if (
+        templateFilterChannel !== "all" &&
+        template.channel !== templateFilterChannel
+      ) {
         return false;
       }
-      
+
       // 按名称、标题或内容搜索
       if (templateSearchTerm) {
         const term = templateSearchTerm.toLowerCase();
@@ -259,18 +322,30 @@ export default function NotificationsPage() {
           template.content.toLowerCase().includes(term)
         );
       }
-      
+
       return true;
     });
   }, [templatesList, templateFilterChannel, templateSearchTerm]);
 
   const getTemplateChannelBadge = (channel: string) => {
     const variants: Record<string, { label: string; className: string }> = {
-      email: { label: 'Email', className: 'bg-blue-50 text-blue-600 border border-blue-200' },
-      slack: { label: 'Slack', className: 'bg-purple-50 text-purple-600 border border-purple-200' },
-      webhook: { label: 'Webhook', className: 'bg-green-50 text-green-600 border border-green-200' },
+      email: {
+        label: "Email",
+        className: "bg-blue-50 text-blue-600 border border-blue-200",
+      },
+      slack: {
+        label: "Slack",
+        className: "bg-purple-50 text-purple-600 border border-purple-200",
+      },
+      webhook: {
+        label: "Webhook",
+        className: "bg-green-50 text-green-600 border border-green-200",
+      },
     };
-    const variant = variants[channel] || { label: channel.toUpperCase(), className: 'bg-gray-100 text-gray-600 border border-gray-200' };
+    const variant = variants[channel] || {
+      label: channel.toUpperCase(),
+      className: "bg-gray-100 text-gray-600 border border-gray-200",
+    };
     return (
       <Badge variant="outline" className={variant.className}>
         {variant.label}
@@ -278,21 +353,27 @@ export default function NotificationsPage() {
     );
   };
 
-  const activeChannelCount = channelsList.filter((c) => c.status === 'active').length
-  const inactiveChannelCount = channelsList.length - activeChannelCount
-  const templateCount = templatesList.length
-  const ruleCount: number = 0 // TODO: replace with real Apis.notifications.listRules() when backend ready
+  const activeChannelCount = channelsList.filter(
+    (c) => c.status === "active",
+  ).length;
+  const inactiveChannelCount = channelsList.length - activeChannelCount;
+  const templateCount = templatesList.length;
+  const ruleCount: number = 0; // TODO: replace with real Apis.notifications.listRules() when backend ready
 
   const headerActionLabel =
-    activeTab === 'channels' ? 'Add Channel' :
-    activeTab === 'templates' ? 'Create Template' :
-    activeTab === 'rules' ? 'New Rule' : null
+    activeTab === "channels"
+      ? "Add Channel"
+      : activeTab === "templates"
+        ? "Create Template"
+        : activeTab === "rules"
+          ? "New Rule"
+          : null;
 
   const headerAction = () => {
-    if (activeTab === 'channels') return handleCreateChannel()
-    if (activeTab === 'templates') return handleCreateTemplate()
+    if (activeTab === "channels") return handleCreateChannel();
+    if (activeTab === "templates") return handleCreateTemplate();
     // rules: not wired yet
-  }
+  };
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
@@ -307,7 +388,7 @@ export default function NotificationsPage() {
           </p>
         </div>
         {headerActionLabel && (
-          <Button onClick={headerAction} disabled={activeTab === 'rules'}>
+          <Button onClick={headerAction} disabled={activeTab === "rules"}>
             <Plus className="mr-2 h-4 w-4" />
             {headerActionLabel}
           </Button>
@@ -318,7 +399,9 @@ export default function NotificationsPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Channels</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Active Channels
+            </CardTitle>
             <Power className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
@@ -330,7 +413,9 @@ export default function NotificationsPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Failed Deliveries</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Failed Deliveries
+            </CardTitle>
             <AlertTriangle className="h-4 w-4 text-rose-500" />
           </CardHeader>
           <CardContent>
@@ -346,7 +431,7 @@ export default function NotificationsPage() {
           <CardContent>
             <div className="text-2xl font-bold">{templateCount}</div>
             <p className="text-xs text-muted-foreground">
-              {ruleCount} routing rule{ruleCount === 1 ? '' : 's'}
+              {ruleCount} routing rule{ruleCount === 1 ? "" : "s"}
             </p>
           </CardContent>
         </Card>
@@ -378,10 +463,13 @@ export default function NotificationsPage() {
                     <Bell className="h-5 w-5" />
                     Notification Channels
                   </CardTitle>
-                  <CardDescription>Configure and manage notification channels (Email, Slack, Webhook)</CardDescription>
+                  <CardDescription>
+                    Configure and manage notification channels (Email, Slack,
+                    Webhook)
+                  </CardDescription>
                 </div>
               </div>
-              
+
               {/* 筛选栏 */}
               <div className="flex gap-4 mt-4">
                 <div className="relative flex-1">
@@ -421,7 +509,9 @@ export default function NotificationsPage() {
                 <div className="flex flex-col items-center justify-center py-12">
                   <Bell className="h-12 w-12 text-muted-foreground mb-4" />
                   <p className="text-muted-foreground mb-4">
-                    {channelsList.length === 0 ? 'No notification channels configured' : 'No channels match your filters'}
+                    {channelsList.length === 0
+                      ? "No notification channels configured"
+                      : "No channels match your filters"}
                   </p>
                   {channelsList.length === 0 ? (
                     <Button onClick={handleCreateChannel}>
@@ -429,7 +519,14 @@ export default function NotificationsPage() {
                       Add Your First Channel
                     </Button>
                   ) : (
-                    <Button variant="outline" onClick={() => { setSearchTerm(''); setFilterType('all'); setFilterStatus('all'); }}>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSearchTerm("");
+                        setFilterType("all");
+                        setFilterStatus("all");
+                      }}
+                    >
                       Clear Filters
                     </Button>
                   )}
@@ -448,7 +545,10 @@ export default function NotificationsPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredChannels.map((channel) => {
-                      const Icon = channelIcons[channel.type as keyof typeof channelIcons] || Bell;
+                      const Icon =
+                        channelIcons[
+                          channel.type as keyof typeof channelIcons
+                        ] || Bell;
                       return (
                         <TableRow key={channel.id}>
                           <TableCell className="font-medium">
@@ -457,38 +557,60 @@ export default function NotificationsPage() {
                               {channel.name}
                             </div>
                           </TableCell>
-                          <TableCell>{getChannelTypeBadge(channel.type)}</TableCell>
-                          <TableCell className="max-w-xs">{getChannelConfigDisplay(channel)}</TableCell>
                           <TableCell>
-                            {channel.status === 'active' ? (
-                              <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border border-emerald-200">
+                            {getChannelTypeBadge(channel.type)}
+                          </TableCell>
+                          <TableCell className="max-w-xs">
+                            {getChannelConfigDisplay(channel)}
+                          </TableCell>
+                          <TableCell>
+                            {channel.status === "active" ? (
+                              <Badge
+                                variant="outline"
+                                className="bg-emerald-50 text-emerald-600 border border-emerald-200"
+                              >
                                 <Power className="mr-1 h-3 w-3" />
                                 Active
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="bg-gray-100 text-gray-500 border border-gray-200">
+                              <Badge
+                                variant="outline"
+                                className="bg-gray-100 text-gray-500 border border-gray-200"
+                              >
                                 <PowerOff className="mr-1 h-3 w-3" />
                                 Inactive
                               </Badge>
                             )}
                           </TableCell>
-                          <TableCell className="max-w-xs truncate">{channel.description || '-'}</TableCell>
+                          <TableCell className="max-w-xs truncate">
+                            {channel.description || "-"}
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <Button size="sm" variant="ghost" onClick={() => handleToggleChannel(channel)}>
-                                {channel.status === 'active' ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleToggleChannel(channel)}
+                              >
+                                {channel.status === "active" ? (
                                   <PowerOff className="h-4 w-4" />
                                 ) : (
                                   <Power className="h-4 w-4" />
                                 )}
                               </Button>
-                              <Button size="sm" variant="ghost" onClick={() => handleEditChannel(channel)}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleEditChannel(channel)}
+                              >
                                 <Edit className="h-4 w-4" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => channel.id && handleDeleteChannel(channel.id)}
+                                onClick={() =>
+                                  channel.id && handleDeleteChannel(channel.id)
+                                }
                                 className="text-red-500 hover:text-red-700"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -514,10 +636,13 @@ export default function NotificationsPage() {
                     <FileText className="h-5 w-5" />
                     Notification Templates
                   </CardTitle>
-                  <CardDescription>Create and manage notification templates for different channels</CardDescription>
+                  <CardDescription>
+                    Create and manage notification templates for different
+                    channels
+                  </CardDescription>
                 </div>
               </div>
-              
+
               {/* 筛选栏 */}
               <div className="flex gap-4 mt-4">
                 <div className="relative flex-1">
@@ -529,7 +654,10 @@ export default function NotificationsPage() {
                     className="pl-10"
                   />
                 </div>
-                <Select value={templateFilterChannel} onValueChange={setTemplateFilterChannel}>
+                <Select
+                  value={templateFilterChannel}
+                  onValueChange={setTemplateFilterChannel}
+                >
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Filter by channel" />
                   </SelectTrigger>
@@ -547,7 +675,9 @@ export default function NotificationsPage() {
                 <div className="flex flex-col items-center justify-center py-12">
                   <FileText className="h-12 w-12 text-muted-foreground mb-4" />
                   <p className="text-muted-foreground mb-4">
-                    {templatesList.length === 0 ? 'No notification templates configured' : 'No templates match your filters'}
+                    {templatesList.length === 0
+                      ? "No notification templates configured"
+                      : "No templates match your filters"}
                   </p>
                   {templatesList.length === 0 ? (
                     <Button onClick={handleCreateTemplate}>
@@ -555,7 +685,13 @@ export default function NotificationsPage() {
                       Create Your First Template
                     </Button>
                   ) : (
-                    <Button variant="outline" onClick={() => { setTemplateSearchTerm(''); setTemplateFilterChannel('all'); }}>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setTemplateSearchTerm("");
+                        setTemplateFilterChannel("all");
+                      }}
+                    >
                       Clear Filters
                     </Button>
                   )}
@@ -573,7 +709,10 @@ export default function NotificationsPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredTemplates.map((template) => {
-                      const Icon = channelIcons[template.channel as keyof typeof channelIcons] || FileText;
+                      const Icon =
+                        channelIcons[
+                          template.channel as keyof typeof channelIcons
+                        ] || FileText;
                       return (
                         <TableRow key={template.id}>
                           <TableCell className="font-medium">
@@ -582,22 +721,35 @@ export default function NotificationsPage() {
                               {template.name}
                             </div>
                           </TableCell>
-                          <TableCell>{getTemplateChannelBadge(template.channel)}</TableCell>
-                          <TableCell className="max-w-xs">
-                            <span className="text-sm truncate block">{template.title}</span>
+                          <TableCell>
+                            {getTemplateChannelBadge(template.channel)}
                           </TableCell>
                           <TableCell className="max-w-xs">
-                            <span className="text-sm truncate block">{template.content}</span>
+                            <span className="text-sm truncate block">
+                              {template.title}
+                            </span>
+                          </TableCell>
+                          <TableCell className="max-w-xs">
+                            <span className="text-sm truncate block">
+                              {template.content}
+                            </span>
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <Button size="sm" variant="ghost" onClick={() => handleEditTemplate(template)}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleEditTemplate(template)}
+                              >
                                 <Edit className="h-4 w-4" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => template.id && handleDeleteTemplate(template.id)}
+                                onClick={() =>
+                                  template.id &&
+                                  handleDeleteTemplate(template.id)
+                                }
                                 className="text-red-500 hover:text-red-700"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -631,14 +783,18 @@ export default function NotificationsPage() {
                   <Send className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div>
-                  <div className="text-base font-medium">No routing rules yet</div>
+                  <div className="text-base font-medium">
+                    No routing rules yet
+                  </div>
                   <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                    Define which events trigger which channels — for example, send pipeline
-                    failures to a Slack channel, or notify owners of production deployments.
+                    Define which events trigger which channels — for example,
+                    send pipeline failures to a Slack channel, or notify owners
+                    of production deployments.
                   </p>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Rules API is not yet available. This tab is reserved for future configuration.
+                  Rules API is not yet available. This tab is reserved for
+                  future configuration.
                 </p>
               </div>
             </CardContent>
@@ -657,10 +813,13 @@ export default function NotificationsPage() {
         open={templateDialogOpen}
         onOpenChange={setTemplateDialogOpen}
         template={editingTemplate}
-        channels={channelsList.map((ch) => ({ id: ch.id || '', name: ch.name, type: ch.type }))}
+        channels={channelsList.map((ch) => ({
+          id: ch.id || "",
+          name: ch.name,
+          type: ch.type,
+        }))}
         onSubmit={handleTemplateSubmit}
       />
     </div>
   );
 }
-

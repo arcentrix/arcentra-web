@@ -8,7 +8,7 @@ import type {
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
   OrganizationListResponse,
-} from './types'
+} from "./types";
 
 /**
  * 获取用户的所有组织
@@ -16,7 +16,7 @@ import type {
  */
 export async function getOrganizations(): Promise<OrganizationListResponse> {
   // TODO: 调用后端 API
-  throw new Error('API not implemented yet')
+  throw new Error("API not implemented yet");
 }
 
 /**
@@ -25,7 +25,7 @@ export async function getOrganizations(): Promise<OrganizationListResponse> {
  */
 export async function getOrganization(_id: string): Promise<Organization> {
   // TODO: 调用后端 API
-  throw new Error('API not implemented yet')
+  throw new Error("API not implemented yet");
 }
 
 /**
@@ -33,10 +33,10 @@ export async function getOrganization(_id: string): Promise<Organization> {
  * TODO: 实现 API 调用
  */
 export async function createOrganization(
-  _data: CreateOrganizationRequest
+  _data: CreateOrganizationRequest,
 ): Promise<Organization> {
   // TODO: 调用后端 API
-  throw new Error('API not implemented yet')
+  throw new Error("API not implemented yet");
 }
 
 /**
@@ -45,10 +45,10 @@ export async function createOrganization(
  */
 export async function updateOrganization(
   _id: string,
-  _data: UpdateOrganizationRequest
+  _data: UpdateOrganizationRequest,
 ): Promise<Organization> {
   // TODO: 调用后端 API
-  throw new Error('API not implemented yet')
+  throw new Error("API not implemented yet");
 }
 
 /**
@@ -57,6 +57,5 @@ export async function updateOrganization(
  */
 export async function deleteOrganization(_id: string): Promise<void> {
   // TODO: 调用后端 API
-  throw new Error('API not implemented yet')
+  throw new Error("API not implemented yet");
 }
-

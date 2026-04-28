@@ -2,8 +2,8 @@
  * Notification Template 对话框组件 - 创建/编辑通知模板
  */
 
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -11,23 +11,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { toast } from '@/lib/toast';
+} from "@/components/ui/select";
+import { toast } from "@/lib/toast";
 
 export interface Template {
   id?: string;
   name: string;
-  channel: 'email' | 'slack' | 'webhook';
+  channel: "email" | "slack" | "webhook";
   title: string;
   content: string;
 }
@@ -49,10 +49,10 @@ export function NotificationTemplateDialog({
 }: NotificationTemplateDialogProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<Template>({
-    name: '',
-    channel: 'email',
-    title: '',
-    content: '',
+    name: "",
+    channel: "email",
+    title: "",
+    content: "",
   });
 
   useEffect(() => {
@@ -60,10 +60,10 @@ export function NotificationTemplateDialog({
       setFormData(template);
     } else if (open) {
       setFormData({
-        name: '',
-        channel: 'email',
-        title: '',
-        content: '',
+        name: "",
+        channel: "email",
+        title: "",
+        content: "",
       });
     }
   }, [template, open]);
@@ -74,11 +74,17 @@ export function NotificationTemplateDialog({
 
     try {
       await onSubmit(formData);
-      toast.success(template ? 'Template updated successfully' : 'Template created successfully');
+      toast.success(
+        template
+          ? "Template updated successfully"
+          : "Template created successfully",
+      );
       onOpenChange(false);
     } catch (error) {
-      toast.error(template ? 'Failed to update template' : 'Failed to create template');
-      console.error('Submit failed:', error);
+      toast.error(
+        template ? "Failed to update template" : "Failed to create template",
+      );
+      console.error("Submit failed:", error);
     } finally {
       setLoading(false);
     }
@@ -88,11 +94,13 @@ export function NotificationTemplateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{template ? 'Edit Template' : 'Create Template'}</DialogTitle>
+          <DialogTitle>
+            {template ? "Edit Template" : "Create Template"}
+          </DialogTitle>
           <DialogDescription>
             {template
-              ? 'Update notification template configuration'
-              : 'Create a new notification template'}
+              ? "Update notification template configuration"
+              : "Create a new notification template"}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -103,7 +111,9 @@ export function NotificationTemplateDialog({
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
                   placeholder="e.g.: Pipeline Success"
                   required
                 />
@@ -113,7 +123,7 @@ export function NotificationTemplateDialog({
                 <Label htmlFor="channel">Channel *</Label>
                 <Select
                   value={formData.channel}
-                  onValueChange={(value: 'email' | 'slack' | 'webhook') =>
+                  onValueChange={(value: "email" | "slack" | "webhook") =>
                     setFormData({ ...formData, channel: value })
                   }
                 >
@@ -122,7 +132,12 @@ export function NotificationTemplateDialog({
                   </SelectTrigger>
                   <SelectContent>
                     {channels
-                      .filter((ch) => ch.type === 'email' || ch.type === 'slack' || ch.type === 'webhook')
+                      .filter(
+                        (ch) =>
+                          ch.type === "email" ||
+                          ch.type === "slack" ||
+                          ch.type === "webhook",
+                      )
                       .map((ch) => (
                         <SelectItem key={ch.id} value={ch.type}>
                           {ch.name}
@@ -138,12 +153,15 @@ export function NotificationTemplateDialog({
               <Input
                 id="title"
                 value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, title: e.target.value })
+                }
                 placeholder="e.g.: Pipeline {{.PipelineName}} completed successfully"
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Use Go template syntax (e.g., {'{{.VariableName}}'}) for variables
+                Use Go template syntax (e.g., {"{{.VariableName}}"}) for
+                variables
               </p>
             </div>
 
@@ -152,22 +170,29 @@ export function NotificationTemplateDialog({
               <Textarea
                 id="content"
                 value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, content: e.target.value })
+                }
                 placeholder="e.g.: Your pipeline {{.PipelineName}} has completed successfully at {{.Timestamp}}."
                 rows={6}
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Use Go template syntax (e.g., {'{{.VariableName}}'}) for variables. Templates are rendered by the backend.
+                Use Go template syntax (e.g., {"{{.VariableName}}"}) for
+                variables. Templates are rendered by the backend.
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
-              {loading ? 'Saving...' : template ? 'Update' : 'Create'}
+              {loading ? "Saving..." : template ? "Update" : "Create"}
             </Button>
           </DialogFooter>
         </form>
@@ -175,4 +200,3 @@ export function NotificationTemplateDialog({
     </Dialog>
   );
 }
-

@@ -2,20 +2,17 @@
  * Settings 配置项 API
  */
 
-import { get, put, dedupeRequest, generateRequestKey } from '../client'
-import type {
-  SettingItem,
-  UpdateSettingRequest,
-} from './types'
+import { get, put, dedupeRequest, generateRequestKey } from "../client";
+import type { SettingItem, UpdateSettingRequest } from "./types";
 
 /**
  * 获取全部配置项（拦截器已经把 detail 解出来）
  * GET /settings → SettingItem[]
  */
 export async function listSettings(): Promise<SettingItem[]> {
-  const url = '/settings'
-  const key = generateRequestKey(url)
-  return dedupeRequest(key, () => get<SettingItem[]>(url))
+  const url = "/settings";
+  const key = generateRequestKey(url);
+  return dedupeRequest(key, () => get<SettingItem[]>(url));
 }
 
 /**
@@ -23,9 +20,9 @@ export async function listSettings(): Promise<SettingItem[]> {
  * GET /settings/:name
  */
 export async function getSetting(name: string): Promise<SettingItem> {
-  const url = `/settings/${encodeURIComponent(name)}`
-  const key = generateRequestKey(url)
-  return dedupeRequest(key, () => get<SettingItem>(url))
+  const url = `/settings/${encodeURIComponent(name)}`;
+  const key = generateRequestKey(url);
+  return dedupeRequest(key, () => get<SettingItem>(url));
 }
 
 /**
@@ -36,5 +33,5 @@ export async function updateSetting(
   name: string,
   data: UpdateSettingRequest,
 ): Promise<SettingItem> {
-  return await put<SettingItem>(`/settings/${encodeURIComponent(name)}`, data)
+  return await put<SettingItem>(`/settings/${encodeURIComponent(name)}`, data);
 }

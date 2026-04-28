@@ -2,6 +2,6 @@
  * AuthToken
  */
 export interface AuthToken {
-  accessToken: string
-  refreshToken: string
+  accessToken: string;
+  refreshToken: string;
 }

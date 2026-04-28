@@ -2,7 +2,7 @@
  * Access 访问控制页面 - 展示所有子菜单卡片
  */
 
-import { Link } from 'react-router-dom';
+import { Link } from "react-router-dom";
 import {
   Shield,
   ChevronRight,
@@ -10,37 +10,37 @@ import {
   UserCog,
   UsersRound,
   Lock,
-} from 'lucide-react';
+} from "lucide-react";
 
 // 子菜单配置
 const accessItems = [
   {
-    title: 'Users',
-    url: '/users',
-    description: 'Manage user accounts and access control',
+    title: "Users",
+    url: "/users",
+    description: "Manage user accounts and access control",
     icon: Users,
-    color: 'text-blue-500',
+    color: "text-blue-500",
   },
   {
-    title: 'Roles',
-    url: '/roles',
-    description: 'Configure user roles and permissions',
+    title: "Roles",
+    url: "/roles",
+    description: "Configure user roles and permissions",
     icon: UserCog,
-    color: 'text-green-500',
+    color: "text-green-500",
   },
   {
-    title: 'Team',
-    url: '#',
-    description: 'Manage your team members and permissions',
+    title: "Team",
+    url: "#",
+    description: "Manage your team members and permissions",
     icon: UsersRound,
-    color: 'text-purple-500',
+    color: "text-purple-500",
   },
   {
-    title: 'Access Control',
-    url: '#',
-    description: 'Configure access control policies and rules',
+    title: "Access Control",
+    url: "#",
+    description: "Configure access control policies and rules",
     icon: Lock,
-    color: 'text-orange-500',
+    color: "text-orange-500",
   },
 ];
 
@@ -84,4 +84,3 @@ export default function AccessPage() {
     </div>
   );
 }
-

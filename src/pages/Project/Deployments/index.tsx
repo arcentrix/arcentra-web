@@ -2,53 +2,78 @@
  * Project Deployments 页面
  */
 
-import { useState, useMemo, useEffect } from 'react'
-import type { FC } from 'react'
-import { Rocket, Search } from 'lucide-react'
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { DataTablePagination } from '@/components/data-table-pagination'
+import { useState, useMemo, useEffect } from "react";
+import type { FC } from "react";
+import { Rocket, Search } from "lucide-react";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { DataTablePagination } from "@/components/data-table-pagination";
 
 const Deployments: FC = () => {
   const [deployments] = useState([
-    { id: '1', name: 'Production Deployment', status: 'success', date: '2024-01-20' },
-    { id: '2', name: 'Staging Deployment', status: 'success', date: '2024-01-19' },
-    { id: '3', name: 'Development Deployment', status: 'running', date: '2024-01-20' },
-    { id: '4', name: 'Test Deployment', status: 'success', date: '2024-01-18' },
-    { id: '5', name: 'QA Deployment', status: 'failed', date: '2024-01-17' },
-    { id: '6', name: 'Preview Deployment', status: 'success', date: '2024-01-16' },
-  ])
-  const [searchTerm, setSearchTerm] = useState('')
-  const [pageNum, setPageNum] = useState(1)
-  const [pageSize] = useState(5)
+    {
+      id: "1",
+      name: "Production Deployment",
+      status: "success",
+      date: "2024-01-20",
+    },
+    {
+      id: "2",
+      name: "Staging Deployment",
+      status: "success",
+      date: "2024-01-19",
+    },
+    {
+      id: "3",
+      name: "Development Deployment",
+      status: "running",
+      date: "2024-01-20",
+    },
+    { id: "4", name: "Test Deployment", status: "success", date: "2024-01-18" },
+    { id: "5", name: "QA Deployment", status: "failed", date: "2024-01-17" },
+    {
+      id: "6",
+      name: "Preview Deployment",
+      status: "success",
+      date: "2024-01-16",
+    },
+  ]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [pageNum, setPageNum] = useState(1);
+  const [pageSize] = useState(5);
 
   // 筛选逻辑
   const filteredDeployments = useMemo(() => {
     return deployments.filter((deployment) => {
       if (searchTerm) {
-        const term = searchTerm.toLowerCase()
+        const term = searchTerm.toLowerCase();
         return (
           deployment.name.toLowerCase().includes(term) ||
           deployment.status.toLowerCase().includes(term) ||
           deployment.date.includes(term)
-        )
+        );
       }
-      return true
-    })
-  }, [deployments, searchTerm])
+      return true;
+    });
+  }, [deployments, searchTerm]);
 
   // 分页计算
-  const totalPages = Math.ceil(filteredDeployments.length / pageSize)
+  const totalPages = Math.ceil(filteredDeployments.length / pageSize);
   const paginatedDeployments = useMemo(() => {
-    const startIndex = (pageNum - 1) * pageSize
-    return filteredDeployments.slice(startIndex, startIndex + pageSize)
-  }, [filteredDeployments, pageNum, pageSize])
+    const startIndex = (pageNum - 1) * pageSize;
+    return filteredDeployments.slice(startIndex, startIndex + pageSize);
+  }, [filteredDeployments, pageNum, pageSize]);
 
   // 当搜索条件变化时，重置到第一页
   useEffect(() => {
-    setPageNum(1)
-  }, [searchTerm])
+    setPageNum(1);
+  }, [searchTerm]);
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
@@ -83,18 +108,18 @@ const Deployments: FC = () => {
                 <CardTitle>{deployment.name}</CardTitle>
                 <Badge
                   variant={
-                    deployment.status === 'success'
-                      ? 'default'
-                      : deployment.status === 'running'
-                      ? 'secondary'
-                      : 'destructive'
+                    deployment.status === "success"
+                      ? "default"
+                      : deployment.status === "running"
+                        ? "secondary"
+                        : "destructive"
                   }
                   className={
-                    deployment.status === 'success'
-                      ? 'bg-green-500'
-                      : deployment.status === 'running'
-                      ? 'bg-blue-500'
-                      : ''
+                    deployment.status === "success"
+                      ? "bg-green-500"
+                      : deployment.status === "running"
+                        ? "bg-blue-500"
+                        : ""
                   }
                 >
                   {deployment.status}
@@ -118,7 +143,7 @@ const Deployments: FC = () => {
         </div>
       )}
     </div>
-  )
-}
+  );
+};
 
-export default Deployments
+export default Deployments;

@@ -2,9 +2,9 @@
  * Share Dialog 组件 - 分享对话框
  */
 
-import { useState } from 'react'
-import { Copy, Check } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useState } from "react";
+import { Copy, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -13,41 +13,46 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { toast } from '@/lib/toast'
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "@/lib/toast";
 
 interface ShareDialogProps {
-  workspaceName: string
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
-  children?: React.ReactNode
+  workspaceName: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children?: React.ReactNode;
 }
 
-export function ShareDialog({ workspaceName, open: controlledOpen, onOpenChange, children }: ShareDialogProps) {
-  const [internalOpen, setInternalOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  
-  const isControlled = controlledOpen !== undefined
-  const isOpen = isControlled ? controlledOpen : internalOpen
-  const setIsOpen = isControlled ? onOpenChange || (() => {}) : setInternalOpen
-  
+export function ShareDialog({
+  workspaceName,
+  open: controlledOpen,
+  onOpenChange,
+  children,
+}: ShareDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const isControlled = controlledOpen !== undefined;
+  const isOpen = isControlled ? controlledOpen : internalOpen;
+  const setIsOpen = isControlled ? onOpenChange || (() => {}) : setInternalOpen;
+
   // 生成分享链接（实际应该从后端获取）
-  const shareUrl = `${window.location.origin}/workspace/${encodeURIComponent(workspaceName)}`
+  const shareUrl = `${window.location.origin}/workspace/${encodeURIComponent(workspaceName)}`;
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(shareUrl)
-      setCopied(true)
-      toast.success('Link copied to clipboard')
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      toast.success("Link copied to clipboard");
       setTimeout(() => {
-        setCopied(false)
-      }, 2000)
+        setCopied(false);
+      }, 2000);
     } catch (error) {
-      toast.error('Failed to copy link')
+      toast.error("Failed to copy link");
     }
-  }
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -91,6 +96,5 @@ export function ShareDialog({ workspaceName, open: controlledOpen, onOpenChange,
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
-

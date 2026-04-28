@@ -1,10 +1,10 @@
 /**
- * Agent 创建/编辑对话框组件
+ * Agent 编辑对话框组件
  */
 
-import { useState, useEffect } from 'react'
-import { Save, X, Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useState, useEffect } from "react";
+import { Save, X, Plus, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,34 +12,41 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { toast } from '@/lib/toast'
-import type { Agent, CreateAgentRequest, UpdateAgentRequest, AgentStatus } from '@/api/agent/types'
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "@/lib/toast";
+import type { Agent, UpdateAgentRequest, AgentStatus } from "@/api/agent/types";
 
 interface AgentDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  agent?: Agent | null
-  onSubmit: (data: CreateAgentRequest | UpdateAgentRequest) => Promise<void>
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  agent: Agent | null;
+  onSubmit: (data: UpdateAgentRequest) => Promise<void>;
 }
 
-export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialogProps) {
-  const [loading, setLoading] = useState(false)
+export function AgentDialog({
+  open,
+  onOpenChange,
+  agent,
+  onSubmit,
+}: AgentDialogProps) {
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    agentName: '',
-    address: '',
-    port: '',
-    os: 'Linux',
-    arch: 'amd64',
-    version: '',
+    agentName: "",
+    address: "",
+    port: "",
+    os: "Linux",
+    arch: "amd64",
+    version: "",
     status: 1 as AgentStatus,
     labels: {} as Record<string, string>,
-    metrics: '/metrics',
+    metrics: "/metrics",
     isEnabled: true,
-  })
-  const [labelPairs, setLabelPairs] = useState<Array<{ key: string; value: string }>>([])
+  });
+  const [labelPairs, setLabelPairs] = useState<
+    Array<{ key: string; value: string }>
+  >([]);
 
   useEffect(() => {
     if (agent && open) {
@@ -54,79 +61,74 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
         labels: agent.labels || {},
         metrics: agent.metrics,
         isEnabled: agent.isEnabled === 1,
-      })
+      });
       // 将 labels 对象转换为数组形式
-      const labels = agent.labels || {}
+      const labels = agent.labels || {};
       setLabelPairs(
         Object.keys(labels).length > 0
           ? Object.entries(labels).map(([key, value]) => ({ key, value }))
-          : [{ key: '', value: '' }]
-      )
+          : [{ key: "", value: "" }],
+      );
     } else if (open && !agent) {
       setFormData({
-        agentName: '',
-        address: '',
-        port: '',
-        os: 'Linux',
-        arch: 'amd64',
-        version: '',
+        agentName: "",
+        address: "",
+        port: "",
+        os: "Linux",
+        arch: "amd64",
+        version: "",
         status: 1,
         labels: {},
-        metrics: '/metrics',
+        metrics: "/metrics",
         isEnabled: true,
-      })
-      setLabelPairs([{ key: '', value: '' }])
+      });
+      setLabelPairs([{ key: "", value: "" }]);
     }
-  }, [agent, open])
+  }, [agent, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
+    e.preventDefault();
+
+    if (!agent) {
+      toast.error("No agent selected");
+      return;
+    }
+
+    setLoading(true);
 
     try {
       // 将 labelPairs 转换为 labels 对象
-      const labels: Record<string, string> = {}
+      const labels: Record<string, string> = {};
       labelPairs.forEach((pair) => {
         if (pair.key.trim()) {
-          labels[pair.key.trim()] = pair.value.trim()
+          labels[pair.key.trim()] = pair.value.trim();
         }
-      })
+      });
 
-      if (agent) {
-        const updateData: UpdateAgentRequest = {
-          agentName: formData.agentName,
-          labels,
-        }
-        await onSubmit(updateData)
-        toast.success('Agent updated successfully')
-        onOpenChange(false)
-      } else {
-        // 创建 Agent - 只需要 name 和 labels
-        const createData: CreateAgentRequest = {
-          agentName: formData.agentName,
-          labels,
-        }
-        await onSubmit(createData)
-        toast.success('Agent created successfully')
-        onOpenChange(false)
-      }
+      const updateData: UpdateAgentRequest = {
+        agentName: formData.agentName,
+        labels,
+      };
+      await onSubmit(updateData);
+      toast.success("Agent updated successfully");
+      onOpenChange(false);
     } catch (error: any) {
-      toast.error(error.message || (agent ? 'Failed to update agent' : 'Failed to create agent'))
-      console.error('Submit failed:', error)
+      toast.error(error.message || "Failed to update agent");
+      console.error("Submit failed:", error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{agent ? 'Edit Agent' : 'Create Agent'}</DialogTitle>
-            <DialogDescription>
-              {agent ? 'Update agent information and configuration' : 'Create a new agent node'}
-            </DialogDescription>
-          </DialogHeader>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit Agent</DialogTitle>
+          <DialogDescription>
+            Update agent information and configuration
+          </DialogDescription>
+        </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -134,7 +136,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
             <Input
               id="agentName"
               value={formData.agentName}
-              onChange={(e) => setFormData({ ...formData, agentName: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, agentName: e.target.value })
+              }
               placeholder="e.g.: agent-001"
               required
             />
@@ -147,7 +151,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setLabelPairs([...labelPairs, { key: '', value: '' }])}
+                onClick={() =>
+                  setLabelPairs([...labelPairs, { key: "", value: "" }])
+                }
               >
                 <Plus className="h-4 w-4 mr-1" />
                 Add Label
@@ -161,9 +167,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                       placeholder="Key"
                       value={pair.key}
                       onChange={(e) => {
-                        const newPairs = [...labelPairs]
-                        newPairs[index].key = e.target.value
-                        setLabelPairs(newPairs)
+                        const newPairs = [...labelPairs];
+                        newPairs[index].key = e.target.value;
+                        setLabelPairs(newPairs);
                       }}
                     />
                   </div>
@@ -172,9 +178,9 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                       placeholder="Value"
                       value={pair.value}
                       onChange={(e) => {
-                        const newPairs = [...labelPairs]
-                        newPairs[index].value = e.target.value
-                        setLabelPairs(newPairs)
+                        const newPairs = [...labelPairs];
+                        newPairs[index].value = e.target.value;
+                        setLabelPairs(newPairs);
                       }}
                     />
                   </div>
@@ -183,11 +189,11 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
                     variant="ghost"
                     size="icon"
                     onClick={() => {
-                      const newPairs = labelPairs.filter((_, i) => i !== index)
+                      const newPairs = labelPairs.filter((_, i) => i !== index);
                       if (newPairs.length === 0) {
-                        newPairs.push({ key: '', value: '' })
+                        newPairs.push({ key: "", value: "" });
                       }
-                      setLabelPairs(newPairs)
+                      setLabelPairs(newPairs);
                     }}
                     className="mt-0"
                   >
@@ -202,18 +208,22 @@ export function AgentDialog({ open, onOpenChange, agent, onSubmit }: AgentDialog
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={loading}
+            >
               <X className="h-4 w-4 mr-1" />
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
               <Save className="h-4 w-4 mr-1" />
-              {loading ? 'Saving...' : 'Save'}
+              {loading ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
-

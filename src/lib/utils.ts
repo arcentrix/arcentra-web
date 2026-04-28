@@ -1,8 +1,8 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
 
 /**
@@ -11,12 +11,12 @@ export function cn(...inputs: ClassValue[]) {
  * @returns cookie 值，如果不存在则返回 null
  */
 export function getCookie(name: string): string | null {
-  const value = `; ${document.cookie}`
-  const parts = value.split(`; ${name}=`)
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
   if (parts.length === 2) {
-    return parts.pop()?.split(';').shift() || null
+    return parts.pop()?.split(";").shift() || null;
   }
-  return null
+  return null;
 }
 
 /**
@@ -24,14 +24,14 @@ export function getCookie(name: string): string | null {
  * @returns 包含所有 cookie 键值对的对象
  */
 export function getAllCookies(): Record<string, string> {
-  const cookies: Record<string, string> = {}
+  const cookies: Record<string, string> = {};
   if (document.cookie) {
-    document.cookie.split(';').forEach((cookie) => {
-      const [name, ...rest] = cookie.trim().split('=')
+    document.cookie.split(";").forEach((cookie) => {
+      const [name, ...rest] = cookie.trim().split("=");
       if (name) {
-        cookies[name] = rest.join('=')
+        cookies[name] = rest.join("=");
       }
-    })
+    });
   }
-  return cookies
+  return cookies;
 }

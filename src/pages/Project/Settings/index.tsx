@@ -2,17 +2,23 @@
  * Project Settings 页面
  */
 
-import type { FC } from 'react'
-import { useParams } from 'react-router-dom'
-import { Settings2 } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
+import type { FC } from "react";
+import { useParams } from "react-router-dom";
+import { Settings2 } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
 const ProjectSettings: FC = () => {
-  const { projectId: _projectId } = useParams<{ projectId: string }>()
-  
+  const { projectId: _projectId } = useParams<{ projectId: string }>();
+
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
       <div className="flex items-center justify-between">
@@ -39,13 +45,16 @@ const ProjectSettings: FC = () => {
           </div>
           <div className="space-y-2">
             <Label htmlFor="project-description">Description</Label>
-            <Input id="project-description" placeholder="Enter project description" />
+            <Input
+              id="project-description"
+              placeholder="Enter project description"
+            />
           </div>
           <Button>Save Changes</Button>
         </CardContent>
       </Card>
     </div>
-  )
-}
+  );
+};
 
-export default ProjectSettings
+export default ProjectSettings;

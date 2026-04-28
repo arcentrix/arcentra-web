@@ -2,8 +2,8 @@
  * Notification Channel 对话框组件 - 创建/编辑通知渠道
  */
 
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -11,23 +11,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { toast } from '@/lib/toast';
+} from "@/components/ui/select";
+import { toast } from "@/lib/toast";
 
 export interface Channel {
   id?: string;
   name: string;
-  type: 'email' | 'slack' | 'webhook';
-  status: 'active' | 'inactive';
+  type: "email" | "slack" | "webhook";
+  status: "active" | "inactive";
   description: string;
   config: {
     smtp?: string;
@@ -52,10 +52,10 @@ export function NotificationChannelDialog({
 }: NotificationChannelDialogProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<Channel>({
-    name: '',
-    type: 'email',
-    status: 'active',
-    description: '',
+    name: "",
+    type: "email",
+    status: "active",
+    description: "",
     config: {},
   });
 
@@ -64,10 +64,10 @@ export function NotificationChannelDialog({
       setFormData(channel);
     } else if (open) {
       setFormData({
-        name: '',
-        type: 'email',
-        status: 'active',
-        description: '',
+        name: "",
+        type: "email",
+        status: "active",
+        description: "",
         config: {},
       });
     }
@@ -79,11 +79,17 @@ export function NotificationChannelDialog({
 
     try {
       await onSubmit(formData);
-      toast.success(channel ? 'Channel updated successfully' : 'Channel created successfully');
+      toast.success(
+        channel
+          ? "Channel updated successfully"
+          : "Channel created successfully",
+      );
       onOpenChange(false);
     } catch (error) {
-      toast.error(channel ? 'Failed to update channel' : 'Failed to create channel');
-      console.error('Submit failed:', error);
+      toast.error(
+        channel ? "Failed to update channel" : "Failed to create channel",
+      );
+      console.error("Submit failed:", error);
     } finally {
       setLoading(false);
     }
@@ -91,14 +97,14 @@ export function NotificationChannelDialog({
 
   const renderConfigFields = () => {
     switch (formData.type) {
-      case 'email':
+      case "email":
         return (
           <>
             <div className="space-y-2">
               <Label htmlFor="smtp">SMTP Server *</Label>
               <Input
                 id="smtp"
-                value={formData.config.smtp || ''}
+                value={formData.config.smtp || ""}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
@@ -114,11 +120,14 @@ export function NotificationChannelDialog({
               <Input
                 id="port"
                 type="number"
-                value={formData.config.port || ''}
+                value={formData.config.port || ""}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    config: { ...formData.config, port: parseInt(e.target.value) || undefined },
+                    config: {
+                      ...formData.config,
+                      port: parseInt(e.target.value) || undefined,
+                    },
                   })
                 }
                 placeholder="e.g.: 587"
@@ -127,14 +136,14 @@ export function NotificationChannelDialog({
             </div>
           </>
         );
-      case 'slack':
+      case "slack":
         return (
           <div className="space-y-2">
             <Label htmlFor="webhook">Webhook URL *</Label>
             <Input
               id="webhook"
               type="url"
-              value={formData.config.webhook || ''}
+              value={formData.config.webhook || ""}
               onChange={(e) =>
                 setFormData({
                   ...formData,
@@ -146,14 +155,14 @@ export function NotificationChannelDialog({
             />
           </div>
         );
-      case 'webhook':
+      case "webhook":
         return (
           <div className="space-y-2">
             <Label htmlFor="url">Webhook URL *</Label>
             <Input
               id="url"
               type="url"
-              value={formData.config.url || ''}
+              value={formData.config.url || ""}
               onChange={(e) =>
                 setFormData({
                   ...formData,
@@ -174,11 +183,13 @@ export function NotificationChannelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{channel ? 'Edit Channel' : 'Create Channel'}</DialogTitle>
+          <DialogTitle>
+            {channel ? "Edit Channel" : "Create Channel"}
+          </DialogTitle>
           <DialogDescription>
             {channel
-              ? 'Update notification channel configuration'
-              : 'Create a new notification channel'}
+              ? "Update notification channel configuration"
+              : "Create a new notification channel"}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -188,7 +199,9 @@ export function NotificationChannelDialog({
               <Input
                 id="name"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
                 placeholder="e.g.: Email Channel"
                 required
               />
@@ -199,7 +212,9 @@ export function NotificationChannelDialog({
               <Input
                 id="description"
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
                 placeholder="Brief description of this channel"
               />
             </div>
@@ -209,7 +224,7 @@ export function NotificationChannelDialog({
                 <Label htmlFor="type">Channel Type *</Label>
                 <Select
                   value={formData.type}
-                  onValueChange={(value: 'email' | 'slack' | 'webhook') =>
+                  onValueChange={(value: "email" | "slack" | "webhook") =>
                     setFormData({
                       ...formData,
                       type: value,
@@ -232,7 +247,7 @@ export function NotificationChannelDialog({
                 <Label htmlFor="status">Status *</Label>
                 <Select
                   value={formData.status}
-                  onValueChange={(value: 'active' | 'inactive') =>
+                  onValueChange={(value: "active" | "inactive") =>
                     setFormData({ ...formData, status: value })
                   }
                 >
@@ -253,11 +268,15 @@ export function NotificationChannelDialog({
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
-              {loading ? 'Saving...' : channel ? 'Update' : 'Create'}
+              {loading ? "Saving..." : channel ? "Update" : "Create"}
             </Button>
           </DialogFooter>
         </form>
@@ -265,4 +284,3 @@ export function NotificationChannelDialog({
     </Dialog>
   );
 }
-

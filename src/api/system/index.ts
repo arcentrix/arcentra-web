@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from "axios";
 
 // 插件版本信息
 export interface PluginVersion {
@@ -20,10 +20,10 @@ export interface VersionInfo {
 
 // 创建独立的 axios 实例用于调用系统接口
 const systemClient = axios.create({
-  baseURL: '', // 使用空 baseURL，直接使用完整路径
+  baseURL: "", // 使用空 baseURL，直接使用完整路径
   timeout: 10000,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
@@ -39,7 +39,8 @@ export async function getVersionInfo(): Promise<VersionInfo> {
   }
 
   // 创建新的请求
-  const requestPromise = systemClient.get<any>('/api/v1/version')
+  const requestPromise = systemClient
+    .get<any>("/api/v1/version")
     .then((response) => {
       // 请求完成后，清除 pending 状态
       pendingVersionRequest = null;
@@ -60,4 +61,3 @@ export async function getVersionInfo(): Promise<VersionInfo> {
   pendingVersionRequest = requestPromise;
   return requestPromise;
 }
-

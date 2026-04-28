@@ -2,53 +2,79 @@
  * Project Secrets 页面
  */
 
-import { useState, useMemo, useEffect } from 'react'
-import type { FC } from 'react'
-import { Key, Plus, Search } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { DataTablePagination } from '@/components/data-table-pagination'
+import { useState, useMemo, useEffect } from "react";
+import type { FC } from "react";
+import { Key, Plus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { DataTablePagination } from "@/components/data-table-pagination";
 
 const Secrets: FC = () => {
   const [secrets] = useState([
-    { name: 'API_KEY', description: 'Main API key', lastUpdated: '2024-01-15' },
-    { name: 'DATABASE_URL', description: 'Database connection string', lastUpdated: '2024-01-10' },
-    { name: 'SECRET_TOKEN', description: 'Authentication token', lastUpdated: '2024-01-20' },
-    { name: 'AWS_ACCESS_KEY', description: 'AWS access key', lastUpdated: '2024-01-18' },
-    { name: 'GITHUB_TOKEN', description: 'GitHub access token', lastUpdated: '2024-01-12' },
-    { name: 'SLACK_WEBHOOK', description: 'Slack webhook URL', lastUpdated: '2024-01-08' },
-  ])
-  const [searchTerm, setSearchTerm] = useState('')
-  const [pageNum, setPageNum] = useState(1)
-  const [pageSize] = useState(6)
+    { name: "API_KEY", description: "Main API key", lastUpdated: "2024-01-15" },
+    {
+      name: "DATABASE_URL",
+      description: "Database connection string",
+      lastUpdated: "2024-01-10",
+    },
+    {
+      name: "SECRET_TOKEN",
+      description: "Authentication token",
+      lastUpdated: "2024-01-20",
+    },
+    {
+      name: "AWS_ACCESS_KEY",
+      description: "AWS access key",
+      lastUpdated: "2024-01-18",
+    },
+    {
+      name: "GITHUB_TOKEN",
+      description: "GitHub access token",
+      lastUpdated: "2024-01-12",
+    },
+    {
+      name: "SLACK_WEBHOOK",
+      description: "Slack webhook URL",
+      lastUpdated: "2024-01-08",
+    },
+  ]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [pageNum, setPageNum] = useState(1);
+  const [pageSize] = useState(6);
 
   // 筛选逻辑
   const filteredSecrets = useMemo(() => {
     return secrets.filter((secret) => {
       if (searchTerm) {
-        const term = searchTerm.toLowerCase()
+        const term = searchTerm.toLowerCase();
         return (
           secret.name.toLowerCase().includes(term) ||
           secret.description.toLowerCase().includes(term) ||
           secret.lastUpdated.includes(term)
-        )
+        );
       }
-      return true
-    })
-  }, [secrets, searchTerm])
+      return true;
+    });
+  }, [secrets, searchTerm]);
 
   // 分页计算
-  const totalPages = Math.ceil(filteredSecrets.length / pageSize)
+  const totalPages = Math.ceil(filteredSecrets.length / pageSize);
   const paginatedSecrets = useMemo(() => {
-    const startIndex = (pageNum - 1) * pageSize
-    return filteredSecrets.slice(startIndex, startIndex + pageSize)
-  }, [filteredSecrets, pageNum, pageSize])
+    const startIndex = (pageNum - 1) * pageSize;
+    return filteredSecrets.slice(startIndex, startIndex + pageSize);
+  }, [filteredSecrets, pageNum, pageSize]);
 
   // 当搜索条件变化时，重置到第一页
   useEffect(() => {
-    setPageNum(1)
-  }, [searchTerm])
+    setPageNum(1);
+  }, [searchTerm]);
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
@@ -110,7 +136,7 @@ const Secrets: FC = () => {
         </div>
       )}
     </div>
-  )
-}
+  );
+};
 
-export default Secrets
+export default Secrets;

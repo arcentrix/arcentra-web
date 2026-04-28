@@ -6,15 +6,15 @@
  * PUT /settings/:name body { value }
  */
 
-export type SettingValue = Record<string, unknown>
+export type SettingValue = Record<string, unknown>;
 
 export interface SettingItem {
   /** 配置项唯一标识，同时也是 PUT URL 的 path 参数 */
-  name: string
+  name: string;
   /** 配置项实际数据，结构因 name 而异 */
-  value: SettingValue
+  value: SettingValue;
 }
 
 export interface UpdateSettingRequest {
-  value: SettingValue
+  value: SettingValue;
 }

@@ -1,11 +1,13 @@
 export function isDev() {
-  return import.meta.env.DEV
+  return import.meta.env.DEV;
 }
 
 export function isProd() {
-  return import.meta.env.PROD
+  return import.meta.env.PROD;
 }
 
 export function isMobile() {
-  return /(?:iPad)|(?:iPhone)|(?:iPod)|(?:android)|(?:webOS)/i.test(navigator.userAgent)
+  return /(?:iPad)|(?:iPhone)|(?:iPod)|(?:android)|(?:webOS)/i.test(
+    navigator.userAgent,
+  );
 }

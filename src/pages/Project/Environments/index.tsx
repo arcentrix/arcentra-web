@@ -2,53 +2,59 @@
  * Project Environments 页面
  */
 
-import { useState, useMemo, useEffect } from 'react'
-import type { FC } from 'react'
-import { Globe, Search } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { DataTablePagination } from '@/components/data-table-pagination'
+import { useState, useMemo, useEffect } from "react";
+import type { FC } from "react";
+import { Globe, Search } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { DataTablePagination } from "@/components/data-table-pagination";
 
 const Environments: FC = () => {
   const [environments] = useState([
-    { name: 'Production', status: 'active', url: 'https://prod.example.com' },
-    { name: 'Staging', status: 'active', url: 'https://staging.example.com' },
-    { name: 'Development', status: 'active', url: 'https://dev.example.com' },
-    { name: 'Testing', status: 'active', url: 'https://test.example.com' },
-    { name: 'QA', status: 'inactive', url: 'https://qa.example.com' },
-    { name: 'Preview', status: 'active', url: 'https://preview.example.com' },
-  ])
-  const [searchTerm, setSearchTerm] = useState('')
-  const [pageNum, setPageNum] = useState(1)
-  const [pageSize] = useState(6)
+    { name: "Production", status: "active", url: "https://prod.example.com" },
+    { name: "Staging", status: "active", url: "https://staging.example.com" },
+    { name: "Development", status: "active", url: "https://dev.example.com" },
+    { name: "Testing", status: "active", url: "https://test.example.com" },
+    { name: "QA", status: "inactive", url: "https://qa.example.com" },
+    { name: "Preview", status: "active", url: "https://preview.example.com" },
+  ]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [pageNum, setPageNum] = useState(1);
+  const [pageSize] = useState(6);
 
   // 筛选逻辑
   const filteredEnvironments = useMemo(() => {
     return environments.filter((env) => {
       if (searchTerm) {
-        const term = searchTerm.toLowerCase()
+        const term = searchTerm.toLowerCase();
         return (
           env.name.toLowerCase().includes(term) ||
           env.url.toLowerCase().includes(term) ||
           env.status.toLowerCase().includes(term)
-        )
+        );
       }
-      return true
-    })
-  }, [environments, searchTerm])
+      return true;
+    });
+  }, [environments, searchTerm]);
 
   // 分页计算
-  const totalPages = Math.ceil(filteredEnvironments.length / pageSize)
+  const totalPages = Math.ceil(filteredEnvironments.length / pageSize);
   const paginatedEnvironments = useMemo(() => {
-    const startIndex = (pageNum - 1) * pageSize
-    return filteredEnvironments.slice(startIndex, startIndex + pageSize)
-  }, [filteredEnvironments, pageNum, pageSize])
+    const startIndex = (pageNum - 1) * pageSize;
+    return filteredEnvironments.slice(startIndex, startIndex + pageSize);
+  }, [filteredEnvironments, pageNum, pageSize]);
 
   // 当搜索条件变化时，重置到第一页
   useEffect(() => {
-    setPageNum(1)
-  }, [searchTerm])
+    setPageNum(1);
+  }, [searchTerm]);
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
@@ -86,7 +92,12 @@ const Environments: FC = () => {
               <CardDescription>{env.url}</CardDescription>
             </CardHeader>
             <CardContent>
-              <Badge variant="default" className={env.status === 'active' ? 'bg-green-500' : 'bg-gray-500'}>
+              <Badge
+                variant="default"
+                className={
+                  env.status === "active" ? "bg-green-500" : "bg-gray-500"
+                }
+              >
                 {env.status}
               </Badge>
             </CardContent>
@@ -106,7 +117,7 @@ const Environments: FC = () => {
         </div>
       )}
     </div>
-  )
-}
+  );
+};
 
-export default Environments
+export default Environments;
