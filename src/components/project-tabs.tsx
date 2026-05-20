@@ -1,15 +1,23 @@
+/**
+ * ProjectTabs — 项目详情子标签条。
+ *
+ * 路由机制完全保留（Link-based，pathname 匹配）；
+ * 视觉按 Engineering Blueprint inset-shadow pill 样式重做，
+ * 并支持 count 角标。
+ */
+
 import { Link } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TABS = [
-  { value: "overview", label: "Overview", match: "" },
-  { value: "pipelines", label: "Pipelines", match: "/pipelines" },
-  { value: "deployments", label: "Deployments", match: "/deployments" },
-  { value: "artifacts", label: "Artifacts", match: "/artifacts" },
-  { value: "environments", label: "Environments", match: "/environments" },
-  { value: "secrets", label: "Secrets", match: "/secrets" },
-  { value: "members", label: "Members", match: "/members" },
-  { value: "settings", label: "Settings", match: "/settings" },
+  { value: "overview",      label: "Overview",      match: "",              count: undefined },
+  { value: "pipelines",     label: "Pipelines",     match: "/pipelines",    count: 12 },
+  { value: "deployments",   label: "Deployments",   match: "/deployments",  count: 47 },
+  { value: "artifacts",     label: "Artifacts",     match: "/artifacts",    count: 318 },
+  { value: "environments",  label: "Environments",  match: "/environments", count: 3 },
+  { value: "secrets",       label: "Secrets",       match: "/secrets",      count: 14 },
+  { value: "members",       label: "Members",       match: "/members",      count: 11 },
+  { value: "settings",      label: "Settings",      match: "/settings",     count: undefined },
 ] as const;
 
 export function ProjectTabs({
@@ -34,12 +42,30 @@ export function ProjectTabs({
 
   return (
     <Tabs value={active} className="w-full">
-      <TabsList>
-        {TABS.map((tab) => (
-          <TabsTrigger key={tab.value} value={tab.value} asChild>
-            <Link to={`${base}${tab.match}`}>{tab.label}</Link>
-          </TabsTrigger>
-        ))}
+      <TabsList className="h-auto flex-wrap rounded-[10px] border bg-bg-elevated p-1">
+        {TABS.map((tab) => {
+          const isActive = tab.value === active;
+          return (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              asChild
+              className="h-7 gap-2 text-[13px] text-fg-muted data-[state=active]:text-foreground data-[state=active]:shadow-[inset_0_0_0_1px_var(--border-strong)]"
+            >
+              <Link to={`${base}${tab.match}`}>
+                {tab.label}
+                {tab.count != null && (
+                  <span
+                    className="font-mono text-[11px] tabular-nums"
+                    style={{ color: isActive ? "var(--fg-muted)" : "var(--fg-subtle)" }}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </Link>
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
     </Tabs>
   );

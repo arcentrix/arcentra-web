@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { Navigate } from "react-router-dom";
 import {
   Plus,
   Edit,
   Trash2,
   Shield,
   Search,
-  Power,
-  PowerOff,
   Crown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +38,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { RoleConfigDialog } from "@/components/role-config-dialog";
 import { DataTablePagination } from "@/components/data-table-pagination";
 import { toast } from "@/lib/toast";
@@ -49,7 +49,12 @@ import type {
 } from "@/api/role/types";
 import { Apis } from "@/api";
 
-export default function RolesPage() {
+export function RolesPanel({
+  headless = false,
+}: {
+  /** 嵌入 Secure 标签时启用：去掉页头与外层留白。 */
+  headless?: boolean;
+}) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -342,21 +347,36 @@ export default function RolesPage() {
 
   return (
     <>
-      <section className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight">
-              Role Management
-            </h2>
-            <p className="text-muted-foreground mt-2">
-              Manage roles and their permissions
-            </p>
+      <section
+        className={
+          headless
+            ? "flex flex-col gap-6"
+            : "flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8"
+        }
+      >
+        {headless ? (
+          <div className="flex justify-end">
+            <Button onClick={handleCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Role
+            </Button>
           </div>
-          <Button onClick={handleCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Role
-          </Button>
-        </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">
+                Role Management
+              </h2>
+              <p className="text-muted-foreground mt-2">
+                Manage roles and their permissions
+              </p>
+            </div>
+            <Button onClick={handleCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Role
+            </Button>
+          </div>
+        )}
 
         <Card>
           <CardHeader>
@@ -496,23 +516,12 @@ export default function RolesPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {role.isEnabled === 1 ? (
-                          <Badge
-                            variant="outline"
-                            className="bg-emerald-50 text-emerald-600 border border-emerald-200"
-                          >
-                            <Power className="mr-1 h-3 w-3" />
-                            Enabled
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="bg-gray-100 text-gray-500 border border-gray-200"
-                          >
-                            <PowerOff className="mr-1 h-3 w-3" />
-                            Disabled
-                          </Badge>
-                        )}
+                        <Switch
+                          checked={role.isEnabled === 1}
+                          onCheckedChange={() => handleToggleStatus(role)}
+                          disabled={role.isBuiltin === 1}
+                          aria-label={`Toggle ${role.displayName || role.name}`}
+                        />
                       </TableCell>
                       <TableCell>
                         {role.permissions && role.permissions.length > 0 ? (
@@ -554,18 +563,6 @@ export default function RolesPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleToggleStatus(role)}
-                            disabled={role.isBuiltin === 1}
-                          >
-                            {role.isEnabled === 1 ? (
-                              <PowerOff className="h-4 w-4" />
-                            ) : (
-                              <Power className="h-4 w-4" />
-                            )}
-                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"
@@ -624,4 +621,9 @@ export default function RolesPage() {
       />
     </>
   );
+}
+
+/** `/roles` 路由：内容已并入 Secure 的 Roles 标签，独立路由重定向过去。 */
+export default function RolesRoute() {
+  return <Navigate to="/secure?tab=roles" replace />;
 }

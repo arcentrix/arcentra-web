@@ -11,7 +11,6 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldSeparator,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -25,7 +24,7 @@ import {
 import { Apis } from "@/api";
 import userStore from "@/store/user";
 import authStore from "@/store/auth";
-import { APP_LOGO } from "@/constants/assets";
+import { LogoLockup } from "@/components/logo-lockup";
 import type { IdentityProvider } from "@/api/auth/types";
 
 const SUPPORTED_PROVIDER_TYPES = new Set(["oauth", "oidc", "ldap"]);
@@ -97,9 +96,12 @@ export function LoginForm({
   const applyLoginSession = (
     response: Awaited<ReturnType<typeof Apis.auth.login>>,
   ) => {
+    const normalizedRole = Array.isArray(response.role)
+      ? ((response.role[0] as any)?.roleId ?? "user")
+      : response.role;
     userStore.updateState((state) => {
       state.userinfo = response.userinfo;
-      state.role = response.role;
+      state.role = normalizedRole as any;
     });
     authStore.setTokens(response.token);
     navigate("/");
@@ -200,20 +202,20 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <form onSubmit={onSubmit}>
         <FieldGroup className="space-y-5">
-          <div className="flex flex-col items-center gap-4 pb-2 text-center">
-            <Link to="/" className="flex items-center font-medium">
-              <img
-                alt="Arcentra"
-                src={APP_LOGO}
-                className="h-7 w-auto dark:invert"
-              />
-              <span className="sr-only">Arcentra</span>
+          {/* ── Header: logo lockup + welcome ── */}
+          <div className="flex flex-col items-center gap-3.5 pb-1 text-center">
+            <Link to="/" aria-label="Arcentra" className="flex items-center">
+              <LogoLockup size={28} />
             </Link>
-            <h1 className="text-lg font-semibold tracking-tight">
+            <h1
+              className="display text-[22px] font-semibold"
+              style={{ letterSpacing: "-0.02em", margin: 0 }}
+            >
               Welcome back
             </h1>
           </div>
 
+          {/* ── Email / Username ── */}
           <Field>
             <FieldLabel htmlFor="username">Email / Username</FieldLabel>
             <Input
@@ -226,15 +228,17 @@ export function LoginForm({
               autoCorrect="off"
               disabled={isLoading}
               required
+              className="h-[38px] bg-bg-elevated text-[13px]"
             />
           </Field>
 
+          {/* ── Password ── */}
           <Field>
             <div className="flex items-center">
               <FieldLabel htmlFor="password">Password</FieldLabel>
               <button
                 type="button"
-                className="ml-auto text-xs underline-offset-4 hover:underline cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                className="ml-auto cursor-pointer text-xs text-fg-muted underline-offset-4 transition-colors hover:text-foreground hover:underline"
                 onClick={() => {
                   /* TODO: implement forgot password */
                 }}
@@ -251,12 +255,12 @@ export function LoginForm({
                 autoComplete="current-password"
                 disabled={isLoading}
                 required
-                className="pr-10"
+                className="h-[38px] bg-bg-elevated pr-10 text-[13px]"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-fg-muted transition-colors hover:text-foreground"
                 disabled={isLoading}
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
@@ -269,6 +273,7 @@ export function LoginForm({
             </div>
           </Field>
 
+          {/* ── Submit + sign-up link ── */}
           <Field className="space-y-3">
             <Button type="submit" disabled={isLoading} className="w-full">
               {isLoading ? (
@@ -276,7 +281,7 @@ export function LoginForm({
               ) : null}
               Login
             </Button>
-            <FieldDescription className="text-center text-xs">
+            <FieldDescription className="text-center text-xs text-fg-muted">
               Don&apos;t have an account?{" "}
               <Link
                 to="/register"
@@ -287,12 +292,18 @@ export function LoginForm({
             </FieldDescription>
           </Field>
 
+          {/* ── Social / external providers ── */}
           {providers.length > 0 && (
             <>
-              <FieldSeparator>Or</FieldSeparator>
+              {/* OR separator */}
+              <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-subtle">
+                <div className="h-px flex-1 bg-border" />
+                <span>Or</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
               <Field
                 className={cn(
-                  "grid gap-4",
+                  "grid gap-3",
                   providers.length > 1 && "sm:grid-cols-2",
                 )}
               >
@@ -304,6 +315,7 @@ export function LoginForm({
                     disabled={isLoading}
                     title={provider.description || undefined}
                     onClick={() => handleProviderLogin(provider)}
+                    className="h-[38px] text-[13px]"
                   >
                     {getProviderIcon(provider.name, provider.providerType)}
                     {provider.name}

@@ -1,14 +1,10 @@
-import { useState, useEffect } from "react";
-import { Plus, Save, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Plus, Save, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AnnouncementDialog,
+  AnnouncementDialogFooter,
+} from "@/components/ui/announcement-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -20,7 +16,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
+import { Apis } from "@/api";
 import type { Role, RoleScope } from "@/api/role/types";
+import type {
+  PermissionDictGroup,
+  PermissionDictItem,
+} from "@/api/permission/types";
 
 interface RoleConfigDialogProps {
   open: boolean;
@@ -55,6 +56,45 @@ export function RoleConfigDialog({
   const [permissions, setPermissions] = useState<string[]>([]);
   const [newPermission, setNewPermission] = useState("");
   const [loading, setLoading] = useState(false);
+  const [permissionGroups, setPermissionGroups] = useState<
+    PermissionDictGroup[]
+  >([]);
+  const [permissionDictLoading, setPermissionDictLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setPermissionDictLoading(true);
+    Apis.permission
+      .listPermissions()
+      .then((response) => {
+        if (cancelled) return;
+        setPermissionGroups(response.groups ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("Failed to load permission dictionary", error);
+      })
+      .finally(() => {
+        if (!cancelled) setPermissionDictLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const dictPermissionIds = useMemo(() => {
+    const set = new Set<string>();
+    permissionGroups.forEach((group) =>
+      group.permissions.forEach((item) => set.add(item.permissionId)),
+    );
+    return set;
+  }, [permissionGroups]);
+
+  const customPermissions = useMemo(
+    () => permissions.filter((p) => !dictPermissionIds.has(p)),
+    [permissions, dictPermissionIds],
+  );
 
   useEffect(() => {
     if (open) {
@@ -95,6 +135,28 @@ export function RoleConfigDialog({
     setPermissions(permissions.filter((p) => p !== permission));
   };
 
+  const handleTogglePermission = (item: PermissionDictItem) => {
+    if (isBuiltin) return;
+    setPermissions((prev) =>
+      prev.includes(item.permissionId)
+        ? prev.filter((p) => p !== item.permissionId)
+        : [...prev, item.permissionId],
+    );
+  };
+
+  const handleToggleGroup = (group: PermissionDictGroup, allOn: boolean) => {
+    if (isBuiltin) return;
+    setPermissions((prev) => {
+      const set = new Set(prev);
+      if (allOn) {
+        group.permissions.forEach((item) => set.delete(item.permissionId));
+      } else {
+        group.permissions.forEach((item) => set.add(item.permissionId));
+      }
+      return Array.from(set);
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -123,18 +185,20 @@ export function RoleConfigDialog({
   const isBuiltin = role?.isBuiltin === 1;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{role ? "Edit Role" : "Create Role"}</DialogTitle>
-          <DialogDescription>
-            {role
-              ? "Update role information and permissions"
-              : "Create a new role with specific permissions"}
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <AnnouncementDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={ShieldCheck}
+      iconTone="info"
+      title={role ? "Edit role" : "Create role"}
+      description={
+        role
+          ? "Update role information and permissions."
+          : "Create a new role with specific permissions."
+      }
+      size="3xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="name">Role Name *</Label>
@@ -231,52 +295,142 @@ export function RoleConfigDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Permissions</Label>
-            <div className="flex gap-2">
-              <Input
-                value={newPermission}
-                onChange={(e) => setNewPermission(e.target.value)}
-                placeholder="e.g.: users.read"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddPermission();
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleAddPermission}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Permissions</Label>
+              <span className="text-xs text-muted-foreground">
+                {permissions.length} selected
+                {permissionDictLoading ? " · loading dictionary..." : ""}
+              </span>
             </div>
 
-            {permissions.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2 p-3 border rounded-md">
-                {permissions.map((permission) => (
-                  <div
-                    key={permission}
-                    className="flex items-center gap-1 bg-secondary text-secondary-foreground px-2 py-1 rounded-md text-sm"
-                  >
-                    <span>{permission}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePermission(permission)}
-                      className="hover:text-destructive"
-                      disabled={isBuiltin}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
+            <div className="space-y-3 max-h-72 overflow-y-auto rounded-md border p-3">
+              {permissionGroups.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {permissionDictLoading
+                    ? "Loading permission dictionary..."
+                    : "No permission dictionary available."}
+                </p>
+              ) : (
+                permissionGroups
+                  .slice()
+                  .sort((a, b) => a.resourceType.localeCompare(b.resourceType))
+                  .map((group) => {
+                    const groupSelectedCount = group.permissions.filter((item) =>
+                      permissions.includes(item.permissionId),
+                    ).length;
+                    const allOn =
+                      groupSelectedCount === group.permissions.length &&
+                      group.permissions.length > 0;
+                    return (
+                      <div key={group.resourceType} className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                            {group.resourceType}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
+                            onClick={() => handleToggleGroup(group, allOn)}
+                            disabled={isBuiltin}
+                          >
+                            {allOn ? "Clear" : "Select all"}
+                          </button>
+                        </div>
+                        <div className="grid gap-1.5 sm:grid-cols-2">
+                          {group.permissions
+                            .slice()
+                            .sort((a, b) =>
+                              a.permissionId.localeCompare(b.permissionId),
+                            )
+                            .map((item) => {
+                              const checked = permissions.includes(
+                                item.permissionId,
+                              );
+                              return (
+                                <label
+                                  key={item.permissionId}
+                                  className="flex cursor-pointer items-start gap-2 rounded-md border border-transparent p-1 hover:border-border"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5"
+                                    checked={checked}
+                                    disabled={isBuiltin}
+                                    onChange={() =>
+                                      handleTogglePermission(item)
+                                    }
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="truncate font-mono text-xs">
+                                      {item.permissionId}
+                                    </div>
+                                    {item.description ? (
+                                      <div className="truncate text-xs text-muted-foreground">
+                                        {item.description}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </label>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Custom permission
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  value={newPermission}
+                  onChange={(e) => setNewPermission(e.target.value)}
+                  placeholder="e.g.: pipeline:custom_action"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddPermission();
+                    }
+                  }}
+                  disabled={isBuiltin}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAddPermission}
+                  disabled={isBuiltin}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
               </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Add permissions one by one. Press Enter or click + to add.
-            </p>
+              {customPermissions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 rounded-md border p-2">
+                  {customPermissions.map((permission) => (
+                    <div
+                      key={permission}
+                      className="flex items-center gap-1 rounded-md bg-secondary px-2 py-1 text-xs text-secondary-foreground"
+                    >
+                      <span className="font-mono">{permission}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePermission(permission)}
+                        className="hover:text-destructive disabled:text-muted-foreground"
+                        disabled={isBuiltin}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Pick from the dictionary above, or add a custom action ID here.
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center space-x-2">
@@ -292,7 +446,7 @@ export function RoleConfigDialog({
             </Label>
           </div>
 
-          <DialogFooter>
+          <AnnouncementDialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -306,9 +460,8 @@ export function RoleConfigDialog({
               <Save className="h-4 w-4 mr-1" />
               {loading ? "Saving..." : "Save"}
             </Button>
-          </DialogFooter>
+          </AnnouncementDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </AnnouncementDialog>
   );
 }

@@ -13,7 +13,8 @@ export interface LoginRequest {
 export interface LoginResponse {
   userinfo: UserInfo;
   token: AuthToken;
-  role: UserRole;
+  role: UserRole | UserRole[];
+  initialRoutes?: string[];
 }
 
 export interface LDAPLoginRequest {

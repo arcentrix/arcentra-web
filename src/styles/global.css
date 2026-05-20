@@ -37,6 +37,26 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* ── Arcentra Engineering-Blueprint 设计令牌 — LIGHT ──
+     新增令牌，与上面的 shadcn 令牌并存，不重命名、不覆盖。
+     交付包 .light 值映射进 :root。 */
+  --brand-signal: oklch(0.55 0.15 200);
+  --brand-signal-dim: oklch(0.7 0.1 200);
+  --brand-signal-bg: color-mix(in oklab, var(--brand-signal) 10%, transparent);
+  --bg-elevated: oklch(0.985 0 0);
+  --fg-muted: oklch(0.45 0 0);
+  --fg-subtle: oklch(0.6 0 0);
+  --border-strong: oklch(0.85 0 0);
+  --accent-success: oklch(0.696 0.17 162.48);
+  --accent-info: oklch(0.7 0.14 220);
+  --accent-warn: oklch(0.8 0.18 84);
+  --accent-danger: oklch(0.645 0.246 16.4);
+  --grid-dot: oklch(0.85 0 0);
+  /* 别名：让蓝图工具类(.blueprint-bg/.eyebrow…)无需重声明 shadcn 令牌即可解析；
+     随 --background/--foreground 自动重解析，故只在 :root 声明一次。 */
+  --bg: var(--background);
+  --fg: var(--foreground);
 }
 
 .dark {
@@ -72,11 +92,24 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+
+  /* ── Arcentra Engineering-Blueprint 设计令牌 — DARK ──
+     仅随主题变化的令牌在此覆盖；--accent-* 与 --bg/--fg 别名在 :root 已声明。 */
+  --brand-signal: oklch(0.82 0.16 195);
+  --brand-signal-dim: oklch(0.65 0.11 195);
+  --brand-signal-bg: color-mix(in oklab, var(--brand-signal) 12%, transparent);
+  --bg-elevated: oklch(0.185 0 0);
+  --fg-muted: oklch(0.72 0 0);
+  --fg-subtle: oklch(0.55 0 0);
+  --border-strong: oklch(0.34 0 0);
+  --grid-dot: oklch(0.3 0 0);
 }
 
 @theme inline {
-  --font-sans: "Inter", "Geist", "Geist Fallback", sans-serif;
-  --font-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans SC", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -96,6 +129,17 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* ── Engineering-Blueprint 令牌 → Tailwind 工具类 ── */
+  --color-brand-signal: var(--brand-signal);
+  --color-brand-signal-dim: var(--brand-signal-dim);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-accent-success: var(--accent-success);
+  --color-accent-info: var(--accent-info);
+  --color-accent-warn: var(--accent-warn);
+  --color-accent-danger: var(--accent-danger);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -143,11 +187,181 @@
   font-display: swap;
 }
 
+/* Geist Mono — 工程风格文本（字标、eyebrow、代码、kbd、指标值） */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("@/assets/fonts/GeistMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("@/assets/fonts/GeistMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("@/assets/fonts/GeistMono-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Engineering-Blueprint 工具类。顶层普通规则（不进 @layer），
+   照搬自 design_handoff_arcentra_redesign/colors_and_type.css。
+   ────────────────────────────────────────────────────────────── */
+
+/* Display：Geist Sans 600 紧字距，用于 hero/h1/h2/大标题 */
+.display {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+}
+
+/* Eyebrow：标志性的大写等宽小标，置于每个区块标题之上 */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+/* Eyebrow 前缀：信号色箭头 ▸ */
+.eyebrow-arrow::before {
+  content: "▸";
+  margin-right: 6px;
+  color: var(--brand-signal);
+  opacity: 0.9;
+}
+
+/* Reading：大号数字读数下方的细信号下划线 */
+.reading {
+  position: relative;
+  padding-bottom: 6px;
+  display: inline-block;
+}
+.reading::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 32px;
+  height: 1px;
+  background: var(--brand-signal);
+  opacity: 0.6;
+}
+
+/* Bracket-frame：四角蓝图括号标记 */
+.bracket-frame {
+  position: relative;
+}
+.bracket-frame::before,
+.bracket-frame::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--brand-signal-dim);
+  pointer-events: none;
+  opacity: 0.7;
+}
+.bracket-frame::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+.bracket-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Blueprint 网格：工程坐标纸（16px 细线 + 64px 粗线） */
+.blueprint-bg {
+  background-image:
+    linear-gradient(to right, var(--grid-dot) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-dot) 1px, transparent 1px),
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--grid-dot) 50%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--grid-dot) 50%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 64px 64px, 64px 64px, 16px 16px, 16px 16px;
+}
+
+/* 旧版点阵网格（仅作变体保留） */
+.grid-bg {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--grid-dot) 1px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+}
+
+.fade-mask-radial {
+  -webkit-mask-image: radial-gradient(ellipse at top, black 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse at top, black 30%, transparent 75%);
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
 /* Toast 自定义样式 */
+.Toastify__toast-container {
+  /* react-toastify v11 reads these CSS variables for layout. */
+  --toastify-toast-width: 400px;
+  --toastify-toast-min-height: 56px;
+  --toastify-toast-bd-radius: 14px;
+  z-index: 60;
+}
+
+.Toastify__toast-container--top-right {
+  top: 72px;
+  right: 24px;
+}
+
+@media only screen and (max-width: 480px) {
+  .Toastify__toast-container--top-right {
+    top: 12px;
+    right: 0;
+    left: 0;
+    width: 100vw;
+    --toastify-toast-width: 100%;
+  }
+}
+
 .Toastify__toast {
-  @apply rounded-lg border bg-background text-foreground shadow-lg;
-  padding: 1rem;
-  min-height: auto;
+  @apply border bg-background text-foreground shadow-lg;
+  border-radius: var(--toastify-toast-bd-radius);
+  padding: 0.875rem 1rem;
+  min-height: var(--toastify-toast-min-height);
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
 .Toastify__toast--success {
@@ -207,7 +421,7 @@
 }
 
 .Toastify__progress-bar {
-  @apply h-1 bg-muted;
+  @apply h-0.5 bg-muted;
 }
 
 .Toastify__progress-bar--success {

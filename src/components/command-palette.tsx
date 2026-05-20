@@ -18,6 +18,7 @@ import {
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Dialog, DialogPortal } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { uiShellStore } from "@/store/ui-shell";
 
@@ -283,9 +284,7 @@ export function CommandPalette() {
               placeholder="Search projects, pipelines, agents…"
               className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
-            <kbd className="pointer-events-none hidden h-5 select-none items-center justify-center rounded border border-border/40 bg-background px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
-              esc
-            </kbd>
+            <Kbd className="hidden sm:inline-flex">esc</Kbd>
           </div>
 
           <ScrollArea className="max-h-[400px]">
@@ -302,7 +301,7 @@ export function CommandPalette() {
                   if (!items || items.length === 0) return null;
                   return (
                     <div key={groupName} className="mb-2 last:mb-0">
-                      <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <div className="eyebrow eyebrow-arrow px-2 py-1.5">
                         {groupName}
                       </div>
                       <ul className="grid gap-0.5">

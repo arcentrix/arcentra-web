@@ -1,24 +1,77 @@
 /**
- * Agents Detail 页面
+ * Agents Detail 页面 — Engineering Blueprint 重做
+ *
+ * 视觉层完全按设计系统规范重写；数据层（Apis.*、useParams、state、effect）全部保留。
  */
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Zap, Edit, Power, PowerOff, ShieldCheck } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  ArrowLeft,
+  ChevronRight,
+  Edit,
+  ShieldCheck,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentDialog } from "@/components/agent-dialog";
 import { toast } from "@/lib/toast";
 import { Apis } from "@/api";
 import type { Agent, UpdateAgentRequest, AgentStatus } from "@/api/agent/types";
+import { PageHeader } from "@/components/page-header";
+import {
+  Panel,
+  PanelHeader,
+  MetaRow,
+  SectionEyebrow,
+  StatusDot,
+} from "@/components/blueprint";
+import type { DotTone } from "@/components/blueprint";
+
+/* ─────────────────────── 常量 ─────────────────────── */
+
+const STATUS_DOT_TONE: Record<AgentStatus, DotTone> = {
+  0: "muted",
+  1: "ok",
+  2: "fail",
+  3: "running",
+  4: "info",
+};
+
+const STATUS_BADGE: Record<
+  AgentStatus,
+  {
+    label: string;
+    variant: "success" | "warning" | "critical" | "outline" | "info" | "secondary";
+  }
+> = {
+  0: { label: "Unknown", variant: "outline" },
+  1: { label: "Online", variant: "success" },
+  2: { label: "Offline", variant: "critical" },
+  3: { label: "Busy", variant: "info" },
+  4: { label: "Idle", variant: "secondary" },
+};
+
+/* ─────────────────────── 数据工具函数（从 Overview 复用）─────────────────────── */
+
+const parseNumericLabelFrom = (
+  labels: Record<string, string> | undefined,
+  keys: string[],
+): number | null => {
+  const source = labels || {};
+  for (const key of keys) {
+    const value = source[key];
+    if (!value) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+/* ─────────────────────── 主组件 ─────────────────────── */
 
 export default function AgentsDetail() {
   const { id } = useParams<{ id: string }>();
@@ -29,16 +82,15 @@ export default function AgentsDetail() {
   const loadingRef = useRef(false);
   const currentIdRef = useRef<string | undefined>(undefined);
 
+  /* ── 数据加载（原有逻辑，保留不变）── */
+
   useEffect(() => {
     if (!id) {
       navigate("/agents");
       return;
     }
 
-    // 防止重复请求：如果正在加载或 ID 没有变化，则跳过
-    if (loadingRef.current || currentIdRef.current === id) {
-      return;
-    }
+    if (loadingRef.current || currentIdRef.current === id) return;
 
     loadingRef.current = true;
     currentIdRef.current = id;
@@ -47,15 +99,10 @@ export default function AgentsDetail() {
     Apis.agent
       .getAgentById(id)
       .then((data) => {
-        // 确保 ID 仍然匹配（防止快速切换路由导致的状态混乱）
-        if (currentIdRef.current === id) {
-          setAgent(data);
-        }
+        if (currentIdRef.current === id) setAgent(data);
       })
       .catch((error: any) => {
-        // 确保 ID 仍然匹配
         if (currentIdRef.current === id) {
-          // 如果是 404 错误，显示更友好的消息
           if (
             error?.response?.status === 404 ||
             error?.message?.includes("not found")
@@ -69,43 +116,30 @@ export default function AgentsDetail() {
         }
       })
       .finally(() => {
-        // 确保 ID 仍然匹配
         if (currentIdRef.current === id) {
           setLoading(false);
           loadingRef.current = false;
         }
       });
 
-    // 清理函数：当 ID 变化时，取消之前的请求
     return () => {
-      if (currentIdRef.current !== id) {
-        loadingRef.current = false;
-      }
+      if (currentIdRef.current !== id) loadingRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const handleEdit = () => {
-    setDialogOpen(true);
-  };
+  /* ── 事件处理（原有，保留不变）── */
 
   const reloadAgent = async () => {
     if (!id) return;
-
-    // 重置 ref 以允许重新加载
     currentIdRef.current = undefined;
     loadingRef.current = false;
-
-    // 触发重新加载
     currentIdRef.current = id;
     loadingRef.current = true;
     setLoading(true);
-
     try {
       const data = await Apis.agent.getAgentById(id);
-      if (currentIdRef.current === id) {
-        setAgent(data);
-      }
+      if (currentIdRef.current === id) setAgent(data);
     } catch (error: any) {
       if (currentIdRef.current === id) {
         toast.error("Failed to reload agent");
@@ -121,7 +155,6 @@ export default function AgentsDetail() {
 
   const handleSubmit = async (data: UpdateAgentRequest) => {
     if (!agent) return;
-
     try {
       await Apis.agent.updateAgent(agent.agentId, data);
       await reloadAgent();
@@ -144,7 +177,6 @@ export default function AgentsDetail() {
 
   const handleToggleStatus = async () => {
     if (!agent) return;
-
     try {
       await Apis.agent.updateAgent(agent.agentId, {
         isEnabled: agent.isEnabled === 1 ? 0 : 1,
@@ -157,50 +189,10 @@ export default function AgentsDetail() {
     }
   };
 
-  // 获取状态 Badge
-  const getStatusBadge = (status: AgentStatus) => {
-    const statusMap = {
-      0: {
-        label: "Unknown",
-        className: "bg-gray-100 text-gray-600 border-gray-200",
-      },
-      1: {
-        label: "Online",
-        className: "bg-green-50 text-green-600 border-green-200",
-      },
-      2: {
-        label: "Offline",
-        className: "bg-red-50 text-red-600 border-red-200",
-      },
-      3: {
-        label: "Busy",
-        className: "bg-yellow-50 text-yellow-600 border-yellow-200",
-      },
-      4: {
-        label: "Idle",
-        className: "bg-blue-50 text-blue-600 border-blue-200",
-      },
-    };
+  /* ── 派生数据（原有，保留不变）── */
 
-    const variant = statusMap[status] || statusMap[0];
-
-    return (
-      <Badge variant="outline" className={variant.className}>
-        {variant.label}
-      </Badge>
-    );
-  };
-
-  const parseNumericLabel = (keys: string[]) => {
-    const source = agent?.labels || {};
-    for (const key of keys) {
-      const value = source[key];
-      if (!value) continue;
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return null;
-  };
+  const parseNumericLabel = (keys: string[]) =>
+    parseNumericLabelFrom(agent?.labels, keys);
 
   const runningJobs =
     parseNumericLabel(["running_jobs", "current_jobs", "jobs"]) ??
@@ -209,18 +201,12 @@ export default function AgentsDetail() {
     agent?.isEnabled === 1
       ? parseNumericLabel(["capacity", "max_jobs", "slots"]) || 4
       : 0;
-  const heartbeatAge = parseNumericLabel([
-    "heartbeat_age_seconds",
-    "heartbeatAgeSeconds",
-  ]);
+  const heartbeatAge = parseNumericLabel(["heartbeat_age_seconds", "heartbeatAgeSeconds"]);
 
   const lastHeartbeatText = (() => {
     const source = agent?.labels || {};
     const explicit =
-      source.last_seen ||
-      source.lastSeen ||
-      source.last_heartbeat ||
-      source.heartbeat;
+      source.last_seen || source.lastSeen || source.last_heartbeat || source.heartbeat;
     if (explicit) return explicit;
     if (heartbeatAge !== null) {
       if (heartbeatAge < 60) return `${heartbeatAge}s ago`;
@@ -241,283 +227,327 @@ export default function AgentsDetail() {
       source.running_task ||
       source.job_names ||
       "";
-
     if (!raw) return [];
-    return raw
-      .split(",")
-      .map((task) => task.trim())
-      .filter(Boolean);
+    return raw.split(",").map((t: string) => t.trim()).filter(Boolean);
   })();
+
+  /* ── 加载 / 空态 ── */
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4 md:p-8 pt-6">
-        <p className="text-muted-foreground">Loading agent...</p>
-      </div>
+      <section className="flex flex-1 flex-col gap-6 p-8">
+        {/* 面包屑骨架 */}
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-4 w-16" />
+          <ChevronRight className="h-3 w-3 text-fg-subtle" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <Skeleton className="mb-2 h-3 w-24" />
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="mt-2 h-4 w-64" />
+          </div>
+          <Skeleton className="h-9 w-40" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Panel key={i} className="flex flex-col gap-2 px-5 py-[18px]">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-4 w-32" />
+            </Panel>
+          ))}
+        </div>
+      </section>
     );
   }
 
   if (!agent) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4 md:p-8 pt-6">
-        <p className="text-muted-foreground">Agent not found</p>
-      </div>
+      <section className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        <p className="text-[13px] text-fg-muted">Agent not found.</p>
+        <Button variant="outline" size="sm" onClick={() => navigate("/agents")}>
+          <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+          Back to agents
+        </Button>
+      </section>
     );
   }
 
+  const statusMeta = STATUS_BADGE[agent.status] ?? STATUS_BADGE[0];
+  const dotTone = STATUS_DOT_TONE[agent.status] ?? "muted";
+  const isDynamicPending = agent.registeredBy === "dynamic" && agent.isEnabled === 0;
+  const loadPct = capacity > 0 ? Math.round((runningJobs / capacity) * 100) : 0;
+
+  /* ─────────────────────── JSX ─────────────────────── */
+
   return (
     <>
-      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-              <Zap className="h-8 w-8 text-yellow-500" />
-              {agent.agentName}
-            </h2>
-            <p className="text-muted-foreground mt-1">
-              Agent ID:{" "}
-              <code className="text-xs bg-muted px-2 py-1 rounded">
-                {agent.agentId}
-              </code>
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {agent.registeredBy === "dynamic" && agent.isEnabled === 0 && (
-              <Button variant="outline" onClick={handleApprove}>
-                <ShieldCheck className="mr-2 h-4 w-4" />
-                Approve
+      <section className="flex flex-1 flex-col gap-6 p-8">
+
+        {/* 面包屑 */}
+        <nav className="flex items-center gap-1.5 font-mono text-[11px] text-fg-muted">
+          <button
+            type="button"
+            className="hover:text-foreground transition-colors"
+            onClick={() => navigate("/agents")}
+          >
+            Agents
+          </button>
+          <ChevronRight className="h-3 w-3 text-fg-subtle" />
+          <span className="text-fg-subtle">{agent.agentName}</span>
+        </nav>
+
+        {/* 页头 */}
+        <PageHeader
+          eyebrow="agents / detail"
+          title={agent.agentName}
+          sub={`Agent ID · ${agent.agentId}`}
+          action={
+            <div className="flex items-center gap-2">
+              {isDynamicPending && (
+                <Button variant="outline" size="sm" onClick={handleApprove}>
+                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                  Approve
+                </Button>
+              )}
+              <Switch
+                checked={agent.isEnabled === 1}
+                onCheckedChange={handleToggleStatus}
+                aria-label={agent.isEnabled === 1 ? "Disable agent" : "Enable agent"}
+              />
+              <Button size="sm" onClick={() => setDialogOpen(true)}>
+                <Edit className="mr-1.5 h-3.5 w-3.5" />
+                Edit
               </Button>
-            )}
-            <Button variant="outline" onClick={handleToggleStatus}>
-              {agent.isEnabled === 1 ? (
-                <>
-                  <PowerOff className="mr-2 h-4 w-4" />
-                  Disable
-                </>
-              ) : (
-                <>
-                  <Power className="mr-2 h-4 w-4" />
-                  Enable
-                </>
-              )}
-            </Button>
-            <Button onClick={handleEdit}>
-              <Edit className="mr-2 h-4 w-4" />
-              Edit
-            </Button>
-          </div>
+            </div>
+          }
+        />
+
+        {/* 指标卡行 */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* 状态 */}
+          <Panel className="flex flex-col gap-2 px-5 py-[18px]">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
+              Status
+            </span>
+            <div className="flex items-center gap-2">
+              <StatusDot tone={dotTone} pulse={agent.status === 3} />
+              <span className="reading font-mono text-[24px] font-semibold leading-none tabular-nums">
+                {statusMeta.label}
+              </span>
+            </div>
+            <Badge variant={statusMeta.variant} className="w-fit">
+              {statusMeta.label}
+            </Badge>
+          </Panel>
+
+          {/* 启用状态 */}
+          <Panel className="flex flex-col gap-2 px-5 py-[18px]">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
+              Scheduling
+            </span>
+            <span className="reading font-mono text-[24px] font-semibold leading-none tabular-nums text-foreground">
+              {agent.isEnabled === 1 ? "Enabled" : "Disabled"}
+            </span>
+            <Badge variant={agent.isEnabled === 1 ? "success" : "secondary"} className="w-fit">
+              {agent.isEnabled === 1 ? "Eligible" : "Excluded"}
+            </Badge>
+          </Panel>
+
+          {/* 版本 */}
+          <Panel className="flex flex-col gap-2 px-5 py-[18px]">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
+              Version
+            </span>
+            <span className="reading font-mono text-[24px] font-semibold leading-none tabular-nums text-foreground">
+              {agent.version || "—"}
+            </span>
+            <span className="text-[12px] text-fg-muted">Agent runtime version</span>
+          </Panel>
+
+          {/* 负载 */}
+          <Panel className="flex flex-col gap-2 px-5 py-[18px]">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
+              Load
+            </span>
+            <span className="reading font-mono text-[24px] font-semibold leading-none tabular-nums text-foreground">
+              {capacity > 0 ? `${loadPct}%` : "—"}
+            </span>
+            <span className="text-[12px] text-fg-muted">
+              {capacity > 0 ? `${runningJobs} / ${capacity} slots` : "No capacity"}
+            </span>
+          </Panel>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Status</CardTitle>
-              <Zap className="h-4 w-4 text-yellow-500" />
-            </CardHeader>
-            <CardContent>{getStatusBadge(agent.status)}</CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Enabled</CardTitle>
-              {agent.isEnabled === 1 ? (
-                <Power className="h-4 w-4 text-green-500" />
-              ) : (
-                <PowerOff className="h-4 w-4 text-gray-500" />
-              )}
-            </CardHeader>
-            <CardContent>
-              {agent.isEnabled === 1 ? (
-                <Badge
-                  variant="outline"
-                  className="bg-emerald-50 text-emerald-600 border-emerald-200"
-                >
-                  Enabled
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className="bg-gray-100 text-gray-500 border-gray-200"
-                >
-                  Disabled
-                </Badge>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Version</CardTitle>
-              <Zap className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{agent.version || "N/A"}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Platform</CardTitle>
-              <Zap className="h-4 w-4 text-purple-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm">
-                <div className="font-medium">{agent.os}</div>
-                <div className="text-muted-foreground">{agent.arch}</div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
+        {/* 详情 Tabs */}
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList>
+          <TabsList className="font-mono">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="running-tasks">Running Tasks</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
           </TabsList>
-          <TabsContent value="overview" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Agent Information</CardTitle>
-                <CardDescription>
-                  Basic information about this agent
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-medium">Agent Name</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.agentName}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Agent ID</p>
-                    <p className="text-sm text-muted-foreground">
-                      <code className="text-xs bg-muted px-2 py-1 rounded">
-                        {agent.agentId}
-                      </code>
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Address</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.address && agent.port
+
+          {/* ── Tab: overview ── */}
+          <TabsContent value="overview" className="mt-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+
+              {/* 基本信息 */}
+              <Panel>
+                <PanelHeader title="Agent information" />
+                <div className="flex flex-col gap-3 p-5">
+                  <MetaRow label="Name" value={agent.agentName} />
+                  <MetaRow label="Agent ID" value={agent.agentId} />
+                  <MetaRow
+                    label="Endpoint"
+                    value={
+                      agent.address && agent.port
                         ? `${agent.address}:${agent.port}`
-                        : "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Status</p>
-                    <div className="mt-1">{getStatusBadge(agent.status)}</div>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Operating System</p>
-                    <p className="text-sm text-muted-foreground">{agent.os}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Architecture</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.arch}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Version</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.version || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Metrics Path</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.metrics}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Registered By</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.registeredBy || "Admin"}
-                    </p>
-                  </div>
+                        : "-"
+                    }
+                  />
+                  <MetaRow label="Status" value={
+                    <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                  } mono={false} />
+                  <MetaRow label="Enabled" value={agent.isEnabled === 1 ? "Yes" : "No"} />
+                  <MetaRow label="Registered by" value={agent.registeredBy || "Admin"} />
+                  <MetaRow label="Last seen" value={lastHeartbeatText} />
+                  <MetaRow label="Metrics path" value={agent.metrics || "-"} />
                 </div>
-                {Object.keys(agent.labels || {}).length > 0 && (
-                  <div>
-                    <p className="text-sm font-medium mb-2">Labels</p>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(agent.labels || {}).map(
-                        ([key, value]) => (
-                          <Badge key={key} variant="outline">
-                            {key}: {value}
-                          </Badge>
-                        ),
-                      )}
+              </Panel>
+
+              {/* 运行时 */}
+              <Panel>
+                <PanelHeader title="Runtime" />
+                <div className="flex flex-col gap-3 p-5">
+                  <MetaRow label="OS" value={agent.os || "-"} />
+                  <MetaRow label="Arch" value={agent.arch || "-"} />
+                  <MetaRow label="Version" value={agent.version || "-"} />
+                  <MetaRow
+                    label="Jobs"
+                    value={capacity > 0 ? `${runningJobs} / ${capacity}` : "-"}
+                  />
+                  <MetaRow label="Load" value={capacity > 0 ? `${loadPct}%` : "-"} />
+                </div>
+
+                {/* 负载进度条 */}
+                {capacity > 0 && (
+                  <div className="border-t px-5 py-4">
+                    <div className="mb-1.5 flex justify-between font-mono text-[10.5px] text-fg-subtle">
+                      <span>Slot utilization</span>
+                      <span>{loadPct}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-border">
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${loadPct}%`,
+                          background:
+                            loadPct > 80
+                              ? "var(--accent-warn)"
+                              : agent.status === 3
+                                ? "var(--brand-signal)"
+                                : "var(--fg)",
+                          opacity: 0.75,
+                          transition: "width 0.4s ease",
+                        }}
+                      />
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </Panel>
+
+              {/* Labels */}
+              {Object.keys(agent.labels || {}).length > 0 && (
+                <Panel className="lg:col-span-2">
+                  <PanelHeader
+                    title="Labels"
+                    sub={`${Object.keys(agent.labels || {}).length} entries`}
+                  />
+                  <div className="flex flex-col divide-y divide-border">
+                    {Object.entries(agent.labels || {}).map(([key, value]) => (
+                      <div key={key} className="flex items-center gap-4 px-5 py-2.5">
+                        <span className="w-48 shrink-0 font-mono text-[11px] uppercase tracking-[0.06em] text-fg-subtle">
+                          {key}
+                        </span>
+                        <span className="min-w-0 truncate font-mono text-[12.5px] text-foreground">
+                          {value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+              )}
+            </div>
           </TabsContent>
 
-          <TabsContent value="running-tasks" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Current Running Tasks</CardTitle>
-                <CardDescription>
-                  Runtime workload currently executed by this agent
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-lg border bg-muted/20 p-3">
-                    <p className="text-xs text-muted-foreground">Jobs</p>
-                    <p className="text-sm font-medium">
+          {/* ── Tab: running-tasks ── */}
+          <TabsContent value="running-tasks" className="mt-4">
+            <Panel>
+              <PanelHeader title="Running tasks" sub={`${runningJobs} active`} />
+              <div className="p-5">
+
+                {/* 指标行 */}
+                <div className="mb-5 grid gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1.5 rounded-md border bg-bg-elevated px-4 py-3">
+                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
+                      Jobs
+                    </span>
+                    <span className="font-mono text-[20px] font-semibold tabular-nums text-foreground">
                       {capacity > 0 ? `${runningJobs} / ${capacity}` : "-"}
-                    </p>
+                    </span>
                   </div>
-                  <div className="rounded-lg border bg-muted/20 p-3">
-                    <p className="text-xs text-muted-foreground">
-                      Last Heartbeat
-                    </p>
-                    <p className="text-sm font-medium">{lastHeartbeatText}</p>
+                  <div className="flex flex-col gap-1.5 rounded-md border bg-bg-elevated px-4 py-3">
+                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
+                      Last heartbeat
+                    </span>
+                    <span className="font-mono text-[20px] font-semibold tabular-nums text-foreground">
+                      {lastHeartbeatText}
+                    </span>
                   </div>
                 </div>
 
+                {/* 任务列表 */}
                 {currentTaskNames.length > 0 ? (
-                  <div className="space-y-2">
-                    {currentTaskNames.map((taskName) => (
+                  <div className="flex flex-col gap-2">
+                    <SectionEyebrow>Active tasks</SectionEyebrow>
+                    {currentTaskNames.map((taskName: string) => (
                       <div
                         key={taskName}
-                        className="rounded-md border px-3 py-2 text-sm"
+                        className="flex items-center gap-3 rounded-md border px-4 py-2.5"
                       >
-                        {taskName}
+                        <StatusDot tone="running" pulse />
+                        <span className="font-mono text-[12.5px] text-foreground">
+                          {taskName}
+                        </span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[13px] text-fg-muted">
                     {runningJobs > 0
                       ? "Agent is busy, but task names are not reported by runtime metadata."
                       : "No running tasks."}
                   </p>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           </TabsContent>
-          <TabsContent value="configuration" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Configuration</CardTitle>
-                <CardDescription>Agent configuration settings</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <pre className="bg-muted p-4 rounded-md overflow-x-auto text-sm">
+
+          {/* ── Tab: configuration ── */}
+          <TabsContent value="configuration" className="mt-4">
+            <Panel>
+              <PanelHeader title="Raw configuration" sub="JSON representation of agent record" />
+              <div className="p-5">
+                <pre className="overflow-x-auto rounded-md border bg-bg-elevated px-4 py-4 font-mono text-[12px] leading-relaxed text-foreground">
                   <code>{JSON.stringify(agent, null, 2)}</code>
                 </pre>
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           </TabsContent>
         </Tabs>
-      </div>
+      </section>
 
       <AgentDialog
         key={agent.agentId}

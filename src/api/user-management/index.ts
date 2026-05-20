@@ -1,10 +1,24 @@
 import { get, post, put, dedupeRequest, generateRequestKey } from "../client";
+import type { RequestConfig } from "../client/types";
 import type {
   User,
   UpdateUserRequest,
   InviteUserRequest,
   UserListResponse,
 } from "./types";
+
+export interface ListUsersOptions {
+  /**
+   * Suppress the client's built-in error toast so the page can render its own
+   * inline error state (with Retry / Request ID). Defaults to `false`.
+   */
+  silence?: boolean;
+}
+
+function toRequestConfig(options?: ListUsersOptions): RequestConfig | undefined {
+  if (!options?.silence) return undefined;
+  return { silence: true };
+}
 
 /**
  * 获取用户列表（带分页和筛选）
@@ -16,6 +30,7 @@ export const listUsers = async (
     search?: string;
     status?: string;
   },
+  options?: ListUsersOptions,
 ): Promise<UserListResponse> => {
   const params = new URLSearchParams();
   if (page) params.append("page", page.toString());
@@ -26,7 +41,9 @@ export const listUsers = async (
 
   // 使用请求去重
   const key = generateRequestKey(url);
-  return dedupeRequest(key, () => get<UserListResponse>(url));
+  return dedupeRequest(key, () =>
+    get<UserListResponse>(url, toRequestConfig(options)),
+  );
 };
 
 /**
@@ -36,6 +53,7 @@ export const listUsersByRole = async (
   roleId: string,
   page?: number,
   pageSize?: number,
+  options?: ListUsersOptions,
 ): Promise<UserListResponse> => {
   const params = new URLSearchParams();
   params.append("roleId", roleId);
@@ -45,7 +63,9 @@ export const listUsersByRole = async (
 
   // 使用请求去重
   const key = generateRequestKey(url);
-  return dedupeRequest(key, () => get<UserListResponse>(url));
+  return dedupeRequest(key, () =>
+    get<UserListResponse>(url, toRequestConfig(options)),
+  );
 };
 
 /**

@@ -1,14 +1,10 @@
 import { useState, useEffect } from "react";
-import { Save, X } from "lucide-react";
+import { Save, UserCog, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AnnouncementDialog,
+  AnnouncementDialogFooter,
+} from "@/components/ui/announcement-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -110,16 +106,16 @@ export function UserManagementDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Edit User</DialogTitle>
-          <DialogDescription>
-            Update user information and permissions
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <AnnouncementDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={UserCog}
+      iconTone="info"
+      title="Edit user"
+      description="Update user information and permissions."
+      size="2xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="username">Username *</Label>
@@ -220,7 +216,7 @@ export function UserManagementDialog({
             </Label>
           </div>
 
-          <DialogFooter>
+          <AnnouncementDialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -234,9 +230,8 @@ export function UserManagementDialog({
               <Save className="h-4 w-4 mr-1" />
               {loading ? "Saving..." : "Save"}
             </Button>
-          </DialogFooter>
+          </AnnouncementDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </AnnouncementDialog>
   );
 }

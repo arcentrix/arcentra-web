@@ -1,18 +1,13 @@
 /**
- * Project Artifacts 页面
+ * Project Artifacts 标签面板 — Engineering Blueprint 重做
+ * Panel + 表格：Name / Tag / Type / Size / SHA / Pushed。
+ * 保留全部筛选/分页/下载/刷新逻辑。
  */
 
 import type { FC } from "react";
 import { useParams } from "react-router-dom";
-import { Package } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useState, useMemo, useEffect } from "react";
+import { RefreshCw, Download, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,9 +17,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useState, useMemo, useEffect } from "react";
-import { RefreshCw, Download, Filter } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { DataTablePagination } from "@/components/data-table-pagination";
+import {
+  Panel,
+  PanelHeader,
+  StatusBadge,
+  ColumnHead,
+  type BadgeTone,
+} from "@/components/blueprint";
 
 interface Artifact {
   id: string;
@@ -37,8 +45,53 @@ interface Artifact {
   status: "available" | "expired" | "archived";
 }
 
+function artifactStatusToBadgeTone(status: string): BadgeTone {
+  switch (status) {
+    case "available":
+      return "ok";
+    case "expired":
+      return "fail";
+    case "archived":
+      return "muted";
+    default:
+      return "muted";
+  }
+}
+
+/** Derive a docker-style tag from artifact data */
+function artifactTag(artifact: Artifact): string {
+  if (artifact.name.includes("v1.2.3")) return "v1.2.3";
+  if (artifact.name.includes("latest")) return "latest";
+  if (artifact.type === "json") return "latest";
+  if (artifact.type === "html") return "latest";
+  if (artifact.type === "yaml") return "v1.0.0";
+  return "latest";
+}
+
+/** Derive a fake short SHA */
+function artifactSha(artifact: Artifact): string {
+  const map: Record<string, string> = {
+    "1": "a4f9c2",
+    "2": "0bcf81",
+    "3": "92ad11",
+    "4": "ee2207",
+    "5": "8a31fc",
+  };
+  return map[artifact.id] ?? "—";
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
+}
+
 const Artifacts: FC = () => {
-  const { projectId } = useParams<{ projectId: string }>();
+  const { projectId: _projectId } = useParams<{ projectId: string }>();
   const [searchText, setSearchText] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -46,7 +99,6 @@ const Artifacts: FC = () => {
   const [pageNum, setPageNum] = useState(1);
   const [pageSize] = useState(10);
 
-  // 模拟数据 - 实际应该从 API 获取
   const artifacts: Artifact[] = [
     {
       id: "1",
@@ -100,221 +152,167 @@ const Artifacts: FC = () => {
     },
   ];
 
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case "available":
-        return "default";
-      case "expired":
-        return "destructive";
-      case "archived":
-        return "outline";
-      default:
-        return "outline";
-    }
-  };
-
-  const getStatusBadgeClassName = (status: string) => {
-    switch (status) {
-      case "available":
-        return "bg-green-50 border-green-200 text-green-700 hover:bg-green-100";
-      case "expired":
-        return "bg-red-50 border-red-200 text-red-700 hover:bg-red-100";
-      case "archived":
-        return "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100";
-      default:
-        return "bg-gray-50 border-gray-200 text-gray-700";
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
   const filteredArtifacts = useMemo(() => {
     return artifacts.filter((artifact) => {
       const matchesSearch =
         artifact.name.toLowerCase().includes(searchText.toLowerCase()) ||
         artifact.pipelineName?.toLowerCase().includes(searchText.toLowerCase());
       const matchesType = typeFilter === "all" || artifact.type === typeFilter;
-      const matchesStatus =
-        statusFilter === "all" || artifact.status === statusFilter;
+      const matchesStatus = statusFilter === "all" || artifact.status === statusFilter;
       return matchesSearch && matchesType && matchesStatus;
     });
   }, [artifacts, searchText, typeFilter, statusFilter]);
 
-  // 分页计算
   const totalPages = Math.ceil(filteredArtifacts.length / pageSize);
   const paginatedArtifacts = useMemo(() => {
     const startIndex = (pageNum - 1) * pageSize;
     return filteredArtifacts.slice(startIndex, startIndex + pageSize);
   }, [filteredArtifacts, pageNum, pageSize]);
 
-  // 当筛选条件变化时，重置到第一页
   useEffect(() => {
     setPageNum(1);
   }, [searchText, typeFilter, statusFilter]);
 
   const handleRefresh = () => {
     setLoading(true);
-    // 模拟 API 调用
-    setTimeout(() => {
-      setLoading(false);
-    }, 1000);
+    setTimeout(() => setLoading(false), 1000);
   };
 
   const handleDownload = (artifact: Artifact) => {
-    // 模拟下载
     console.log("Downloading artifact:", artifact.name);
   };
 
   return (
-    <div className="flex-1 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Package className="h-8 w-8 text-purple-500" />
-            Artifacts
-          </h2>
-          <p className="text-muted-foreground mt-1">
-            View and manage build artifacts for project {projectId}
-          </p>
-        </div>
-        <Button variant="outline" onClick={handleRefresh} disabled={loading}>
-          <RefreshCw
-            className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
+    <div className="flex flex-col gap-4">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Input
+            placeholder="Search artifacts or pipeline…"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="h-8 w-[240px] text-[13px]"
           />
+        </div>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="h-8 w-auto min-w-[130px] gap-1.5 text-[13px]">
+            <Filter className="h-3.5 w-3.5 shrink-0" />
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="archive">Archive</SelectItem>
+            <SelectItem value="json">JSON</SelectItem>
+            <SelectItem value="docker">Docker</SelectItem>
+            <SelectItem value="html">HTML</SelectItem>
+            <SelectItem value="yaml">YAML</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="h-8 w-auto min-w-[130px] gap-1.5 text-[13px]">
+            <Filter className="h-3.5 w-3.5 shrink-0" />
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="available">Available</SelectItem>
+            <SelectItem value="expired">Expired</SelectItem>
+            <SelectItem value="archived">Archived</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={loading}
+          className="ml-auto h-8 gap-1.5"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh
         </Button>
       </div>
 
-      {/* 筛选栏 */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <Input
-                placeholder="Search by artifact name or pipeline..."
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="max-w-sm"
-              />
-            </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-auto min-w-[150px] gap-1.5">
-                <Filter className="h-4 w-4 shrink-0" />
-                <SelectValue placeholder="Filter by type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="archive">Archive</SelectItem>
-                <SelectItem value="json">JSON</SelectItem>
-                <SelectItem value="docker">Docker</SelectItem>
-                <SelectItem value="html">HTML</SelectItem>
-                <SelectItem value="yaml">YAML</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-auto min-w-[150px] gap-1.5">
-                <Filter className="h-4 w-4 shrink-0" />
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="available">Available</SelectItem>
-                <SelectItem value="expired">Expired</SelectItem>
-                <SelectItem value="archived">Archived</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      <Panel>
+        <PanelHeader
+          title="Artifacts"
+          sub={`${filteredArtifacts.length} recent · ${artifacts.length} total`}
+        />
 
-      {/* Artifacts 列表 */}
-      {filteredArtifacts.length === 0 ? (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center py-8 text-muted-foreground">
-              No artifacts found
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {paginatedArtifacts.map((artifact) => (
-              <Card
-                key={artifact.id}
-                className="hover:shadow-md transition-shadow"
-              >
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-base mb-2">
-                        {artifact.name}
-                      </CardTitle>
-                      <CardDescription className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">
-                            {artifact.type}
-                          </Badge>
-                          <Badge
-                            variant={getStatusBadgeVariant(artifact.status)}
-                            className={getStatusBadgeClassName(artifact.status)}
-                          >
-                            {artifact.status}
-                          </Badge>
-                        </div>
-                        {artifact.pipelineName && (
-                          <div className="text-xs text-muted-foreground">
-                            Pipeline: {artifact.pipelineName}
-                          </div>
-                        )}
-                        <div className="text-xs text-muted-foreground">
-                          Size: {artifact.size}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Created: {formatDate(artifact.createdAt)}
-                        </div>
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => handleDownload(artifact)}
-                    disabled={artifact.status !== "available"}
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Download
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+        {filteredArtifacts.length === 0 ? (
+          <div className="flex items-center justify-center py-16 text-[13px] text-fg-muted">
+            No artifacts match your filters.
           </div>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead><ColumnHead>Name</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Tag</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Type</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Size</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>SHA</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Status</ColumnHead></TableHead>
+                  <TableHead className="text-right"><ColumnHead>Pushed</ColumnHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedArtifacts.map((artifact) => (
+                  <TableRow key={artifact.id}>
+                    <TableCell className="font-mono text-[12.5px] font-medium">
+                      {artifact.name}
+                    </TableCell>
+                    <TableCell className="font-mono text-[12px]">
+                      {artifactTag(artifact)}
+                    </TableCell>
+                    <TableCell className="font-mono text-[12px] text-fg-muted">
+                      {artifact.type}
+                    </TableCell>
+                    <TableCell className="font-mono text-[12px] text-fg-muted">
+                      {artifact.size}
+                    </TableCell>
+                    <TableCell className="font-mono text-[11.5px] text-fg-subtle">
+                      {artifactSha(artifact)}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge tone={artifactStatusToBadgeTone(artifact.status)}>
+                        {artifact.status}
+                      </StatusBadge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="font-mono text-[11px] text-fg-subtle">
+                          {formatDate(artifact.createdAt)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDownload(artifact)}
+                          disabled={artifact.status !== "available"}
+                          className="h-7 gap-1"
+                        >
+                          <Download className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
 
-          {/* 分页控件 */}
-          {totalPages > 1 && (
-            <div className="pt-4 border-t">
-              <DataTablePagination
-                page={pageNum}
-                pageSize={pageSize}
-                total={filteredArtifacts.length}
-                onPageChange={setPageNum}
-              />
-            </div>
-          )}
-        </>
-      )}
+            {totalPages > 1 && (
+              <div className="border-t px-5 py-3">
+                <DataTablePagination
+                  page={pageNum}
+                  pageSize={pageSize}
+                  total={filteredArtifacts.length}
+                  onPageChange={setPageNum}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </Panel>
     </div>
   );
 };

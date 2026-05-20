@@ -15,12 +15,14 @@ function ToastContent({
   iconClassName,
 }: ToastContentProps) {
   return (
-    <div className="flex items-center gap-3">
-      <div className={`flex-shrink-0 ${iconClassName || ""}`}>{icon}</div>
-      <div className="flex-1">
+    <div className="flex items-start gap-3">
+      <div className={`mt-0.5 flex-shrink-0 ${iconClassName || ""}`}>
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
         <div className="font-medium leading-tight">{title}</div>
         {description && (
-          <div className="text-sm opacity-90 mt-1 leading-relaxed">
+          <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
             {typeof description === "string" ? (
               <p>{description}</p>
             ) : (

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import authStore from "@/store/auth";
 import userStore from "@/store/user";
+import permissionStore from "@/store/permission";
 import storage from "@/lib/storage";
 import { getCookie } from "@/lib/utils";
 import { Apis } from "@/api";
@@ -26,6 +27,14 @@ const AuthGuard: FC<AuthGuardProps> = () => {
         return;
       }
       if (auth.initialized) {
+        if (permissionStore.getState().menus.length === 0) {
+          try {
+            await permissionStore.fetch();
+            userStore.setEffectiveActions(permissionStore.getState().actions);
+          } catch {
+            // ignore permission prefetch errors, route guard will handle fallback
+          }
+        }
         return;
       }
 
@@ -182,6 +191,15 @@ const AuthGuard: FC<AuthGuardProps> = () => {
             // 如果 userInfo 中有 role，使用它；否则默认为 'user'
             state.role = (userInfo as any).role || "user";
           });
+
+          try {
+            await permissionStore.fetch();
+            userStore.setEffectiveActions(permissionStore.getState().actions);
+          } catch (permissionError) {
+            if (import.meta.env.DEV) {
+              console.warn("Failed to fetch permission routes:", permissionError);
+            }
+          }
 
           return;
         }
