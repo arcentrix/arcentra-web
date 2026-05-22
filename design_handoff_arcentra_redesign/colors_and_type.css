@@ -1,0 +1,383 @@
+/* =============================================================
+   Arcentra Design System — core tokens
+   Source of truth: arcentra-website/src/app/globals.css (themed)
+                  + arcentra-web/src/styles/global.css (app theme)
+   Defaults to DARK (matches the brand's primary mode).
+   ============================================================= */
+
+@font-face {
+  font-family: "Geist";
+  src: url("./fonts/Geist[wght].woff2") format("woff2-variations"),
+       url("./fonts/Geist[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ── Font stacks ─────────────────────────────────────────── */
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "Noto Sans SC", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono",
+               Menlo, Consolas, monospace;
+
+  /* ── Neutral scale (zinc-leaning, fully chroma-free) ─────── */
+  /* Using oklch keeps perceptual lightness consistent across themes */
+  --neutral-0:   oklch(1     0 0);  /* pure white       */
+  --neutral-50:  oklch(0.985 0 0);
+  --neutral-100: oklch(0.97  0 0);
+  --neutral-200: oklch(0.922 0 0);
+  --neutral-300: oklch(0.85  0 0);
+  --neutral-400: oklch(0.72  0 0);
+  --neutral-500: oklch(0.55  0 0);
+  --neutral-600: oklch(0.439 0 0);
+  --neutral-700: oklch(0.34  0 0);
+  --neutral-800: oklch(0.269 0 0);
+  --neutral-850: oklch(0.205 0 0);
+  --neutral-900: oklch(0.185 0 0);
+  --neutral-950: oklch(0.145 0 0); /* near-black, brand canvas */
+
+  /* ── Semantic accents (used sparingly — status only) ─────── */
+  --accent-success: oklch(0.696 0.17  162.48);  /* emerald-500 */
+  --accent-info:    oklch(0.7   0.14  220);     /* sky-500    */
+  --accent-warn:    oklch(0.8   0.18  84);      /* amber-500  */
+  --accent-danger:  oklch(0.645 0.246 16.4);    /* rose-500   */
+  --accent-violet:  oklch(0.627 0.265 303.9);
+
+  /* ── BRAND SIGNAL ────────────────────────────────────────────
+     One distinctive Arcentra accent. Used VERY sparingly:
+     - the wordmark glyph (the trailing slash in `arcentra/`)
+     - the active route indicator in the dock
+     - `running` / live status (replaces sky)
+     - subtle focus / hover rings on the primary CTA
+     Never as a background fill, never as a gradient stop. */
+  --brand-signal:     oklch(0.82 0.16 195);   /* desaturated electric cyan */
+  --brand-signal-dim: oklch(0.65 0.11 195);   /* same hue, lower lightness, for borders/rings on dark */
+  --brand-signal-bg:  color-mix(in oklab, var(--brand-signal) 12%, transparent);
+
+  /* ─────────────────────────────────────────────────────────
+     DARK THEME (DEFAULT) — the marketing site and most app
+     surfaces ship this way. Background is true near-black,
+     borders/text desaturated zinc.
+     ───────────────────────────────────────────────────────── */
+  --bg:              var(--neutral-950);
+  --bg-elevated:     var(--neutral-900);
+  --bg-card:         var(--neutral-950);
+
+  --fg:              var(--neutral-50);   /* primary text */
+  --fg-muted:        var(--neutral-400);  /* secondary    */
+  --fg-subtle:       var(--neutral-500);  /* hint / meta  */
+
+  --border:          var(--neutral-800);
+  --border-strong:   var(--neutral-700);
+
+  --accent-bg:       var(--neutral-50);   /* inverted (primary CTA bg) */
+  --accent-fg:       var(--neutral-950);  /* inverted (primary CTA fg) */
+
+  --grid-dot:        oklch(0.3 0 0);
+
+  /* ── Radii ──────────────────────────────────────────────── */
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   8px;   /* button default */
+  --radius-lg:   10px;  /* button-lg */
+  --radius-xl:   12px;
+  --radius-2xl:  16px;  /* card default */
+  --radius-3xl:  24px;  /* large card */
+  --radius-full: 9999px;
+
+  /* ── Spacing scale (4px base; same as tailwind default) ──── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* ── Shadows / elevation ────────────────────────────────────
+     The dark theme uses *inner highlight* + soft drop, never
+     a colored glow.                                         */
+  --shadow-elevated:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-overlay:
+    0 8px 32px -8px rgba(0, 0, 0, 0.6),
+    0 0 0 1px var(--border);
+
+  /* Inset border (used for active tab pill, focused chip) */
+  --ring-inset: inset 0 0 0 1px var(--border-strong);
+
+  /* ── Type scale ─────────────────────────────────────────── */
+  /* Display = hero. tracking is negative for tight Geist look. */
+  --text-display-1-size:    64px;
+  --text-display-1-leading: 1.04;
+  --text-display-1-track:   -0.025em;
+
+  --text-display-2-size:    48px;
+  --text-display-2-leading: 1.06;
+  --text-display-2-track:   -0.025em;
+
+  --text-h1-size:    36px;
+  --text-h1-leading: 1.1;
+  --text-h1-track:   -0.02em;
+
+  --text-h2-size:    24px;
+  --text-h2-leading: 1.2;
+  --text-h2-track:   -0.015em;
+
+  --text-h3-size:    18px;
+  --text-h3-leading: 1.3;
+  --text-h3-track:   -0.01em;
+
+  --text-body-size:    15px;
+  --text-body-leading: 1.6;
+
+  --text-small-size:    13px;
+  --text-small-leading: 1.55;
+
+  --text-meta-size:    11px;
+  --text-meta-leading: 1.4;
+  --text-meta-track:   0.08em; /* uppercase mono meta uses tracked caps */
+
+  /* ── Animation ──────────────────────────────────────────── */
+  --easing-out:    cubic-bezier(0.16, 1, 0.3, 1); /* smooth deceleration  */
+  --easing-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-1:    120ms;
+  --duration-2:    160ms;
+  --duration-3:    220ms;
+  --duration-4:    400ms;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   LIGHT THEME — opt-in via .light on <html>. Same hue system,
+   inverted neutrals. Marketing site supports it via next-themes;
+   the app ships with this also.
+   ────────────────────────────────────────────────────────────── */
+.light, :root.light {
+  --bg:              var(--neutral-0);
+  --bg-elevated:     var(--neutral-50);
+  --bg-card:         var(--neutral-0);
+
+  --fg:              var(--neutral-950);
+  --fg-muted:        oklch(0.45 0 0);
+  --fg-subtle:       oklch(0.6  0 0);
+
+  --border:          var(--neutral-200);
+  --border-strong:   var(--neutral-300);
+
+  --accent-bg:       var(--neutral-950);
+  --accent-fg:       var(--neutral-50);
+
+  --grid-dot:        oklch(0.85 0 0);
+
+  /* Brand signal needs more lightness contrast on white surfaces —
+     drop ~0.27 in L while keeping the hue and chroma. */
+  --brand-signal:     oklch(0.55 0.15 200);
+  --brand-signal-dim: oklch(0.7  0.10 200);
+  --brand-signal-bg:  color-mix(in oklab, var(--brand-signal) 10%, transparent);
+
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-elevated:
+    0 1px 0 0 rgba(255, 255, 255, 0.6) inset,
+    0 8px 24px -12px rgba(0, 0, 0, 0.18);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Base element styles — semantic targets agents can write against
+   without restating tokens. Mirrors the production CSS reset.
+   ────────────────────────────────────────────────────────────── */
+html { color-scheme: dark; }
+html.light { color-scheme: light; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--fg); color: var(--bg); }
+
+h1, .h1 {
+  font-size: var(--text-h1-size);
+  line-height: var(--text-h1-leading);
+  letter-spacing: var(--text-h1-track);
+  font-weight: 500;
+  margin: 0;
+}
+h2, .h2 {
+  font-size: var(--text-h2-size);
+  line-height: var(--text-h2-leading);
+  letter-spacing: var(--text-h2-track);
+  font-weight: 500;
+  margin: 0;
+}
+h3, .h3 {
+  font-size: var(--text-h3-size);
+  line-height: var(--text-h3-leading);
+  letter-spacing: var(--text-h3-track);
+  font-weight: 600;
+  margin: 0;
+}
+p { margin: 0; }
+code, kbd, samp, pre, .mono {
+  font-family: var(--font-mono);
+}
+
+.display-1 {
+  font-size: clamp(40px, 6vw, var(--text-display-1-size));
+  line-height: var(--text-display-1-leading);
+  letter-spacing: var(--text-display-1-track);
+  font-weight: 500;
+}
+.display-2 {
+  font-size: clamp(32px, 5vw, var(--text-display-2-size));
+  line-height: var(--text-display-2-leading);
+  letter-spacing: var(--text-display-2-track);
+  font-weight: 500;
+}
+
+/* Eyebrow / meta label: the brand's signature uppercase-mono caption,
+   used above every section title on marketing and inside every dashboard card. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  line-height: var(--text-meta-leading);
+  letter-spacing: var(--text-meta-track);
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+/* Decorative dot grid background — appears behind every hero & CTA. */
+.grid-bg {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--grid-dot) 1px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   BLUEPRINT GRID — Arcentra's signature background. Engineering
+   graph paper: minor 8px lines + major 32px lines, both stroked
+   in --grid-dot at low contrast. Replaces the dot-grid as the
+   default brand texture (dot-grid is kept for legacy uses).
+   ────────────────────────────────────────────────────────────── */
+.blueprint-bg {
+  background-image:
+    linear-gradient(to right, var(--grid-dot) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-dot) 1px, transparent 1px),
+    linear-gradient(to right, color-mix(in oklab, var(--grid-dot) 50%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--grid-dot) 50%, transparent) 1px, transparent 1px);
+  background-size: 64px 64px, 64px 64px, 16px 16px, 16px 16px;
+  background-position: 0 0, 0 0, 0 0, 0 0;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   BRACKET FRAME — 4 corner brackets like a blueprint section
+   marker. Apply to any positioned container (`position: relative`).
+   The brackets sit *outside* the element's padding so they don't
+   clip the content.
+   ────────────────────────────────────────────────────────────── */
+.bracket-frame { position: relative; }
+.bracket-frame::before,
+.bracket-frame::after,
+.bracket-frame > .bracket-tl,
+.bracket-frame > .bracket-br {
+  /* fallback: only ::before / ::after used, sized to 14px */
+}
+.bracket-frame::before,
+.bracket-frame::after {
+  content: "";
+  position: absolute;
+  width: 14px; height: 14px;
+  border: 1px solid var(--brand-signal-dim);
+  pointer-events: none;
+  opacity: 0.7;
+}
+.bracket-frame::before {
+  top: -1px; left: -1px;
+  border-right: none; border-bottom: none;
+}
+.bracket-frame::after {
+  bottom: -1px; right: -1px;
+  border-left: none; border-top: none;
+}
+
+/* Display-mono utility: keep Geist Mono available for the wordmark, FIG
+   captions, and engineering meta lines — but DO NOT use it on hero/h1/h2
+   headlines. The brand's headlines now run on Geist Sans @ 600 for the
+   commercial / SaaS gravitas that mono couldn't carry. */
+.display-mono, .h-mono {
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+  font-weight: 500;
+}
+
+/* Display (Sans, semibold) — the headline treatment for marketing
+   heroes, section h2s, and large dashboard titles. Carries weight
+   without being flippant. */
+.display {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+}
+
+/* Measure line: a thin signal underline under big numeric readouts.
+   Apply to a wrapper around <span class="value">. */
+.reading {
+  position: relative;
+  padding-bottom: 6px;
+  display: inline-block;
+}
+.reading::after {
+  content: "";
+  position: absolute;
+  left: 0; bottom: 0;
+  width: 32px; height: 1px;
+  background: var(--brand-signal);
+  opacity: 0.6;
+}
+
+/* Eyebrow prefix utility: prepends a thin signal-colored arrow head. */
+.eyebrow-arrow::before {
+  content: "▸";
+  margin-right: 6px;
+  color: var(--brand-signal);
+  opacity: 0.9;
+}
+
+.fade-mask-radial {
+  -webkit-mask-image: radial-gradient(ellipse at top, black 30%, transparent 75%);
+          mask-image: radial-gradient(ellipse at top, black 30%, transparent 75%);
+}
+.fade-mask-y {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 70%, transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 70%, transparent 100%);
+}
+
+@keyframes pulse-dot { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+.pulse-dot { animation: pulse-dot 2s var(--easing-in-out) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

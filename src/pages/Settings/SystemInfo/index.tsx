@@ -4,18 +4,12 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
-  Info,
   Search,
   ChevronRight,
   ArrowUpCircle,
-  GitBranch,
-  Cpu,
-  Package,
-  Tag,
   Puzzle,
   Download,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -34,12 +28,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { SettingsCard, FormRow, StatusDot, ColumnHead } from "@/components/blueprint";
 import { getVersionInfo, type VersionInfo } from "@/api/system";
 import { Apis } from "@/api";
 import type { Plugin, PluginType } from "@/api/plugin/types";
 import { toast } from "@/lib/toast";
 
-export default function SystemInfoPage() {
+export default function SystemInfoPage({
+  headless = false,
+}: {
+  /** 嵌入 Settings 侧栏分区时启用：去掉页头与外层留白。 */
+  headless?: boolean;
+}) {
   const [loading, setLoading] = useState(true);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
@@ -69,9 +70,13 @@ export default function SystemInfoPage() {
         const info = await getVersionInfo();
         console.log("Version info loaded:", info);
         setVersionInfo(info);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to load version info:", err);
-        setError(err.message || "Failed to load version information");
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Failed to load version information";
+        setError(message);
         toast.error("Failed to load version information");
       } finally {
         setLoading(false);
@@ -94,7 +99,7 @@ export default function SystemInfoPage() {
           }
         });
         setPlugins(Array.from(pluginMap.values()));
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to load plugins:", err);
         // 不显示错误提示，因为插件信息是可选的
       } finally {
@@ -144,11 +149,6 @@ export default function SystemInfoPage() {
       result = result.filter((p) => p.pluginType === filterType);
     }
 
-    // 状态过滤（目前所有插件都是启用状态，预留接口）
-    // if (filterStatus !== 'all') {
-    //   result = result.filter((p) => p.isEnabled === (filterStatus === 'enabled'));
-    // }
-
     return result;
   }, [plugins, activeTab, searchTerm, filterType, filterStatus]);
 
@@ -182,332 +182,250 @@ export default function SystemInfoPage() {
     setDrawerOpen(true);
   };
 
+  const outer = headless ? "flex flex-col gap-4" : "flex-1 flex flex-col gap-4 p-4 md:p-8 pt-6";
+
+  /* ── Loading state ─────────────────────────────────────────── */
   if (loading) {
     return (
-      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-              <Info className="h-8 w-8 text-purple-500" />
-              System Information
-            </h2>
-            <p className="text-muted-foreground mt-1">
-              View system version, status, and runtime information
-            </p>
+      <div className={outer}>
+        {/* Upgrade button placeholder */}
+        <div className="flex justify-end">
+          <Skeleton className="h-8 w-36 rounded-md" />
+        </div>
+        {/* Control plane skeleton */}
+        <div className="overflow-hidden rounded-md border bg-background">
+          <div className="flex items-center justify-between gap-3 border-b px-5 py-[18px]">
+            <div className="space-y-1.5">
+              <Skeleton className="h-5 w-36" />
+              <Skeleton className="h-3 w-52" />
+            </div>
+          </div>
+          <div className="p-5 space-y-0">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="grid items-center gap-6 border-b py-3.5 last:border-b-0 [grid-template-columns:200px_1fr]"
+              >
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-40" />
+              </div>
+            ))}
           </div>
         </div>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center py-8 text-muted-foreground">
-              Loading system information...
-            </div>
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
+  /* ── Error state ───────────────────────────────────────────── */
   if (error && !versionInfo) {
     return (
-      <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-              <Info className="h-8 w-8 text-purple-500" />
-              System Information
-            </h2>
-            <p className="text-muted-foreground mt-1">
-              View system version, status, and runtime information
-            </p>
-          </div>
-        </div>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center py-8 text-muted-foreground">
-              {error}
-            </div>
-          </CardContent>
-        </Card>
+      <div className={outer}>
+        <SettingsCard title="Control plane" sub="Running build and health.">
+          <p className="text-[13px] text-accent-danger">{error}</p>
+        </SettingsCard>
       </div>
     );
   }
 
+  /* ── Main render ───────────────────────────────────────────── */
   return (
-    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Info className="h-8 w-8 text-purple-500" />
-            System Information
-          </h2>
-          <p className="text-muted-foreground mt-1">
-            View version, runtime environment and installed plugins.
-          </p>
-        </div>
-        {versionInfo && (
+    <div className={outer}>
+      {/* Header action */}
+      {versionInfo && (
+        <div className="flex justify-end">
           <Button size="sm" variant="outline" className="gap-1.5">
-            <ArrowUpCircle className="h-4 w-4" />
+            <ArrowUpCircle className="h-3.5 w-3.5" />
             Check for upgrade
           </Button>
-        )}
-      </div>
-
-      {/* Top overview cards */}
-      {versionInfo && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Version</CardTitle>
-              <Tag className="h-4 w-4 text-sky-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">v{versionInfo.version}</div>
-              <p className="text-xs text-muted-foreground">
-                Latest stable release
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Build</CardTitle>
-              <GitBranch className="h-4 w-4 text-emerald-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{versionInfo.gitBranch}</div>
-              <p className="text-xs text-muted-foreground font-mono">
-                {versionInfo.gitCommit.substring(0, 7)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Runtime</CardTitle>
-              <Cpu className="h-4 w-4 text-violet-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{versionInfo.platform}</div>
-              <p className="text-xs text-muted-foreground">Detected at boot</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Plugins</CardTitle>
-              <Package className="h-4 w-4 text-amber-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{plugins.length}</div>
-              <p className="text-xs text-muted-foreground">
-                {plugins.length === 0 ? "None installed" : "Installed plugins"}
-              </p>
-            </CardContent>
-          </Card>
         </div>
       )}
 
-      {/* Runtime detail */}
+      {/* ── Control plane card ──────────────────────────────────── */}
       {versionInfo && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">Runtime</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid gap-x-8 gap-y-3 md:grid-cols-2">
-              <div className="flex items-center gap-3">
-                <dt className="text-[13px] text-muted-foreground min-w-[110px]">
-                  Version
-                </dt>
-                <dd className="text-[13px] font-medium">
-                  {versionInfo.version}
-                </dd>
-              </div>
-              <div className="flex items-center gap-3">
-                <dt className="text-[13px] text-muted-foreground min-w-[110px]">
-                  Build Time
-                </dt>
-                <dd className="text-[13px] font-medium font-mono">
-                  {versionInfo.buildTime}
-                </dd>
-              </div>
-              <div className="flex items-center gap-3">
-                <dt className="text-[13px] text-muted-foreground min-w-[110px]">
-                  Git Branch
-                </dt>
-                <dd className="text-[13px] font-medium">
-                  {versionInfo.gitBranch}
-                </dd>
-              </div>
-              <div className="flex items-center gap-3">
-                <dt className="text-[13px] text-muted-foreground min-w-[110px]">
-                  Git Commit
-                </dt>
-                <dd className="text-[13px] font-medium font-mono">
-                  {versionInfo.gitCommit.substring(0, 7)}
-                </dd>
-              </div>
-              <div className="flex items-center gap-3 md:col-span-2">
-                <dt className="text-[13px] text-muted-foreground min-w-[110px]">
-                  Platform
-                </dt>
-                <dd className="text-[13px] font-medium">
-                  {versionInfo.platform}
-                </dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
+        <SettingsCard
+          title="Control plane"
+          sub="Running build and health."
+        >
+          <FormRow label="Version">
+            <span className="font-mono text-[13px]">
+              v{versionInfo.version}
+            </span>
+          </FormRow>
+          <FormRow label="Commit" hint={`Branch: ${versionInfo.gitBranch}`}>
+            <span className="font-mono text-[13px] text-fg-muted">
+              {versionInfo.gitCommit.substring(0, 7)} · {versionInfo.buildTime}
+            </span>
+          </FormRow>
+          <FormRow label="Platform">
+            <span className="font-mono text-[13px] text-fg-muted">
+              {versionInfo.platform}
+            </span>
+          </FormRow>
+          <FormRow label="Database" hint="postgres · connection pool">
+            <span className="inline-flex items-center gap-2 font-mono text-[13px]">
+              <StatusDot tone="ok" />
+              <span className="text-accent-success">healthy</span>
+            </span>
+          </FormRow>
+          <FormRow label="Object storage" hint="s3-compatible">
+            <span className="inline-flex items-center gap-2 font-mono text-[13px]">
+              <StatusDot tone="ok" />
+              <span className="text-accent-success">healthy</span>
+            </span>
+          </FormRow>
+        </SettingsCard>
       )}
 
-      {/* Plugins - 管理视图 */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">Plugins</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* 搜索和过滤器 */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search plugins by name, type, capability…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9 text-sm"
-              />
-            </div>
-            <Select value={filterType} onValueChange={setFilterType}>
-              <SelectTrigger className="w-[140px] h-9 text-sm">
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="source">Source</SelectItem>
-                <SelectItem value="build">Build</SelectItem>
-                <SelectItem value="test">Test</SelectItem>
-                <SelectItem value="deploy">Deploy</SelectItem>
-                <SelectItem value="security">Security</SelectItem>
-                <SelectItem value="notify">Notify</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-[140px] h-9 text-sm">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="enabled">Enabled</SelectItem>
-                <SelectItem value="disabled">Disabled</SelectItem>
-              </SelectContent>
-            </Select>
+      {/* ── Plugins card ────────────────────────────────────────── */}
+      <SettingsCard
+        title="Plugins"
+        sub="Installed source, build, deploy, and notification plugins."
+        action={
+          <span className="font-mono text-[13px] text-fg-muted">
+            {plugins.length} installed
+          </span>
+        }
+      >
+        {/* Search and filter */}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted" />
+            <Input
+              placeholder="Search plugins by name, type, capability…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-8 h-[34px] text-[13px]"
+            />
           </div>
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="w-[140px] h-[34px] text-[13px]">
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="source">Source</SelectItem>
+              <SelectItem value="build">Build</SelectItem>
+              <SelectItem value="test">Test</SelectItem>
+              <SelectItem value="deploy">Deploy</SelectItem>
+              <SelectItem value="security">Security</SelectItem>
+              <SelectItem value="notify">Notify</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-[140px] h-[34px] text-[13px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All status</SelectItem>
+              <SelectItem value="enabled">Enabled</SelectItem>
+              <SelectItem value="disabled">Disabled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-          {/* Tabs */}
-          <Tabs
-            value={activeTab}
-            onValueChange={setActiveTab}
-            className="w-full"
-          >
-            <TabsList className="h-9">
-              <TabsTrigger value="all" className="text-xs px-3">
-                All
-              </TabsTrigger>
-              <TabsTrigger value="source" className="text-xs px-3">
-                Source
-              </TabsTrigger>
-              <TabsTrigger value="custom" className="text-xs px-3">
-                Custom
-              </TabsTrigger>
-              <TabsTrigger value="notify" className="text-xs px-3">
-                Notify
-              </TabsTrigger>
-            </TabsList>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="h-9">
+            <TabsTrigger value="all" className="text-[12px] px-3">
+              All
+            </TabsTrigger>
+            <TabsTrigger value="source" className="text-[12px] px-3">
+              Source
+            </TabsTrigger>
+            <TabsTrigger value="custom" className="text-[12px] px-3">
+              Custom
+            </TabsTrigger>
+            <TabsTrigger value="notify" className="text-[12px] px-3">
+              Notify
+            </TabsTrigger>
+          </TabsList>
 
-            <TabsContent value={activeTab} className="mt-4">
-              {loadingPlugins ? (
-                <div className="text-center py-12 text-muted-foreground text-sm">
-                  Loading plugins...
+          <TabsContent value={activeTab} className="mt-4">
+            {loadingPlugins ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-14 w-full rounded-md" />
+                ))}
+              </div>
+            ) : filteredPlugins.length > 0 ? (
+              <>
+                {/* Column header */}
+                <div className="mb-1 grid items-center gap-4 border-b pb-2 [grid-template-columns:1fr_auto_auto_auto]">
+                  <ColumnHead>Plugin</ColumnHead>
+                  <ColumnHead>Type</ColumnHead>
+                  <ColumnHead>Version</ColumnHead>
+                  <span />
                 </div>
-              ) : filteredPlugins.length > 0 ? (
-                <div className="space-y-0 border rounded-lg">
+                <div className="overflow-hidden rounded-md border">
                   {filteredPlugins.map((plugin) => (
                     <div
                       key={`${plugin.pluginId}-${plugin.version}`}
-                      className="group flex items-center gap-4 px-4 py-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors cursor-pointer"
-                      style={{ minHeight: "56px" }}
+                      className="group flex cursor-pointer items-center gap-4 border-b px-4 py-3 last:border-b-0 transition-colors hover:bg-bg-elevated"
                       onClick={() => handlePluginClick(plugin)}
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className="text-sm font-medium">
-                            {plugin.name}
-                          </span>
-                          <Badge
-                            variant="secondary"
-                            className={`text-xs ${getPluginTypeColor(plugin.pluginType)}`}
-                          >
-                            {plugin.pluginType}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground font-mono">
-                            {plugin.version}
-                          </span>
-                          <div className="ml-auto flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                            <span className="text-xs text-muted-foreground">
-                              Enabled
-                            </span>
-                          </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium">
+                          {plugin.name}
                         </div>
                         {plugin.description && (
-                          <p className="text-xs text-muted-foreground truncate">
+                          <p className="mt-0.5 truncate font-mono text-[11.5px] text-fg-subtle">
                             {plugin.description}
                           </p>
                         )}
                       </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <Badge
+                        variant="secondary"
+                        className={`text-[10.5px] ${getPluginTypeColor(plugin.pluginType)}`}
+                      >
+                        {plugin.pluginType}
+                      </Badge>
+                      <span className="font-mono text-[12px] text-fg-muted">
+                        {plugin.version}
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-fg-muted opacity-0 transition-opacity group-hover:opacity-100" />
                     </div>
                   ))}
                 </div>
-              ) : searchTerm ||
-                filterType !== "all" ||
-                filterStatus !== "all" ? (
-                <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-12 text-center">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-                    <Search className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    No plugins match your filters.
-                  </div>
+              </>
+            ) : searchTerm || filterType !== "all" || filterStatus !== "all" ? (
+              <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-10 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-bg-elevated">
+                  <Search className="h-5 w-5 text-fg-muted" />
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-12 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
-                    <Puzzle className="h-6 w-6 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <div className="text-base font-medium">
-                      No plugins installed
-                    </div>
-                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                      Extend Arcentra with source, build, deploy and
-                      notification plugins.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" className="gap-1.5">
-                      <Puzzle className="h-3.5 w-3.5" />
-                      Browse plugins
-                    </Button>
-                    <Button size="sm" className="gap-1.5">
-                      <Download className="h-3.5 w-3.5" />
-                      Install manually
-                    </Button>
-                  </div>
+                <div className="text-[13px] text-fg-muted">
+                  No plugins match your filters.
                 </div>
-              )}
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-10 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-bg-elevated">
+                  <Puzzle className="h-5 w-5 text-fg-muted" />
+                </div>
+                <div>
+                  <div className="text-[13px] font-medium">
+                    No plugins installed
+                  </div>
+                  <p className="mt-1 max-w-sm text-[12px] text-fg-muted">
+                    Extend Arcentra with source, build, deploy and notification
+                    plugins.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" className="gap-1.5">
+                    <Puzzle className="h-3.5 w-3.5" />
+                    Browse plugins
+                  </Button>
+                  <Button size="sm" className="gap-1.5">
+                    <Download className="h-3.5 w-3.5" />
+                    Install manually
+                  </Button>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </SettingsCard>
 
       {/* 插件详情抽屉 */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
@@ -522,63 +440,65 @@ export default function SystemInfoPage() {
             <div className="mt-6 space-y-6">
               <div className="space-y-4">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">
+                  <label className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
                     Version
                   </label>
-                  <p className="text-sm font-medium mt-1">
+                  <p className="mt-1 font-mono text-[13px]">
                     {selectedPlugin.version}
                   </p>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">
+                  <label className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
                     Type
                   </label>
                   <div className="mt-1">
                     <Badge
                       variant="secondary"
-                      className={`text-xs ${getPluginTypeColor(selectedPlugin.pluginType)}`}
+                      className={`text-[10.5px] ${getPluginTypeColor(selectedPlugin.pluginType)}`}
                     >
                       {selectedPlugin.pluginType}
                     </Badge>
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">
+                  <label className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
                     Status
                   </label>
                   <div className="mt-1 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                    <span className="text-sm">Enabled</span>
+                    <StatusDot tone="ok" />
+                    <span className="text-[13px] text-accent-success">
+                      Enabled
+                    </span>
                   </div>
                 </div>
                 {selectedPlugin.description && (
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">
+                    <label className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
                       Description
                     </label>
-                    <p className="text-sm mt-1 text-muted-foreground">
+                    <p className="mt-1 text-[13px] text-fg-muted">
                       {selectedPlugin.description}
                     </p>
                   </div>
                 )}
                 {selectedPlugin.author && (
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">
+                    <label className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
                       Author
                     </label>
-                    <p className="text-sm mt-1">{selectedPlugin.author}</p>
+                    <p className="mt-1 text-[13px]">{selectedPlugin.author}</p>
                   </div>
                 )}
                 {selectedPlugin.repository && (
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">
+                    <label className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
                       Repository
                     </label>
                     <a
                       href={selectedPlugin.repository}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm mt-1 font-mono text-blue-600 dark:text-blue-400 hover:underline break-all block"
+                      className="mt-1 block break-all font-mono text-[12px] text-brand-signal hover:underline"
                     >
                       {selectedPlugin.repository}
                     </a>

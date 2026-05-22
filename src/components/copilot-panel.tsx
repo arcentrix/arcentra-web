@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, History, MessageSquare, Sparkles } from "lucide-react";
+import { ArrowRight, MessageSquare, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { uiShellStore } from "@/store/ui-shell";
 
-const DEFAULT_WORKSPACE = "ML Model Training";
+const DEFAULT_WORKSPACE = "Copilot";
 
 const SUGGESTED_PROMPTS = [
   "Why did this pipeline fail?",
@@ -105,30 +105,15 @@ export function CopilotPanel() {
             </div>
 
             <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              The full conversation experience lives in workspace chat. Pick a
-              prompt above or open the full chat below to keep context across
-              sessions.
+              The full Copilot keeps context across sessions — pick a prompt
+              above, or open it for the complete experience.
             </div>
           </div>
 
           <div className="flex flex-col gap-2 border-t p-4">
             <Button size="sm" className="gap-2" onClick={() => openFullChat()}>
               <MessageSquare className="h-4 w-4" />
-              Open full chat
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2"
-              onClick={() => {
-                uiShellStore.closeCopilot();
-                navigate(
-                  `/workspace/${encodeURIComponent(DEFAULT_WORKSPACE)}/history`,
-                );
-              }}
-            >
-              <History className="h-4 w-4" />
-              View history
+              Open Copilot
             </Button>
           </div>
         </SheetContent>

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Arcentra — Control Plane</title>
+<link rel="icon" href="../../assets/favicon-32x32.png" sizes="32x32" />
+<link rel="stylesheet" href="../../colors_and_type.css" />
+<style>
+  html, body { background: var(--bg); }
+  body { margin: 0; min-height: 100dvh; }
+
+  /* Helper classes used by Icon className passes */
+  .muted  { color: var(--fg-muted); }
+  .ok     { color: var(--accent-success); }
+  .fail   { color: var(--accent-danger); }
+  .warn   { color: var(--accent-warn); }
+  .info   { color: var(--accent-info); }
+  .violet { color: var(--accent-violet); }
+
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* App layout shell: AppDock fixed-left, main content pushed by 56px gutter */
+  .app-shell {
+    min-height: 100dvh;
+    padding-left: 56px;
+    transition: padding-left 200ms var(--easing-out);
+  }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="../_shared/primitives.jsx"></script>
+<script type="text/babel" src="./_pages.jsx"></script>
+<script type="text/babel" src="./AppDock.jsx"></script>
+<script type="text/babel" src="./TopBar.jsx"></script>
+<script type="text/babel" src="./Dashboard.jsx"></script>
+<script type="text/babel" src="./Projects.jsx"></script>
+<script type="text/babel" src="./ProjectDetail.jsx"></script>
+<script type="text/babel" src="./Build.jsx"></script>
+<script type="text/babel" src="./Deploy.jsx"></script>
+<script type="text/babel" src="./Agents.jsx"></script>
+<script type="text/babel" src="./Observe.jsx"></script>
+<script type="text/babel" src="./Secure.jsx"></script>
+<script type="text/babel" src="./Settings.jsx"></script>
+<script type="text/babel" src="./Account.jsx"></script>
+<script type="text/babel" src="./Inbox.jsx"></script>
+<script type="text/babel" src="./Chat.jsx"></script>
+<script type="text/babel" src="./LoginForm.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+function App() {
+  const [authed, setAuthed] = React.useState(true);  // start signed in
+  const [route, setRoute] = React.useState("/");
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [projectId, setProjectId] = React.useState(null);
+
+  // ⌘K shortcut
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      } else if (e.key === "Escape") {
+        setPaletteOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  if (!authed) {
+    return (
+      <div data-screen-label="Login">
+        <LoginForm onLogin={() => setAuthed(true)} />
+      </div>
+    );
+  }
+
+  const breadcrumbMap = {
+    "/":             ["Arcentra", "Overview"],
+    "/projects":     ["Arcentra", "Projects"],
+    "/project":      ["Arcentra", "Projects", projectId || "—"],
+    "/build":        ["Arcentra", "Build"],
+    "/deploy":       ["Arcentra", "Deploy"],
+    "/agents":       ["Arcentra", "Agents"],
+    "/chat":         ["Arcentra", "Copilot"],
+    "/observe":      ["Arcentra", "Observe"],
+    "/secure":       ["Arcentra", "Secure"],
+    "/settings":     ["Arcentra", "Settings"],
+    "/account":      ["Arcentra", "Account"],
+    "/inbox":        ["Arcentra", "Inbox"],
+  };
+
+  return (
+    <div data-screen-label={`App · ${route}`}>
+      <AppDock
+        active={route}
+        onNavigate={(url) => { setRoute(url); setProjectId(null); }}
+        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenAccount={() => setRoute("/account")}
+        onSignOut={() => setAuthed(false)}
+      />
+      <div className="app-shell">
+        <TopBar
+          breadcrumb={breadcrumbMap[route] || ["Arcentra"]}
+          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenInbox={() => setRoute("/inbox")}
+          unreadCount={3}
+        />
+        {route === "/"         && <Dashboard />}
+        {route === "/projects" && <Projects onOpen={(id) => { setProjectId(id); setRoute("/project"); }} />}
+        {route === "/project"  && <ProjectDetail projectId={projectId} onBack={() => setRoute("/projects")} />}
+        {route === "/build"    && <Build />}
+        {route === "/deploy"   && <Deploy />}
+        {route === "/agents"   && <Agents />}
+        {route === "/chat"     && <Chat />}
+        {route === "/observe"  && <Observe />}
+        {route === "/secure"   && <Secure />}
+        {route === "/settings" && <Settings />}
+        {route === "/account"  && <Account />}
+        {route === "/inbox"    && <Inbox />}
+      </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>

@@ -1,47 +1,78 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { ToastContainer } from "react-toastify";
 import { useTheme } from "@/hooks/use-theme";
 import AuthGuard from "@/components/Layouts/AuthGuard";
 import DefaultLayouts from "@/components/Layouts/default";
 import DockLayout from "@/components/Layouts/dock-layout";
+import permissionStore from "@/store/permission";
+import { buildDynamicRoutes } from "@/router/build-dynamic-routes";
 import Login from "./Login";
 import Register from "./Register";
-import Dashboard from "./Dashboard";
-import ProjectsIndex from "./Projects";
-import ProjectDetail from "./Projects/Detail";
-import ProjectDetailOverview from "./Projects/Detail/Overview";
-import ProjectPipelines from "./Project/Pipelines";
-import PipelineDetail from "./Project/Pipelines/Detail";
-import PipelineHistory from "./Project/Pipelines/History";
-import ProjectDeployments from "./Project/Deployments";
-import ProjectArtifacts from "./Project/Artifacts";
-import ProjectEnvironments from "./Project/Environments";
-import ProjectSecrets from "./Project/Secrets";
-import ProjectSettings from "./Project/Settings";
-import ProjectMembers from "./Project/Members";
-import AgentsOverview from "./Models/Agents/Overview";
-import AgentsDetail from "./Models/Agents/Detail";
-import Build from "./Build";
-import Deploy from "./Deploy";
-import Observe from "./Observe";
-import Secure from "./Secure";
-import Identity from "./Identity";
-import Users from "./Users";
-import Roles from "./Roles";
-import Settings from "./Settings";
-import SettingsNotifications from "./Settings/Notifications";
-import SettingsSystemInfo from "./Settings/SystemInfo";
-import Access from "./Access";
-import GeneralSettings from "./GeneralSettings";
+import Forbidden from "./Forbidden";
 import { AuthCallback } from "./AuthCallback";
-import LLMDialogueChat from "./LLMDialogue/Chat";
-import LLMDialogueHistory from "./LLMDialogue/History";
-import Inbox from "./Inbox";
 import NotFound from "./NotFound";
 import "react-toastify/dist/ReactToastify.css";
 
+const AccountPage = lazy(() => import("./Account"));
+const ChatPage = lazy(() => import("./Copilot"));
+const InboxPage = lazy(() => import("./Inbox"));
+const AgentsDetailPage = lazy(() => import("./Models/Agents/Detail"));
+const ProjectDetailPage = lazy(() => import("./Projects/Detail"));
+const ProjectOverviewPage = lazy(() => import("./Projects/Detail/Overview"));
+const ProjectPipelinesPage = lazy(() => import("./Project/Pipelines"));
+const PipelineHistoryPage = lazy(() => import("./Project/Pipelines/History"));
+const PipelineDetailPage = lazy(() => import("./Project/Pipelines/Detail"));
+const ProjectDeploymentsPage = lazy(() => import("./Project/Deployments"));
+const ProjectArtifactsPage = lazy(() => import("./Project/Artifacts"));
+const ProjectEnvironmentsPage = lazy(() => import("./Project/Environments"));
+const ProjectSecretsPage = lazy(() => import("./Project/Secrets"));
+const ProjectSettingsPage = lazy(() => import("./Project/Settings"));
+const ProjectMembersPage = lazy(() => import("./Project/Members"));
+
+/** 懒加载页面的 Suspense 包裹。 */
+function Lazy({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
+function PermissionLoading() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+      Loading workspace...
+    </div>
+  );
+}
+
 function App() {
   const { resolvedTheme } = useTheme();
+  const permission = permissionStore.useState();
+
+  let protectedRoutes: React.ReactNode;
+  if (!permission.initialized) {
+    protectedRoutes = <Route path="*" element={<PermissionLoading />} />;
+  } else if (permission.menus.length > 0) {
+    protectedRoutes = (
+      <>
+        <Route element={<Forbidden />} path="/403" />
+        {buildDynamicRoutes(permission.menus)}
+      </>
+    );
+  } else {
+    protectedRoutes = (
+      <>
+        <Route element={<Forbidden />} path="/403" />
+        <Route path="*" element={<Navigate to="/403" replace />} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -50,52 +81,130 @@ function App() {
           <Route element={<DefaultLayouts />}>
             <Route element={<AuthGuard />}>
               <Route element={<DockLayout />}>
-                <Route element={<Dashboard />} index path="/" />
-                <Route element={<Build />} path="/build" />
-                <Route element={<Deploy />} path="/deploy" />
-                <Route element={<Observe />} path="/observe" />
-                <Route element={<Secure />} path="/secure" />
-                <Route element={<ProjectsIndex />} path="/projects" />
-                <Route element={<ProjectDetail />} path="/projects/:projectId">
-                  <Route index element={<ProjectDetailOverview />} />
-                  <Route element={<ProjectPipelines />} path="pipelines" />
-                  <Route element={<PipelineHistory />} path="pipelines/runs" />
-                  <Route element={<PipelineDetail />} path="pipelines/:id" />
-                  <Route element={<ProjectDeployments />} path="deployments" />
-                  <Route element={<ProjectArtifacts />} path="artifacts" />
-                  <Route
-                    element={<ProjectEnvironments />}
-                    path="environments"
-                  />
-                  <Route element={<ProjectSecrets />} path="secrets" />
-                  <Route element={<ProjectSettings />} path="settings" />
-                  <Route element={<ProjectMembers />} path="members" />
-                </Route>
-                <Route element={<AgentsOverview />} path="/agents" />
-                <Route element={<AgentsDetail />} path="/agents/:id" />
-                <Route element={<Access />} path="/access" />
-                <Route element={<Users />} path="/users" />
-                <Route element={<Roles />} path="/roles" />
-                <Route element={<Identity />} path="/identity-integration" />
-                <Route element={<Settings />} path="/settings" />
+                {/* 静态页：登录后始终可达，不走后端动态菜单 */}
                 <Route
-                  element={<SettingsNotifications />}
-                  path="/settings/notifications"
+                  path="/account"
+                  element={
+                    <Lazy>
+                      <AccountPage />
+                    </Lazy>
+                  }
                 />
                 <Route
-                  element={<SettingsSystemInfo />}
-                  path="/settings/system-info"
-                />
-                <Route element={<GeneralSettings />} path="/general-settings" />
-                <Route element={<Inbox />} path="/inbox" />
-                <Route
-                  element={<LLMDialogueChat />}
                   path="/workspace/:workspaceName/chat"
+                  element={
+                    <Lazy>
+                      <ChatPage />
+                    </Lazy>
+                  }
                 />
                 <Route
-                  element={<LLMDialogueHistory />}
-                  path="/workspace/:workspaceName/history"
+                  path="/inbox"
+                  element={
+                    <Lazy>
+                      <InboxPage />
+                    </Lazy>
+                  }
                 />
+                <Route
+                  path="/agents/:id"
+                  element={
+                    <Lazy>
+                      <AgentsDetailPage />
+                    </Lazy>
+                  }
+                />
+                {/* 项目详情：抽屉式下钻页，含 8 个嵌套子标签 */}
+                <Route
+                  path="/projects/:projectId"
+                  element={
+                    <Lazy>
+                      <ProjectDetailPage />
+                    </Lazy>
+                  }
+                >
+                  <Route
+                    index
+                    element={
+                      <Lazy>
+                        <ProjectOverviewPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="pipelines"
+                    element={
+                      <Lazy>
+                        <ProjectPipelinesPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="pipelines/runs"
+                    element={
+                      <Lazy>
+                        <PipelineHistoryPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="pipelines/:id"
+                    element={
+                      <Lazy>
+                        <PipelineDetailPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="deployments"
+                    element={
+                      <Lazy>
+                        <ProjectDeploymentsPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="artifacts"
+                    element={
+                      <Lazy>
+                        <ProjectArtifactsPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="environments"
+                    element={
+                      <Lazy>
+                        <ProjectEnvironmentsPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="secrets"
+                    element={
+                      <Lazy>
+                        <ProjectSecretsPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="settings"
+                    element={
+                      <Lazy>
+                        <ProjectSettingsPage />
+                      </Lazy>
+                    }
+                  />
+                  <Route
+                    path="members"
+                    element={
+                      <Lazy>
+                        <ProjectMembersPage />
+                      </Lazy>
+                    }
+                  />
+                </Route>
+                {protectedRoutes}
               </Route>
             </Route>
             <Route element={<Login />} path="/login" />
@@ -117,7 +226,7 @@ function App() {
         pauseOnHover
         theme={resolvedTheme === "dark" ? "dark" : "light"}
         icon={false}
-        toastClassName="border rounded-lg shadow-lg text-sm"
+        toastClassName="text-sm"
       />
     </>
   );

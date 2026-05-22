@@ -3,6 +3,7 @@ import { toast } from "@/lib/toast";
 import { ENV } from "@/constants/env";
 import { isDev } from "@/lib/is";
 import authStore from "@/store/auth";
+import { ApiError, extractRequestId } from "@/lib/api-error";
 import type {
   ApiClientErrorResponse,
   ApiClientResponse,
@@ -105,6 +106,16 @@ client.interceptors.response.use(
       }
     }
 
+    const errResponse = data as ApiClientErrorResponse;
+    const requestId = extractRequestId(response.headers);
+    const apiError = new ApiError({
+      message: errResponse.errMsg || "Request failed",
+      code: errResponse.code,
+      status: response.status,
+      requestId,
+      path: errResponse.path,
+    });
+
     // Token 相关错误，自动登出并跳转
     if (data.code === 4401 || data.code === 4403 || data.code === 4406) {
       // 使用动态导入避免循环依赖
@@ -112,25 +123,50 @@ client.interceptors.response.use(
         clearLocalAuth();
         window.location.href = "/login";
       });
-      return Promise.reject(new Error("Session expired, please login again"));
+      return Promise.reject(
+        new ApiError({
+          message: "Session expired, please login again",
+          code: data.code,
+          status: response.status,
+          requestId,
+          path: errResponse.path,
+        }),
+      );
     }
 
     if (!(response.config as RequestConfig).silence) {
-      toast.error((data as ApiClientErrorResponse).errMsg);
+      toast.error(errResponse.errMsg);
     }
 
-    return Promise.reject(new Error((data as ApiClientErrorResponse).errMsg));
+    return Promise.reject(apiError);
   },
   (error) => {
+    const requestId = extractRequestId(error.response?.headers);
+    const status = error.response?.status as number | undefined;
+
     // 处理网络错误或其他 axios 错误
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    if (status === 401 || status === 403) {
       // 使用动态导入避免循环依赖
       import("@/lib/auth").then(({ clearLocalAuth }) => {
         clearLocalAuth();
         window.location.href = "/login";
       });
     }
-    return Promise.reject(error as Error);
+
+    const message =
+      (error.response?.data as ApiClientErrorResponse | undefined)?.errMsg ||
+      error.message ||
+      "Network error";
+
+    const apiError = new ApiError({
+      message,
+      status,
+      requestId,
+      path: (error.response?.data as ApiClientErrorResponse | undefined)?.path,
+      cause: error,
+    });
+
+    return Promise.reject(apiError);
   },
 );
 

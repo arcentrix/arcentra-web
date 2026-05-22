@@ -4,7 +4,6 @@
 
 import { useState, useMemo } from "react";
 import {
-  Bell,
   Plus,
   Mail,
   MessageSquare,
@@ -13,32 +12,12 @@ import {
   Edit,
   Trash2,
   Search,
-  Power,
-  PowerOff,
-  AlertTriangle,
-  Clock,
-  GitMerge,
   Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -54,6 +33,7 @@ import {
   NotificationTemplateDialog,
   type Template,
 } from "@/components/notification-template-dialog";
+import { SettingsCard, ColumnHead } from "@/components/blueprint";
 import { toast } from "@/lib/toast";
 
 // 模拟数据
@@ -124,8 +104,41 @@ const channelIcons = {
   webhook: Webhook,
 };
 
-export default function NotificationsPage() {
-  const [activeTab, setActiveTab] = useState("channels");
+const CHANNEL_TYPE_LABELS: Record<string, string> = {
+  email: "Email",
+  slack: "Slack",
+  webhook: "Webhook",
+};
+
+function getChannelConfigDisplay(channel: Channel): React.ReactNode {
+  switch (channel.type) {
+    case "email":
+      return channel.config.smtp && channel.config.port
+        ? `${channel.config.smtp}:${channel.config.port}`
+        : "—";
+    case "slack":
+      return channel.config.webhook ? (
+        <span className="font-mono text-[12px] text-fg-muted truncate max-w-xs block">
+          {channel.config.webhook}
+        </span>
+      ) : "—";
+    case "webhook":
+      return channel.config.url ? (
+        <span className="font-mono text-[12px] text-fg-muted truncate max-w-xs block">
+          {channel.config.url}
+        </span>
+      ) : "—";
+    default:
+      return "—";
+  }
+}
+
+export default function NotificationsPage({
+  headless = false,
+}: {
+  /** 嵌入 Settings 侧栏分区时启用：去掉页头与外层留白。 */
+  headless?: boolean;
+}) {
   const [channelDialogOpen, setChannelDialogOpen] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
@@ -222,20 +235,9 @@ export default function NotificationsPage() {
   // 筛选逻辑
   const filteredChannels = useMemo(() => {
     return channelsList.filter((channel) => {
-      // 按类型筛选
-      if (filterType !== "all" && channel.type !== filterType) {
-        return false;
-      }
-
-      // 按状态筛选
-      if (filterStatus === "active" && channel.status !== "active") {
-        return false;
-      }
-      if (filterStatus === "inactive" && channel.status !== "inactive") {
-        return false;
-      }
-
-      // 按名称或描述搜索
+      if (filterType !== "all" && channel.type !== filterType) return false;
+      if (filterStatus === "active" && channel.status !== "active") return false;
+      if (filterStatus === "inactive" && channel.status !== "inactive") return false;
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
@@ -244,76 +246,19 @@ export default function NotificationsPage() {
             channel.description.toLowerCase().includes(term))
         );
       }
-
       return true;
     });
   }, [channelsList, filterType, filterStatus, searchTerm]);
 
-  const getChannelTypeBadge = (type: string) => {
-    const variants: Record<string, { label: string; className: string }> = {
-      email: {
-        label: "Email",
-        className: "bg-blue-50 text-blue-600 border border-blue-200",
-      },
-      slack: {
-        label: "Slack",
-        className: "bg-purple-50 text-purple-600 border border-purple-200",
-      },
-      webhook: {
-        label: "Webhook",
-        className: "bg-green-50 text-green-600 border border-green-200",
-      },
-    };
-    const variant = variants[type] || {
-      label: type.toUpperCase(),
-      className: "bg-gray-100 text-gray-600 border border-gray-200",
-    };
-    return (
-      <Badge variant="outline" className={variant.className}>
-        {variant.label}
-      </Badge>
-    );
-  };
-
-  const getChannelConfigDisplay = (channel: Channel) => {
-    switch (channel.type) {
-      case "email":
-        return channel.config.smtp && channel.config.port
-          ? `${channel.config.smtp}:${channel.config.port}`
-          : "-";
-      case "slack":
-        return channel.config.webhook ? (
-          <span className="font-mono text-xs truncate max-w-xs">
-            {channel.config.webhook}
-          </span>
-        ) : (
-          "-"
-        );
-      case "webhook":
-        return channel.config.url ? (
-          <span className="font-mono text-xs truncate max-w-xs">
-            {channel.config.url}
-          </span>
-        ) : (
-          "-"
-        );
-      default:
-        return "-";
-    }
-  };
-
   // 模板筛选逻辑
   const filteredTemplates = useMemo(() => {
     return templatesList.filter((template) => {
-      // 按渠道筛选
       if (
         templateFilterChannel !== "all" &&
         template.channel !== templateFilterChannel
       ) {
         return false;
       }
-
-      // 按名称、标题或内容搜索
       if (templateSearchTerm) {
         const term = templateSearchTerm.toLowerCase();
         return (
@@ -322,485 +267,326 @@ export default function NotificationsPage() {
           template.content.toLowerCase().includes(term)
         );
       }
-
       return true;
     });
   }, [templatesList, templateFilterChannel, templateSearchTerm]);
 
-  const getTemplateChannelBadge = (channel: string) => {
-    const variants: Record<string, { label: string; className: string }> = {
-      email: {
-        label: "Email",
-        className: "bg-blue-50 text-blue-600 border border-blue-200",
-      },
-      slack: {
-        label: "Slack",
-        className: "bg-purple-50 text-purple-600 border border-purple-200",
-      },
-      webhook: {
-        label: "Webhook",
-        className: "bg-green-50 text-green-600 border border-green-200",
-      },
-    };
-    const variant = variants[channel] || {
-      label: channel.toUpperCase(),
-      className: "bg-gray-100 text-gray-600 border border-gray-200",
-    };
-    return (
-      <Badge variant="outline" className={variant.className}>
-        {variant.label}
-      </Badge>
-    );
-  };
-
-  const activeChannelCount = channelsList.filter(
-    (c) => c.status === "active",
-  ).length;
-  const inactiveChannelCount = channelsList.length - activeChannelCount;
-  const templateCount = templatesList.length;
-  const ruleCount: number = 0; // TODO: replace with real Apis.notifications.listRules() when backend ready
-
-  const headerActionLabel =
-    activeTab === "channels"
-      ? "Add Channel"
-      : activeTab === "templates"
-        ? "Create Template"
-        : activeTab === "rules"
-          ? "New Rule"
-          : null;
-
-  const headerAction = () => {
-    if (activeTab === "channels") return handleCreateChannel();
-    if (activeTab === "templates") return handleCreateTemplate();
-    // rules: not wired yet
-  };
+  const outer = headless ? "flex flex-col gap-4" : "flex-1 flex flex-col gap-4 p-4 md:p-8 pt-6";
 
   return (
-    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Bell className="h-8 w-8 text-green-500" />
-            Notifications
-          </h2>
-          <p className="text-muted-foreground mt-1">
-            Manage notification channels, templates and routing rules.
+    <div className={outer}>
+      {/* ── Channels card ────────────────────────────────────────── */}
+      <SettingsCard
+        title="Channels"
+        sub="Where Arcentra sends events."
+        action={
+          <Button size="sm" onClick={handleCreateChannel} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Add channel
+          </Button>
+        }
+      >
+        {/* Filters */}
+        <div className="mb-4 flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted" />
+            <Input
+              placeholder="Search channels…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-8 h-[34px] text-[13px]"
+            />
+          </div>
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="w-[150px] h-[34px] text-[13px]">
+              <SelectValue placeholder="Filter by type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="email">Email</SelectItem>
+              <SelectItem value="slack">Slack</SelectItem>
+              <SelectItem value="webhook">Webhook</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-[140px] h-[34px] text-[13px]">
+              <SelectValue placeholder="Filter by status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {filteredChannels.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-10 text-center">
+            <MessageSquare className="h-8 w-8 text-fg-subtle" />
+            <div>
+              <div className="text-[13px] font-medium">
+                {channelsList.length === 0
+                  ? "No notification channels configured"
+                  : "No channels match your filters"}
+              </div>
+            </div>
+            {channelsList.length === 0 ? (
+              <Button size="sm" onClick={handleCreateChannel} className="gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                Add your first channel
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearchTerm("");
+                  setFilterType("all");
+                  setFilterStatus("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+          </div>
+        ) : (
+          <ul className="m-0 list-none p-0">
+            {/* Column header row */}
+            <li className="grid items-center gap-4 border-b pb-2 [grid-template-columns:32px_1fr_auto_auto_auto]">
+              <span />
+              <ColumnHead>Channel</ColumnHead>
+              <ColumnHead>Type</ColumnHead>
+              <ColumnHead>Enabled</ColumnHead>
+              <span />
+            </li>
+            {filteredChannels.map((channel) => {
+              const Icon =
+                channelIcons[channel.type as keyof typeof channelIcons] ||
+                MessageSquare;
+              return (
+                <li
+                  key={channel.id}
+                  className="grid items-center gap-4 border-b py-3 last:border-b-0 [grid-template-columns:32px_1fr_auto_auto_auto]"
+                >
+                  {/* Icon tile */}
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-bg-elevated">
+                    <Icon className="h-3.5 w-3.5 text-fg-muted" />
+                  </div>
+
+                  {/* Name + config */}
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium">{channel.name}</div>
+                    <div className="mt-0.5 font-mono text-[11.5px] text-fg-subtle truncate">
+                      {getChannelConfigDisplay(channel)}
+                    </div>
+                  </div>
+
+                  {/* Type badge */}
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-[10.5px] uppercase tracking-[0.04em]"
+                  >
+                    {CHANNEL_TYPE_LABELS[channel.type] ?? channel.type}
+                  </Badge>
+
+                  {/* Toggle */}
+                  <Switch
+                    checked={channel.status === "active"}
+                    onCheckedChange={() => handleToggleChannel(channel)}
+                    aria-label={`Toggle ${channel.name}`}
+                  />
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleEditChannel(channel)}
+                      className="h-7 px-2 text-[12.5px]"
+                    >
+                      <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => channel.id && handleDeleteChannel(channel.id)}
+                      className="h-7 px-2 text-accent-danger hover:text-accent-danger"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SettingsCard>
+
+      {/* ── Templates card ────────────────────────────────────────── */}
+      <SettingsCard
+        title="Templates"
+        sub="Notification message templates for different channels."
+        action={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleCreateTemplate}
+            className="gap-1.5"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New template
+          </Button>
+        }
+      >
+        {/* Filters */}
+        <div className="mb-4 flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted" />
+            <Input
+              placeholder="Search templates…"
+              value={templateSearchTerm}
+              onChange={(e) => setTemplateSearchTerm(e.target.value)}
+              className="pl-8 h-[34px] text-[13px]"
+            />
+          </div>
+          <Select
+            value={templateFilterChannel}
+            onValueChange={setTemplateFilterChannel}
+          >
+            <SelectTrigger className="w-[160px] h-[34px] text-[13px]">
+              <SelectValue placeholder="Filter by channel" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All channels</SelectItem>
+              <SelectItem value="email">Email</SelectItem>
+              <SelectItem value="slack">Slack</SelectItem>
+              <SelectItem value="webhook">Webhook</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {filteredTemplates.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-10 text-center">
+            <FileText className="h-8 w-8 text-fg-subtle" />
+            <div className="text-[13px] font-medium">
+              {templatesList.length === 0
+                ? "No notification templates configured"
+                : "No templates match your filters"}
+            </div>
+            {templatesList.length === 0 ? (
+              <Button size="sm" onClick={handleCreateTemplate} className="gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                Create your first template
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setTemplateSearchTerm("");
+                  setTemplateFilterChannel("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b">
+                <th className="pb-2 text-left">
+                  <ColumnHead>Name</ColumnHead>
+                </th>
+                <th className="pb-2 px-3 text-left">
+                  <ColumnHead>Channel</ColumnHead>
+                </th>
+                <th className="pb-2 px-3 text-left">
+                  <ColumnHead>Title</ColumnHead>
+                </th>
+                <th className="pb-2 text-right">
+                  <ColumnHead>Actions</ColumnHead>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTemplates.map((template) => {
+                const Icon =
+                  channelIcons[
+                    template.channel as keyof typeof channelIcons
+                  ] || FileText;
+                return (
+                  <tr key={template.id} className="border-b last:border-b-0">
+                    <td className="py-3 pr-3">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Icon className="h-3.5 w-3.5 shrink-0 text-fg-muted" />
+                        {template.name}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <Badge
+                        variant="outline"
+                        className="font-mono text-[10.5px] uppercase tracking-[0.04em]"
+                      >
+                        {CHANNEL_TYPE_LABELS[template.channel] ?? template.channel}
+                      </Badge>
+                    </td>
+                    <td className="max-w-[240px] truncate px-3 py-3 text-fg-muted">
+                      {template.title}
+                    </td>
+                    <td className="py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleEditTemplate(template)}
+                          className="h-7 px-2"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            template.id && handleDeleteTemplate(template.id)
+                          }
+                          className="h-7 px-2 text-accent-danger hover:text-accent-danger"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </SettingsCard>
+
+      {/* ── Routing rules card ───────────────────────────────────── */}
+      <SettingsCard
+        title="Routing rules"
+        sub="Map platform events to notification channels and templates."
+      >
+        <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-10 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-bg-elevated">
+            <Send className="h-5 w-5 text-fg-muted" />
+          </div>
+          <div>
+            <div className="text-[13px] font-medium">No routing rules yet</div>
+            <p className="mt-1 max-w-sm text-[12px] text-fg-muted">
+              Define which events trigger which channels — for example, send
+              pipeline failures to Slack, or notify owners of production
+              deployments.
+            </p>
+          </div>
+          <p className="text-[12px] text-fg-subtle">
+            Rules API is not yet available. This section is reserved for future
+            configuration.
           </p>
         </div>
-        {headerActionLabel && (
-          <Button onClick={headerAction} disabled={activeTab === "rules"}>
-            <Plus className="mr-2 h-4 w-4" />
-            {headerActionLabel}
-          </Button>
-        )}
-      </div>
-
-      {/* Top overview cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Active Channels
-            </CardTitle>
-            <Power className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeChannelCount}</div>
-            <p className="text-xs text-muted-foreground">
-              {inactiveChannelCount} inactive · {channelsList.length} total
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Failed Deliveries
-            </CardTitle>
-            <AlertTriangle className="h-4 w-4 text-rose-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">In the last 24h</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Templates</CardTitle>
-            <FileText className="h-4 w-4 text-sky-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{templateCount}</div>
-            <p className="text-xs text-muted-foreground">
-              {ruleCount} routing rule{ruleCount === 1 ? "" : "s"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Last Sent</CardTitle>
-            <Clock className="h-4 w-4 text-violet-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">—</div>
-            <p className="text-xs text-muted-foreground">Awaiting events</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList>
-          <TabsTrigger value="channels">Channels</TabsTrigger>
-          <TabsTrigger value="templates">Templates</TabsTrigger>
-          <TabsTrigger value="rules">Rules</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="channels" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Bell className="h-5 w-5" />
-                    Notification Channels
-                  </CardTitle>
-                  <CardDescription>
-                    Configure and manage notification channels (Email, Slack,
-                    Webhook)
-                  </CardDescription>
-                </div>
-              </div>
-
-              {/* 筛选栏 */}
-              <div className="flex gap-4 mt-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by name or description..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <Select value={filterType} onValueChange={setFilterType}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Filter by type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="slack">Slack</SelectItem>
-                    <SelectItem value="webhook">Webhook</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Filter by status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {filteredChannels.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Bell className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">
-                    {channelsList.length === 0
-                      ? "No notification channels configured"
-                      : "No channels match your filters"}
-                  </p>
-                  {channelsList.length === 0 ? (
-                    <Button onClick={handleCreateChannel}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Your First Channel
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setSearchTerm("");
-                        setFilterType("all");
-                        setFilterStatus("all");
-                      }}
-                    >
-                      Clear Filters
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Configuration</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredChannels.map((channel) => {
-                      const Icon =
-                        channelIcons[
-                          channel.type as keyof typeof channelIcons
-                        ] || Bell;
-                      return (
-                        <TableRow key={channel.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <Icon className="h-4 w-4 text-muted-foreground" />
-                              {channel.name}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {getChannelTypeBadge(channel.type)}
-                          </TableCell>
-                          <TableCell className="max-w-xs">
-                            {getChannelConfigDisplay(channel)}
-                          </TableCell>
-                          <TableCell>
-                            {channel.status === "active" ? (
-                              <Badge
-                                variant="outline"
-                                className="bg-emerald-50 text-emerald-600 border border-emerald-200"
-                              >
-                                <Power className="mr-1 h-3 w-3" />
-                                Active
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="bg-gray-100 text-gray-500 border border-gray-200"
-                              >
-                                <PowerOff className="mr-1 h-3 w-3" />
-                                Inactive
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate">
-                            {channel.description || "-"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleToggleChannel(channel)}
-                              >
-                                {channel.status === "active" ? (
-                                  <PowerOff className="h-4 w-4" />
-                                ) : (
-                                  <Power className="h-4 w-4" />
-                                )}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleEditChannel(channel)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() =>
-                                  channel.id && handleDeleteChannel(channel.id)
-                                }
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="templates" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-5 w-5" />
-                    Notification Templates
-                  </CardTitle>
-                  <CardDescription>
-                    Create and manage notification templates for different
-                    channels
-                  </CardDescription>
-                </div>
-              </div>
-
-              {/* 筛选栏 */}
-              <div className="flex gap-4 mt-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by name, title or content..."
-                    value={templateSearchTerm}
-                    onChange={(e) => setTemplateSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <Select
-                  value={templateFilterChannel}
-                  onValueChange={setTemplateFilterChannel}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Filter by channel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Channels</SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="slack">Slack</SelectItem>
-                    <SelectItem value="webhook">Webhook</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {filteredTemplates.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">
-                    {templatesList.length === 0
-                      ? "No notification templates configured"
-                      : "No templates match your filters"}
-                  </p>
-                  {templatesList.length === 0 ? (
-                    <Button onClick={handleCreateTemplate}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create Your First Template
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setTemplateSearchTerm("");
-                        setTemplateFilterChannel("all");
-                      }}
-                    >
-                      Clear Filters
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Channel</TableHead>
-                      <TableHead>Title</TableHead>
-                      <TableHead>Content</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTemplates.map((template) => {
-                      const Icon =
-                        channelIcons[
-                          template.channel as keyof typeof channelIcons
-                        ] || FileText;
-                      return (
-                        <TableRow key={template.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <Icon className="h-4 w-4 text-muted-foreground" />
-                              {template.name}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {getTemplateChannelBadge(template.channel)}
-                          </TableCell>
-                          <TableCell className="max-w-xs">
-                            <span className="text-sm truncate block">
-                              {template.title}
-                            </span>
-                          </TableCell>
-                          <TableCell className="max-w-xs">
-                            <span className="text-sm truncate block">
-                              {template.content}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleEditTemplate(template)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() =>
-                                  template.id &&
-                                  handleDeleteTemplate(template.id)
-                                }
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="rules" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <GitMerge className="h-5 w-5" />
-                Routing Rules
-              </CardTitle>
-              <CardDescription>
-                Map platform events to notification channels and templates.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed py-12 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
-                  <Send className="h-6 w-6 text-muted-foreground" />
-                </div>
-                <div>
-                  <div className="text-base font-medium">
-                    No routing rules yet
-                  </div>
-                  <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                    Define which events trigger which channels — for example,
-                    send pipeline failures to a Slack channel, or notify owners
-                    of production deployments.
-                  </p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Rules API is not yet available. This tab is reserved for
-                  future configuration.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      </SettingsCard>
 
       <NotificationChannelDialog
         open={channelDialogOpen}

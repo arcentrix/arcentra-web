@@ -10,4 +10,11 @@ export interface UserInfo {
   username: string;
 }
 
-export type UserRole = "admin" | "user";
+export type UserRole =
+  | string
+  | {
+      roleId?: string;
+      name?: string;
+      displayName?: string;
+      description?: string;
+    };

@@ -144,27 +144,19 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
       return [{ title: "Overview" }];
     }
 
-    // 如果是 workspace 页面（需要在匹配一级菜单之前处理）
-    if (pathname.match(/^\/workspace\/[^/]+\/(chat|history)$/)) {
-      const match = pathname.match(/^\/workspace\/([^/]+)\/(chat|history)$/);
+    // Copilot 对话页（需在匹配一级菜单之前处理）
+    if (pathname.match(/^\/workspace\/[^/]+\/chat$/)) {
+      const match = pathname.match(/^\/workspace\/([^/]+)\/chat$/);
       if (match) {
-        const [, workspaceName, page] = match;
-        const decodedWorkspaceName = decodeURIComponent(workspaceName);
-        // 添加一级菜单 "LLM Dialogue"（虽然不在 mainMenuItems 中，但需要显示）
-        items.push({ title: "LLM Dialogue" });
-        // 添加 workspace 名称，链接到该 workspace 的 chat 页面
+        const [, workspaceName] = match;
+        // 一级 "Copilot"，链接到对话页
         items.push({
-          title: decodedWorkspaceName,
+          title: "Copilot",
           url: `/workspace/${workspaceName}/chat`,
         });
-        // 添加页面名称
-        if (page === "chat") {
-          // 对于 chat 页面，尝试从 URL 查询参数中获取 title
-          const titleParam = new URLSearchParams(location.search).get("title");
-          items.push({ title: titleParam || "New chat" });
-        } else {
-          items.push({ title: "History" });
-        }
+        // 当前对话标题（取自 URL 查询参数）
+        const titleParam = new URLSearchParams(location.search).get("title");
+        items.push({ title: titleParam || "New chat" });
       }
       return items;
     }

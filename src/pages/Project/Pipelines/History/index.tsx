@@ -1,31 +1,34 @@
 /**
- * Pipeline History 页面 - 显示 pipeline 的执行历史记录
+ * Pipeline History 页面 — Engineering Blueprint 重做
+ * Panel + 表格样式，保留全部筛选/分页/搜索逻辑与数据。
  */
 
 import type { FC } from "react";
-import { useParams, Link } from "react-router-dom";
-import {
-  History,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  Filter,
-  RefreshCw,
-} from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { RefreshCw, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { DataTablePagination } from "@/components/data-table-pagination";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useState, useMemo, useEffect } from "react";
+  Panel,
+  PanelHeader,
+  StatusDot,
+  StatusBadge,
+  FilterPill,
+  ColumnHead,
+  type DotTone,
+  type BadgeTone,
+} from "@/components/blueprint";
 
 type PipelineExecutionStatus =
   | "success"
@@ -41,7 +44,7 @@ interface PipelineExecution {
   status: PipelineExecutionStatus;
   startedAt: string;
   completedAt?: string;
-  duration?: number; // 秒
+  duration?: number;
   triggeredBy: string;
   commit?: string;
   branch?: string;
@@ -52,6 +55,63 @@ interface PipelineExecution {
   }[];
 }
 
+function statusToDotTone(status: PipelineExecutionStatus): DotTone {
+  switch (status) {
+    case "success":
+      return "ok";
+    case "failed":
+      return "fail";
+    case "running":
+      return "running";
+    case "pending":
+      return "warn";
+    case "cancelled":
+      return "muted";
+  }
+}
+
+function statusToBadgeTone(status: PipelineExecutionStatus): BadgeTone {
+  switch (status) {
+    case "success":
+      return "ok";
+    case "failed":
+      return "fail";
+    case "running":
+      return "running";
+    case "pending":
+      return "warn";
+    case "cancelled":
+      return "muted";
+  }
+}
+
+function formatDuration(seconds?: number): string {
+  if (!seconds) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatCompactDate(dateString: string): string {
+  const date = new Date(dateString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
+}
+
+const FILTER_OPTIONS: { label: string; value: string; dotTone?: DotTone }[] = [
+  { label: "All", value: "all" },
+  { label: "Success", value: "success", dotTone: "ok" },
+  { label: "Failed", value: "failed", dotTone: "fail" },
+  { label: "Running", value: "running", dotTone: "running" },
+  { label: "Cancelled", value: "cancelled", dotTone: "muted" },
+  { label: "Pending", value: "pending", dotTone: "warn" },
+];
+
 const PipelineHistory: FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchText, setSearchText] = useState("");
@@ -60,7 +120,6 @@ const PipelineHistory: FC = () => {
   const [pageNum, setPageNum] = useState(1);
   const [pageSize] = useState(10);
 
-  // 模拟数据 - 实际应该从 API 获取
   const executions: PipelineExecution[] = [
     {
       id: "1",
@@ -140,54 +199,10 @@ const PipelineHistory: FC = () => {
     },
   ];
 
-  const getStatusIcon = (status: PipelineExecutionStatus) => {
-    switch (status) {
-      case "success":
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case "failed":
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      case "running":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "cancelled":
-        return <XCircle className="h-4 w-4 text-gray-500" />;
-      case "pending":
-        return <Clock className="h-4 w-4 text-yellow-500" />;
-      default:
-        return <Clock className="h-4 w-4 text-gray-500" />;
-    }
-  };
-
-  const getStatusBadgeClassName = (status: PipelineExecutionStatus) => {
-    switch (status) {
-      case "success":
-        return "bg-green-50 border-green-200 text-green-700 hover:bg-green-100";
-      case "failed":
-        return "bg-red-50 border-red-200 text-red-700 hover:bg-red-100";
-      case "running":
-        return "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100";
-      case "cancelled":
-        return "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100";
-      case "pending":
-        return "bg-yellow-50 border-yellow-200 text-yellow-700 hover:bg-yellow-100";
-      default:
-        return "bg-gray-50 border-gray-200 text-gray-700";
-    }
-  };
-
-  const formatDuration = (seconds?: number) => {
-    if (!seconds) return "-";
-    if (seconds < 60) return `${seconds}s`;
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}m ${remainingSeconds}s`;
-  };
-
   const filteredExecutions = useMemo(() => {
     return executions.filter((execution) => {
       const matchesSearch =
-        execution.pipelineName
-          .toLowerCase()
-          .includes(searchText.toLowerCase()) ||
+        execution.pipelineName.toLowerCase().includes(searchText.toLowerCase()) ||
         execution.commit?.toLowerCase().includes(searchText.toLowerCase()) ||
         execution.branch?.toLowerCase().includes(searchText.toLowerCase());
       const matchesStatus =
@@ -196,226 +211,146 @@ const PipelineHistory: FC = () => {
     });
   }, [executions, searchText, statusFilter]);
 
-  // 分页计算
   const totalPages = Math.ceil(filteredExecutions.length / pageSize);
   const paginatedExecutions = useMemo(() => {
     const startIndex = (pageNum - 1) * pageSize;
     return filteredExecutions.slice(startIndex, startIndex + pageSize);
   }, [filteredExecutions, pageNum, pageSize]);
 
-  // 当筛选条件变化时，重置到第一页
   useEffect(() => {
     setPageNum(1);
   }, [searchText, statusFilter]);
 
   const handleRefresh = () => {
     setLoading(true);
-    // 模拟 API 调用
-    setTimeout(() => {
-      setLoading(false);
-    }, 1000);
+    setTimeout(() => setLoading(false), 1000);
   };
 
   return (
-    <div className="flex-1 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <History className="h-8 w-8 text-blue-500" />
-            Pipeline Runs
-          </h2>
-          <p className="text-muted-foreground mt-1">
-            View execution runs for all pipelines in project {projectId}
-          </p>
-        </div>
-        <Button variant="outline" onClick={handleRefresh} disabled={loading}>
-          <RefreshCw
-            className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
+    <div className="flex flex-col gap-4">
+      {/* Filter strip */}
+      <div className="flex flex-wrap items-center gap-2">
+        {FILTER_OPTIONS.map((opt) => (
+          <FilterPill
+            key={opt.value}
+            label={opt.label}
+            dotTone={opt.dotTone}
+            active={statusFilter === opt.value}
+            onClick={() => setStatusFilter(opt.value)}
           />
-          Refresh
-        </Button>
+        ))}
+
+        <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <Input
+              placeholder="Search pipeline, commit, branch…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="h-8 w-[260px] pl-3 text-[13px]"
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={loading}
+            className="h-8 gap-1.5"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* 筛选栏 */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <Input
-                placeholder="Search by pipeline name, commit, or branch..."
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="max-w-sm"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-auto min-w-[150px] gap-1.5">
-                <Filter className="h-4 w-4 shrink-0" />
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="success">Success</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="running">Running</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-              </SelectContent>
-            </Select>
+      {/* Table panel */}
+      <Panel>
+        <PanelHeader
+          title="Pipeline runs"
+          sub={`${filteredExecutions.length} of ${executions.length} runs · project ${projectId}`}
+        />
+
+        {filteredExecutions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-[13px] text-fg-muted">
+            No pipeline executions match your filters.
           </div>
-        </CardContent>
-      </Card>
-
-      {/* 历史记录列表 */}
-      {filteredExecutions.length === 0 ? (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center py-8 text-muted-foreground">
-              No pipeline executions found
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <div className="space-y-3">
-            {paginatedExecutions.map((execution) => {
-              const getStageClassName = (status: PipelineExecutionStatus) => {
-                switch (status) {
-                  case "success":
-                    return "bg-green-50 border-green-200 text-green-700";
-                  case "failed":
-                    return "bg-red-50 border-red-200 text-red-700";
-                  case "running":
-                    return "bg-blue-50 border-blue-200 text-blue-700";
-                  case "cancelled":
-                    return "bg-gray-50 border-gray-200 text-gray-700";
-                  case "pending":
-                    return "bg-yellow-50 border-yellow-200 text-yellow-700";
-                  default:
-                    return "bg-gray-50 border-gray-200 text-gray-700";
-                }
-              };
-
-              // 格式化日期为 YYYY/MM/DD HH:mm
-              const formatCompactDate = (dateString: string) => {
-                const date = new Date(dateString);
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, "0");
-                const day = String(date.getDate()).padStart(2, "0");
-                const hours = String(date.getHours()).padStart(2, "0");
-                const minutes = String(date.getMinutes()).padStart(2, "0");
-                return `${year}/${month}/${day} ${hours}:${minutes}`;
-              };
-
-              return (
-                <Card
-                  key={execution.id}
-                  className="border shadow-none hover:border-primary/50 transition-colors"
-                >
-                  <CardContent className="p-3 px-4 space-y-1.5">
-                    {/* Row 1: Pipeline Name + Status */}
-                    <div
-                      className="flex items-center justify-between"
-                      style={{ lineHeight: "20px" }}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        {getStatusIcon(execution.status)}
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead><ColumnHead>Pipeline</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Commit</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Branch</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Status</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Duration</ColumnHead></TableHead>
+                  <TableHead><ColumnHead>Triggered by</ColumnHead></TableHead>
+                  <TableHead className="text-right"><ColumnHead>Started</ColumnHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedExecutions.map((execution) => (
+                  <TableRow key={execution.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <StatusDot
+                          tone={statusToDotTone(execution.status)}
+                          pulse={execution.status === "running"}
+                        />
                         <Link
                           to={`/projects/${projectId}/pipelines/${execution.pipelineId}`}
-                          className="font-semibold text-base hover:text-primary transition-colors"
+                          className="font-medium hover:text-brand-signal transition-colors"
                         >
                           {execution.pipelineName}
                         </Link>
                       </div>
-                      <Badge
-                        variant="outline"
-                        className={getStatusBadgeClassName(execution.status)}
-                      >
-                        <span className="flex items-center gap-1">
-                          {getStatusIcon(execution.status)}
-                          {execution.status.toUpperCase()}
-                        </span>
-                      </Badge>
-                    </div>
-
-                    {/* Row 2: Metadata (分开显示，强调 commit id) */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* Commit ID - 强调显示 */}
-                      {execution.commit && (
-                        <span className="font-mono text-xs font-semibold bg-gray-100 text-gray-900 px-2 py-0.5 rounded border border-gray-300">
-                          {execution.commit.substring(0, 7)}
-                        </span>
-                      )}
-
-                      {/* Branch - 单独显示 */}
-                      {execution.branch && (
-                        <Badge
-                          variant="outline"
-                          className="text-xs bg-blue-50 text-blue-700 border-blue-200"
-                        >
+                    </TableCell>
+                    <TableCell className="font-mono text-[11.5px] text-fg-subtle">
+                      {execution.commit
+                        ? execution.commit.substring(0, 7)
+                        : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {execution.branch ? (
+                        <span className="inline-flex items-center gap-1 font-mono text-[11.5px] text-fg-muted">
+                          <GitBranch className="h-3 w-3 shrink-0" />
                           {execution.branch}
-                        </Badge>
-                      )}
-
-                      {/* 触发人员 - 单独显示 */}
-                      <span className="text-sm text-gray-600">
-                        {execution.triggeredBy}
-                      </span>
-
-                      {/* 耗时 - 单独显示，强调 */}
-                      {execution.duration && (
-                        <span className="text-sm font-medium text-gray-700">
-                          {formatDuration(execution.duration)}
                         </span>
+                      ) : (
+                        <span className="text-fg-subtle">—</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge tone={statusToBadgeTone(execution.status)}>
+                        {execution.status}
+                      </StatusBadge>
+                    </TableCell>
+                    <TableCell className="font-mono text-[12px] tabular-nums text-fg-muted">
+                      {formatDuration(execution.duration)}
+                    </TableCell>
+                    <TableCell className="text-[13px] text-fg-muted">
+                      {execution.triggeredBy}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-[11px] text-fg-subtle">
+                      {formatCompactDate(execution.startedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
 
-                      {/* 开始时间 - 灰色小字 */}
-                      <span className="text-xs text-gray-400">
-                        {formatCompactDate(execution.startedAt)}
-                      </span>
-                    </div>
-
-                    {/* Row 3: Stages (单行展示，24px高度) */}
-                    {execution.stages && execution.stages.length > 0 && (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {execution.stages.map((stage, index) => (
-                          <div
-                            key={index}
-                            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border h-6 ${getStageClassName(stage.status)}`}
-                            style={{ height: "24px" }}
-                          >
-                            {getStatusIcon(stage.status)}
-                            <span className="text-xs font-medium">
-                              {stage.name}
-                            </span>
-                            {stage.duration && (
-                              <span className="text-xs opacity-80">
-                                ({formatDuration(stage.duration)})
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          {/* 分页控件 */}
-          {totalPages > 1 && (
-            <div className="pt-4 border-t">
-              <DataTablePagination
-                page={pageNum}
-                pageSize={pageSize}
-                total={filteredExecutions.length}
-                onPageChange={setPageNum}
-              />
-            </div>
-          )}
-        </>
-      )}
+            {totalPages > 1 && (
+              <div className="border-t px-5 py-3">
+                <DataTablePagination
+                  page={pageNum}
+                  pageSize={pageSize}
+                  total={filteredExecutions.length}
+                  onPageChange={setPageNum}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </Panel>
     </div>
   );
 };

@@ -1,20 +1,52 @@
 /**
- * Project Pipelines 页面 - 单个 Pipeline 的流程图展示
+ * Project Pipelines 标签面板 — Engineering Blueprint 重做
+ * 嵌入 Project Detail 标签页，headless（无页头/外层留白）。
  */
 
 import type { FC } from "react";
 import { useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { GitBranch, Plus, Edit, Terminal } from "lucide-react";
+import { Plus, Edit, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Panel,
+  PanelHeader,
+  StatusDot,
+  ColumnHead,
+  type DotTone,
+} from "@/components/blueprint";
 import {
   PipelineEditorDialog,
   type Pipeline,
 } from "@/components/pipeline-editor-dialog";
-import { PipelineFlowchart } from "@/components/pipeline-flowchart";
 import { PipelineLogViewer } from "@/components/pipeline-log-viewer";
 import { toast } from "@/lib/toast";
+
+/** pipeline 状态 → DotTone 映射 */
+function toneForStatus(status: string): DotTone {
+  switch (status) {
+    case "running":
+      return "running";
+    case "success":
+    case "ok":
+      return "ok";
+    case "failed":
+    case "fail":
+      return "fail";
+    case "warn":
+      return "warn";
+    default:
+      return "muted";
+  }
+}
 
 const Pipelines: FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -24,12 +56,10 @@ const Pipelines: FC = () => {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
 
   useEffect(() => {
-    // 模拟加载单个 pipeline 数据
     const loadPipeline = async () => {
       setLoading(true);
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      // 模拟数据 - 一个项目只有一个 pipeline
       const mockPipeline: Pipeline = {
         id: "1",
         name: "Main Pipeline",
@@ -39,37 +69,21 @@ const Pipelines: FC = () => {
           {
             name: "Build",
             steps: [
-              {
-                name: "Install dependencies",
-                type: "build",
-                command: "npm install",
-              },
-              {
-                name: "Build project",
-                type: "build",
-                command: "npm run build",
-              },
+              { name: "Install dependencies", type: "build", command: "npm install" },
+              { name: "Build project", type: "build", command: "npm run build" },
             ],
           },
           {
             name: "Test",
             steps: [
               { name: "Run unit tests", type: "test", command: "npm test" },
-              {
-                name: "Run integration tests",
-                type: "test",
-                command: "npm run test:integration",
-              },
+              { name: "Run integration tests", type: "test", command: "npm run test:integration" },
             ],
           },
           {
             name: "Deploy",
             steps: [
-              {
-                name: "Deploy to staging",
-                type: "deploy",
-                command: "npm run deploy:staging",
-              },
+              { name: "Deploy to staging", type: "deploy", command: "npm run deploy:staging" },
             ],
           },
         ],
@@ -82,89 +96,128 @@ const Pipelines: FC = () => {
     loadPipeline();
   }, [projectId]);
 
-  const handleCreate = () => {
-    setDialogOpen(true);
-  };
-
-  const handleEdit = () => {
-    setDialogOpen(true);
-  };
+  const handleCreate = () => setDialogOpen(true);
+  const handleEdit = () => setDialogOpen(true);
 
   const handleSubmit = async (data: Pipeline) => {
-    // 模拟 API 调用
     await new Promise((resolve) => setTimeout(resolve, 500));
-
     setPipeline({ ...data, id: pipeline?.id || "1" });
     toast.success(
-      pipeline
-        ? "Pipeline updated successfully"
-        : "Pipeline created successfully",
+      pipeline ? "Pipeline updated successfully" : "Pipeline created successfully",
     );
     setDialogOpen(false);
   };
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-4 md:p-8 pt-6">
-        <p className="text-muted-foreground">Loading pipeline...</p>
-      </div>
-    );
-  }
+  /** 从 pipeline stages 生成表格行数据（用于展示每个 step）*/
+  const rows = pipeline
+    ? (pipeline.stages ?? []).flatMap((stage) =>
+        stage.steps.map((step) => ({
+          key: `${stage.name}-${step.name}`,
+          pipeline: pipeline.name,
+          trigger: step.type === "build"
+            ? "push · main"
+            : step.type === "test"
+              ? "push · any"
+              : "tag · v*",
+          schedule: "—",
+          last: "—",
+          status: "ok" as const,
+          runs: "—",
+        })),
+      )
+    : [];
 
   return (
-    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <GitBranch className="h-8 w-8 text-blue-500" />
-            Pipeline
-          </h2>
-          <p className="text-muted-foreground mt-1">
-            CI/CD pipeline configuration and visualization for project{" "}
-            {projectId}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {pipeline && (
-            <Button variant="outline" onClick={() => setLogViewerOpen(true)}>
-              <Terminal className="h-4 w-4 mr-2" />
-              Real Time Logs
-            </Button>
-          )}
-          <Button onClick={pipeline ? handleEdit : handleCreate}>
-            {pipeline ? (
-              <>
-                <Edit className="h-4 w-4 mr-2" />
-                Edit Pipeline
-              </>
-            ) : (
-              <>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Pipeline
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
+    <>
+      <Panel>
+        <PanelHeader
+          title="Pipelines"
+          sub={
+            loading
+              ? "Loading…"
+              : pipeline
+                ? `${(pipeline.stages ?? []).length} stages configured`
+                : "No pipeline configured"
+          }
+          action={
+            <div className="flex items-center gap-2">
+              {pipeline && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLogViewerOpen(true)}
+                >
+                  <Terminal className="mr-1.5 h-3.5 w-3.5" />
+                  Logs
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={pipeline ? handleEdit : handleCreate}
+              >
+                {pipeline ? (
+                  <>
+                    <Edit className="mr-1.5 h-3.5 w-3.5" />
+                    Edit
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    New pipeline
+                  </>
+                )}
+              </Button>
+            </div>
+          }
+        />
 
-      {pipeline ? (
-        <Card className="p-6">
-          <PipelineFlowchart pipeline={pipeline} />
-        </Card>
-      ) : (
-        <Card className="p-12 text-center">
-          <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">No Pipeline Configured</h3>
-          <p className="text-muted-foreground mb-4">
-            Create a pipeline to automate your build, test, and deployment
-            processes.
-          </p>
-          <Button onClick={handleCreate}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Pipeline
-          </Button>
-        </Card>
-      )}
+        {loading ? (
+          <div className="flex items-center justify-center py-16 text-[13px] text-fg-muted">
+            Loading pipeline…
+          </div>
+        ) : !pipeline ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <p className="text-[13px] text-fg-muted">No pipeline configured.</p>
+            <Button size="sm" onClick={handleCreate}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Create pipeline
+            </Button>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead><ColumnHead>Name</ColumnHead></TableHead>
+                <TableHead><ColumnHead>Trigger</ColumnHead></TableHead>
+                <TableHead><ColumnHead>Schedule</ColumnHead></TableHead>
+                <TableHead><ColumnHead>Last run</ColumnHead></TableHead>
+                <TableHead><ColumnHead>Status</ColumnHead></TableHead>
+                <TableHead className="text-right"><ColumnHead>Total runs</ColumnHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={row.key}>
+                  <TableCell className="font-medium">{row.pipeline}</TableCell>
+                  <TableCell className="font-mono text-[12px] text-fg-muted">
+                    {row.trigger}
+                  </TableCell>
+                  <TableCell className="font-mono text-[12px] text-fg-muted">
+                    {row.schedule}
+                  </TableCell>
+                  <TableCell className="text-[13px] text-fg-muted">{row.last}</TableCell>
+                  <TableCell>
+                    <StatusDot tone={toneForStatus(row.status)} />
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-[12px]">
+                    {row.runs}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
 
       <PipelineEditorDialog
         open={dialogOpen}
@@ -181,7 +234,7 @@ const Pipelines: FC = () => {
           pipelineId={pipeline?.id}
         />
       )}
-    </div>
+    </>
   );
 };
 

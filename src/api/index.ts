@@ -8,6 +8,9 @@ import role from "./role";
 import * as general_settings from "./general-settings";
 import agent from "./agent";
 import plugin from "./plugin";
+import me from "./me";
+import policy from "./policy";
+import permission from "./permission";
 
 export const Apis = {
   auth,
@@ -20,4 +23,7 @@ export const Apis = {
   general_settings,
   agent,
   plugin,
+  me,
+  policy,
+  permission,
 };

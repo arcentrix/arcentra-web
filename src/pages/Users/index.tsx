@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Navigate } from "react-router-dom";
 import {
   Edit,
   Users as UsersIcon,
@@ -7,10 +8,10 @@ import {
   Mail,
   UserPlus,
   Lock,
-  Power,
-  PowerOff,
   Crown,
 } from "lucide-react";
+import { ApiError, isApiError } from "@/lib/api-error";
+import { InlineErrorState } from "@/components/inline-error-state";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { UserManagementDialog } from "@/components/user-management-dialog";
 import { ResetPasswordDialog } from "@/components/reset-password-dialog";
 import { DataTablePagination } from "@/components/data-table-pagination";
@@ -60,10 +62,17 @@ import type {
 import type { Role } from "@/api/role/types";
 import { Apis } from "@/api";
 
-export default function UsersPage() {
+export function UsersPanel({
+  headless = false,
+}: {
+  /** 嵌入 Secure 标签时启用：去掉页头与外层留白。 */
+  headless?: boolean;
+}) {
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ApiError | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
@@ -76,6 +85,7 @@ export default function UsersPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<string>("");
+  const lastErrorToastRef = useRef<string | null>(null);
 
   // 只在首次加载时获取角色列表
   useEffect(() => {
@@ -106,13 +116,19 @@ export default function UsersPage() {
           filterRole,
           pageNum,
           pageSize,
+          { silence: true },
         );
       } else {
         // 否则使用普通用户列表接口
-        response = await Apis.user_management.listUsers(pageNum, pageSize, {
-          search: searchTerm || undefined,
-          status: filterStatus !== "all" ? filterStatus : undefined,
-        });
+        response = await Apis.user_management.listUsers(
+          pageNum,
+          pageSize,
+          {
+            search: searchTerm || undefined,
+            status: filterStatus !== "all" ? filterStatus : undefined,
+          },
+          { silence: true },
+        );
       }
 
       // 如果有搜索词或状态筛选，在前端进行二次筛选
@@ -141,12 +157,38 @@ export default function UsersPage() {
           ? filteredUsers.length
           : response.count || 0,
       );
+      setLoadError(null);
+      lastErrorToastRef.current = null;
     } catch (error) {
-      toast.error("Failed to load users");
-      console.error("Load failed:", error);
+      const apiError = isApiError(error)
+        ? error
+        : new ApiError({
+            message:
+              error instanceof Error ? error.message : "Failed to load users",
+            cause: error,
+          });
+      setLoadError(apiError);
+      setUsers([]);
+      setTotalCount(0);
+      const toastKey = `${apiError.requestId ?? ""}|${apiError.message}`;
+      if (lastErrorToastRef.current !== toastKey) {
+        lastErrorToastRef.current = toastKey;
+        toast.error(
+          "Failed to load users",
+          "Check details on the page.",
+        );
+      }
+      console.error("Load failed:", apiError);
     } finally {
       setLoading(false);
+      setRetrying(false);
     }
+  };
+
+  const handleRetry = () => {
+    setRetrying(true);
+    lastErrorToastRef.current = null;
+    void loadUsers();
   };
 
   const loadRoles = async () => {
@@ -284,21 +326,36 @@ export default function UsersPage() {
 
   return (
     <>
-      <section className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight">
-              User Management
-            </h2>
-            <p className="text-muted-foreground mt-2">
-              Manage system users and their permissions
-            </p>
+      <section
+        className={
+          headless
+            ? "flex flex-col gap-6"
+            : "flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-8"
+        }
+      >
+        {headless ? (
+          <div className="flex justify-end">
+            <Button onClick={() => setInviteDialogOpen(true)}>
+              <Mail className="mr-2 h-4 w-4" />
+              Invite User
+            </Button>
           </div>
-          <Button onClick={() => setInviteDialogOpen(true)}>
-            <Mail className="mr-2 h-4 w-4" />
-            Invite User
-          </Button>
-        </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">
+                User Management
+              </h2>
+              <p className="text-muted-foreground mt-2">
+                Manage system users and their permissions
+              </p>
+            </div>
+            <Button onClick={() => setInviteDialogOpen(true)}>
+              <Mail className="mr-2 h-4 w-4" />
+              Invite User
+            </Button>
+          </div>
+        )}
 
         <Card>
           <CardHeader>
@@ -351,7 +408,7 @@ export default function UsersPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {loading && !retrying ? (
               <div className="space-y-4 py-4">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <div key={i} className="flex items-center gap-4">
@@ -365,6 +422,48 @@ export default function UsersPage() {
                   </div>
                 ))}
               </div>
+            ) : loadError ? (
+              <InlineErrorState
+                title="Unable to load users"
+                description="The user list could not be loaded. Retry the request, or open diagnostics for details."
+                requestId={loadError.requestId}
+                diagnostics={[
+                  ...(loadError.code !== undefined
+                    ? [
+                        {
+                          label: "Error code",
+                          value: String(loadError.code),
+                          mono: true,
+                        },
+                      ]
+                    : []),
+                  ...(loadError.status !== undefined
+                    ? [
+                        {
+                          label: "HTTP status",
+                          value: String(loadError.status),
+                          mono: true,
+                        },
+                      ]
+                    : []),
+                  ...(loadError.path
+                    ? [
+                        {
+                          label: "Path",
+                          value: loadError.path,
+                          mono: true,
+                          copyValue: loadError.path,
+                        },
+                      ]
+                    : []),
+                  {
+                    label: "Message",
+                    value: loadError.message,
+                  },
+                ]}
+                onRetry={handleRetry}
+                retrying={retrying}
+              />
             ) : users.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <UsersIcon className="h-12 w-12 text-muted-foreground mb-4" />
@@ -407,8 +506,8 @@ export default function UsersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
-                      <TableRow key={user.userId}>
+                    {users.map((user, idx) => (
+                      <TableRow key={`${user.userId || "row"}-${idx}`}>
                         <TableCell>
                           <div className="flex items-center gap-3">
                             <Avatar className="h-8 w-8">
@@ -432,17 +531,11 @@ export default function UsersPage() {
                         <TableCell>{user.email}</TableCell>
                         <TableCell>{getRoleBadge(user)}</TableCell>
                         <TableCell>
-                          {user.isEnabled === 1 ? (
-                            <Badge variant="success">
-                              <Power className="mr-1 h-3 w-3" />
-                              Enabled
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary">
-                              <PowerOff className="mr-1 h-3 w-3" />
-                              Disabled
-                            </Badge>
-                          )}
+                          <Switch
+                            checked={user.isEnabled === 1}
+                            onCheckedChange={() => handleToggleStatus(user)}
+                            aria-label={`Toggle ${user.username}`}
+                          />
                         </TableCell>
                         <TableCell>
                           {getInvitationStatusBadge(user.invitationStatus)}
@@ -472,22 +565,6 @@ export default function UsersPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleToggleStatus(user)}
-                              aria-label={
-                                user.isEnabled === 1
-                                  ? "Disable user"
-                                  : "Enable user"
-                              }
-                            >
-                              {user.isEnabled === 1 ? (
-                                <PowerOff className="h-4 w-4" />
-                              ) : (
-                                <Power className="h-4 w-4" />
-                              )}
-                            </Button>
                             <Button
                               size="sm"
                               variant="ghost"
@@ -606,4 +683,9 @@ export default function UsersPage() {
       </Dialog>
     </>
   );
+}
+
+/** `/users` 路由：内容已并入 Secure 的 Users 标签，独立路由重定向过去。 */
+export default function UsersRoute() {
+  return <Navigate to="/secure?tab=users" replace />;
 }
