@@ -2,7 +2,7 @@ import { isNil } from "lodash-es";
 
 type StorageKeys = "LOGIN_FALLBACK_URL" | "USER_INFO" | "TOKENS";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type AnyData = any;
 
 const DEFAULT_CACHE_TIME = 60 * 60 * 24 * 7; // 1 week

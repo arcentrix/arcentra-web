@@ -5,7 +5,7 @@ import type { AxiosRequestConfig } from "axios";
  */
 export type RequestConfig = AxiosRequestConfig & { silence?: boolean };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export interface ApiClientResponse<T = any> {
   code: number;
   msg: string;

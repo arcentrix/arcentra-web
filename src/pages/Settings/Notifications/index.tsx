@@ -37,7 +37,7 @@ import { SettingsCard, ColumnHead } from "@/components/blueprint";
 import { toast } from "@/lib/toast";
 
 // 模拟数据
-let channels: Channel[] = [
+const channels: Channel[] = [
   {
     id: "1",
     name: "Email Channel",
@@ -71,7 +71,7 @@ let channels: Channel[] = [
   },
 ];
 
-let templates: Template[] = [
+const templates: Template[] = [
   {
     id: "1",
     name: "Pipeline Success",

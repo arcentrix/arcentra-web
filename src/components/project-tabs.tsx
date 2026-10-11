@@ -10,14 +10,39 @@ import { Link } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TABS = [
-  { value: "overview",      label: "Overview",      match: "",              count: undefined },
-  { value: "pipelines",     label: "Pipelines",     match: "/pipelines",    count: 12 },
-  { value: "deployments",   label: "Deployments",   match: "/deployments",  count: 47 },
-  { value: "artifacts",     label: "Artifacts",     match: "/artifacts",    count: 318 },
-  { value: "environments",  label: "Environments",  match: "/environments", count: 3 },
-  { value: "secrets",       label: "Secrets",       match: "/secrets",      count: 14 },
-  { value: "members",       label: "Members",       match: "/members",      count: 11 },
-  { value: "settings",      label: "Settings",      match: "/settings",     count: undefined },
+  { value: "overview", label: "Overview", match: "", count: undefined },
+  {
+    value: "pipelines",
+    label: "Pipelines",
+    match: "/pipelines",
+    count: undefined,
+  },
+  {
+    value: "deployments",
+    label: "Deployments",
+    match: "/deployments",
+    count: undefined,
+  },
+  {
+    value: "artifacts",
+    label: "Artifacts",
+    match: "/artifacts",
+    count: undefined,
+  },
+  {
+    value: "environments",
+    label: "Environments",
+    match: "/environments",
+    count: undefined,
+  },
+  { value: "secrets", label: "Secrets", match: "/secrets", count: undefined },
+  { value: "members", label: "Members", match: "/members", count: undefined },
+  {
+    value: "settings",
+    label: "Settings",
+    match: "/settings",
+    count: undefined,
+  },
 ] as const;
 
 export function ProjectTabs({
@@ -57,7 +82,9 @@ export function ProjectTabs({
                 {tab.count != null && (
                   <span
                     className="font-mono text-[11px] tabular-nums"
-                    style={{ color: isActive ? "var(--fg-muted)" : "var(--fg-subtle)" }}
+                    style={{
+                      color: isActive ? "var(--fg-muted)" : "var(--fg-subtle)",
+                    }}
                   >
                     {tab.count}
                   </span>

@@ -21,8 +21,12 @@ function getRoutes(scope?: ScopeRef) {
   return get<string[]>("/me/routes", toParams(scope));
 }
 
-function getEffectiveActions(scope?: ScopeRef) {
-  return get<string[]>("/me/effective-actions", toParams(scope));
+function getEffectiveActions(scope?: ScopeRef, signal?: AbortSignal) {
+  return get<string[]>("/me/effective-actions", {
+    ...toParams(scope),
+    signal,
+    silence: true,
+  });
 }
 
 export default {

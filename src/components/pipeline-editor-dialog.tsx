@@ -113,7 +113,7 @@ const yamlToPipeline = (
   try {
     // 简单的 YAML 解析（将 YAML 转换为 JSON 然后解析）
     // 这是一个简化的实现，实际项目中应该使用 js-yaml 或类似的库
-    let jsonStr = yaml
+    const jsonStr = yaml
       .replace(/^(\s*)([a-zA-Z_][a-zA-Z0-9_]*):/gm, '"$2":') // 键名加引号
       .replace(/:\s*"([^"]*)"/g, ': "$1"') // 保留字符串值
       .replace(/:\s*([^"\[\n]+)$/gm, (_match, value) => {

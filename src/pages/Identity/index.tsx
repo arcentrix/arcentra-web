@@ -64,7 +64,7 @@ export default function IdentityPage({
       hasFetchedRef.current = true;
       loadProviders();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   const loadProviders = async () => {
