@@ -41,6 +41,18 @@ export function RunDeployment({
       ) : release ? (
         <>
           <p>Release status: {release.status}</p>
+          {release.approvalId && (
+            <p className="break-all">
+              Durable approval: {release.approvalId}. Review its immutable
+              evidence in Deployment approvals for this run.
+            </p>
+          )}
+          {release.status === "queued" && release.approvalId && (
+            <p>
+              Waiting for an authorized controller and approved gate. Approval
+              never restarts a stopped or interrupted run; refresh is read-only.
+            </p>
+          )}
           {release.reason && <p className="break-words">{release.reason}</p>}
           <p className="break-all font-mono">{release.image}</p>
           <p>Environment: {release.environmentId}</p>

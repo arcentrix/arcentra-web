@@ -59,3 +59,22 @@ In a restricted executor, Chromium may be unable to create a Unix socket. That i
 The project Artifacts tab now uses persisted metadata and authenticated attachment downloads; see [Artifact workspace](artifact-workspace.md). Other product areas such as Deploy, Dashboard, and Environments remain outside this execution integration and may still contain their existing prototypes.
 
 Build-log transport can replay delayed output after a network outage or process restart. A terminal run is not a guarantee that all output has arrived. The detail view retains its final catch-up window and manual Refresh, and now explains delayed replay after that window. The backend persists redacted output in a bounded private spool; failed local acceptance is reported as a failed step rather than silent log loss.
+
+## Durable final-deployment approval
+
+Run detail includes an authenticated, run-scoped approval list and an explicit detail review. Only a persisted `builtin:deployment` approval linked to the exact final Kubernetes release is actionable. Unsupported/legacy gates remain visible diagnostics; the UI cannot create a gate or select approvers.
+
+- `GET /approvals/?pipeline_run_id=:runID` returns a raw array inside the standard `detail` envelope. `GET /approvals/:approvalID` returns the current DTO.
+- The DTO includes numeric status (`0` pending, `1` approved, `2` rejected, `3` expired, `4` cancelled), vote counts, frozen `candidateApprovers` JSON string, `expiresAt`, `version`, `deploymentReleaseId`, and `evidenceHash`.
+- Server-computed `canApprove`, `canReject`, `decisionBlockReason`, and `viewerDecision` describe the current authenticated subject. Missing capability flags fail closed. Candidate membership displayed in the browser is never authority.
+- `POST /approvals/:approvalID/approve` or `/reject` sends only `{reason}` (at most 2,048 UTF-8 bytes). There is no actor field, user query parameter, or client-supplied candidate policy.
+
+The detail view cross-checks project/pipeline/run identity, the linked release and evidence hash, run opt-in, definition revision, deployment-plan hash, exact producer/execution IDs, artifact SHA256, and digest-pinned image. It renders the release's frozen `approvalTarget` tuple instead of substituting a paginated current environment. All target, image and evidence values are read-only.
+
+A checkbox binds review to the current evidence, vote version, release state and eligibility. Before posting, the exact scoped records are re-read; changed evidence, a competing vote, revocation, expiry or cancellation clears consent. Synchronous mutation locks prevent duplicate clicks. Closing, route identity changes and unmount discard consent; late preflight reads cannot send a decision. An uncertain mutation response causes read-only verification, never automatic mutation retry. Refresh and polling never call release advance/recovery.
+
+An approved record is historical evidence, not a guarantee of deployment. Expiry, revoked approver permissions or changed operator policy can still block application; the server revalidates before applying. Approval may release the original live controller's wait, but never restarts an interrupted/cancelled/timed-out run. A queued pipeline release has no manual execute/recovery button and may be cancelled before apply. Applying releases retain the separate existing explicit same-release recovery flow and cancellation/rollback warnings.
+
+Trigger review displays the server's `approvalRequired` and operator `pipelineApproval` policy. Missing/inconsistent policy fails closed. The deployment opt-in checkbox still starts unchecked; run opt-in never casts an approval vote.
+
+Tests use fake HTTP fixtures with the production API adapters, including partial quorum, reason-only approve/reject, immutable evidence, mismatched identities, stale versions, revocation, expiry, historical terminal status, duplicate clicks, uncertain responses, denied refresh, dismissal/navigation, and no automatic recovery. These are component/API tests, not live cluster or browser acceptance tests.

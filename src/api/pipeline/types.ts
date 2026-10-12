@@ -89,6 +89,7 @@ export interface CreatePipelineInput {
   saveMode: "direct" | "pr";
 }
 export interface PipelineDeploymentPlan {
+  approvalRequired?: boolean;
   jobName: string;
   stepName: string;
   environmentId: string;
@@ -104,6 +105,11 @@ export interface PipelineDeploymentPlan {
     container: string;
     configured: boolean;
     allowPipelineDeployments: boolean;
+    pipelineApproval?: {
+      approvers: string[];
+      minApprovals: number;
+      timeoutSeconds: number;
+    };
   };
 }
 export interface TriggerPipelineInput {
