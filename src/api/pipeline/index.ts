@@ -9,6 +9,7 @@ import type {
   RunLogs,
   RunStatus,
   StepRun,
+  TriggerPipelineInput,
 } from "./types";
 
 type Wire = Record<string, unknown>;
@@ -78,6 +79,9 @@ export function normalizeRun(input: unknown): PipelineRun {
     pipelineName: str(v, "pipelineName"),
     branch: str(v, "branch"),
     commitSha: str(v, "commitSha"),
+    definitionCommitSha: str(v, "definitionCommitSha"),
+    allowDeployments: field(v, "allowDeployments") === true,
+    deploymentPlanHash: str(v, "deploymentPlanHash"),
     status: normalizeStatus(v.status),
     triggeredBy: str(v, "triggeredBy"),
     totalJobs: num(v, "totalJobs"),
@@ -93,6 +97,12 @@ export function normalizeStep(input: unknown): StepRun {
   const v = record(input);
   return {
     stepRunId: str(v, "stepRunId"),
+    deploymentReleaseId: str(v, "deploymentReleaseId"),
+    uses: str(v, "uses"),
+    action: str(v, "action"),
+    attempt: num(v, "attempt") || 1,
+    retryMode: str(v, "retryMode"),
+    previousStepRunId: str(v, "previousStepRunId"),
     name: str(v, "name"),
     status: normalizeStatus(v.status, "job"),
     agentId: str(v, "agentId"),
@@ -176,14 +186,11 @@ export async function getRun(
 }
 export const triggerPipeline = (
   pipelineId: string,
-  variables: Record<string, string>,
-  requestId: string,
+  input: TriggerPipelineInput,
 ) =>
-  post<{ runID: string }>(
-    `/pipelines/${id(pipelineId)}/trigger`,
-    { variables, requestId },
-    { silence: true },
-  );
+  post<{ runID: string }>(`/pipelines/${id(pipelineId)}/trigger`, input, {
+    silence: true,
+  });
 export const stopRun = (pipelineId: string, runId: string) =>
   post(
     `/pipelines/${id(pipelineId)}/runs/${id(runId)}/stop`,
