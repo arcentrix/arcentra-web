@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopilotConsole } from "@/components/copilot-console";
@@ -20,8 +21,20 @@ import { uiShellStore } from "@/store/ui-shell";
 
 export function CopilotPanel() {
   const { copilotOpen } = uiShellStore.useState();
+  const location = useLocation();
+  const previousLocation = useRef(location);
+  const routeChanged = previousLocation.current !== location;
+  useEffect(() => {
+    if (previousLocation.current !== location) {
+      previousLocation.current = location;
+      uiShellStore.closeCopilot();
+    }
+  }, [location]);
   return (
-    <Sheet open={copilotOpen} onOpenChange={uiShellStore.setCopilotOpen}>
+    <Sheet
+      open={copilotOpen && !routeChanged}
+      onOpenChange={uiShellStore.setCopilotOpen}
+    >
       <Tooltip delayDuration={200}>
         <TooltipTrigger asChild>
           <SheetTrigger asChild>
@@ -56,7 +69,7 @@ export function CopilotPanel() {
           </SheetDescription>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto p-4">
-          {copilotOpen && <CopilotConsole />}
+          {copilotOpen && !routeChanged && <CopilotConsole />}
         </div>
         <nav
           className="flex gap-2 border-t p-4"

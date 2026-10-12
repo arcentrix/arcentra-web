@@ -41,6 +41,61 @@ function controllerManaged(job: JobRun) {
   );
 }
 
+function InitialCheckout({ job }: { job: JobRun }) {
+  const reported =
+    job.sourceProvenanceState === "reported" &&
+    job.sourceExpectationCaptured &&
+    job.sourceType === "git" &&
+    !!job.sourceRepository &&
+    /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(job.sourceResolvedCommit);
+  const noSource =
+    job.sourceExpectationCaptured && !job.sourceType && !job.sourceRepository;
+  return (
+    <section
+      aria-label={`${job.jobName} initial checkout`}
+      className="mt-3 rounded-md border bg-muted/20 p-3 text-xs"
+    >
+      <h4 className="font-medium">Initial source checkout</h4>
+      <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <dt className="text-muted-foreground">Source repository</dt>
+          <dd className="mt-1 break-all font-mono">
+            {job.sourceRepository || (noSource ? "Not configured" : "Unknown")}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Requested ref</dt>
+          <dd className="mt-1 break-all font-mono">
+            {job.sourceRef ||
+              (job.sourceRepository ? "Not specified" : "Unknown")}
+          </dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-muted-foreground">Initial commit SHA</dt>
+          <dd className="mt-1 break-all font-mono">
+            {reported ? job.sourceResolvedCommit : "Unknown"}
+          </dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-muted-foreground">Evidence state</dt>
+          <dd className="mt-1">
+            {reported ? "Agent-reported initial checkout" : "Unknown"}
+          </dd>
+        </div>
+      </dl>
+      {!reported && (
+        <p className="mt-3 text-muted-foreground">
+          {!job.sourceExpectationCaptured
+            ? "No captured source expectation is available for this job. Older runs remain unknown."
+            : noSource
+              ? "No source checkout was configured for this job."
+              : "No Agent checkout report is recorded. It may still be awaiting the terminal report, checkout may not have completed, or the Agent may not support reporting."}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function RunDetail({
   pipelineId,
   runId,
@@ -175,7 +230,9 @@ export function RunDetail({
           <>
             <dl className="grid grid-cols-2 gap-4 border-t p-5 text-xs">
               <div>
-                <dt className="text-muted-foreground">Branch</dt>
+                <dt className="text-muted-foreground">
+                  Recorded trigger branch
+                </dt>
                 <dd className="mt-1 break-all font-mono">
                   {resource.data.branch || "—"}
                 </dd>
@@ -185,10 +242,21 @@ export function RunDetail({
                 <dd className="mt-1 break-all font-mono">
                   {resource.data.definitionCommitSha || "Unknown"}
                 </dd>
+                <dd className="mt-1 text-muted-foreground">
+                  Pipeline definition loaded for this run.
+                </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Source commit</dt>
-                <dd className="mt-1">Not verified by this run</dd>
+                <dt className="text-muted-foreground">
+                  Recorded trigger revision
+                </dt>
+                <dd className="mt-1 break-all font-mono">
+                  {resource.data.commitSha || "Unknown"}
+                </dd>
+                <dd className="mt-1 text-muted-foreground">
+                  Ambiguous legacy value; may identify the definition. Per-job
+                  checkout evidence is below.
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">Started</dt>
@@ -246,6 +314,12 @@ export function RunDetail({
           title="Jobs & steps"
           sub="Persisted execution state from agents and the controller"
         />
+        <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+          Each Agent report describes that job's initial checkout before user
+          steps. It is not a build attestation or proof of the current
+          workspace, artifacts, or image contents. Jobs can use different
+          repositories and commits.
+        </p>
         <div className="border-t">
           {jobs.error && (
             <InlineErrorState
@@ -293,6 +367,7 @@ export function RunDetail({
                   "Not assigned"
                 )}
               </p>
+              <InitialCheckout job={job} />
               {job.errorMessage && (
                 <p className="mt-2 break-words text-xs text-destructive">
                   {job.errorMessage}

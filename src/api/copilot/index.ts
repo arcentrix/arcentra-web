@@ -8,9 +8,30 @@ export interface CopilotModel {
 export interface CopilotStatus {
   configured: boolean;
   models: CopilotModel[];
-  codeContext: "registered-text-artifacts-only";
+  codeContext:
+    | "registered-text-artifacts-only"
+    | "registered-text-artifacts-and-selected-github-files";
+  // Older servers omit these fields; repository source selection fails closed.
+  sourceContextEnabled?: boolean;
+  maxSourceFiles?: number;
+  maxSourceFileBytes?: number;
   maxContextBytes: number;
   maxQuestionBytes: number;
+}
+export interface CopilotSourceJob {
+  jobRunId: string;
+  name: string;
+  status: number;
+  available: boolean;
+  reason: string;
+  repository?: string;
+  requestedRef?: string;
+  resolvedCommit?: string;
+  provenanceState: "unknown" | "reported";
+}
+export interface CopilotSourceFile {
+  jobRunId: string;
+  path: string;
 }
 export interface CopilotSources {
   steps: { stepRunId: string; name: string; status: number }[];
@@ -20,6 +41,7 @@ export interface CopilotSources {
     size: number;
     expiresAt?: string;
   }[];
+  sourceJobs?: CopilotSourceJob[];
   warnings: string[];
 }
 export interface CopilotRequest {
@@ -29,7 +51,12 @@ export interface CopilotRequest {
   providerId: string;
   model: string;
   question: string;
-  context: { stepRunIds: string[]; artifactIds: string[]; fromLine: number };
+  context: {
+    stepRunIds: string[];
+    artifactIds: string[];
+    fromLine: number;
+    sourceFiles?: CopilotSourceFile[];
+  };
   shareSelectedContext: boolean;
 }
 export interface CopilotResult {
@@ -41,6 +68,13 @@ export interface CopilotResult {
     name?: string;
     bytes: number;
     truncated: boolean;
+    jobRunId?: string;
+    repository?: string;
+    requestedRef?: string;
+    resolvedCommit?: string;
+    path?: string;
+    blobSHA?: string;
+    provenanceState?: "unknown" | "reported";
   }[];
   warnings: string[];
   truncated: boolean;
