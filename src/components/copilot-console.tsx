@@ -11,7 +11,9 @@ import type {
   CopilotPreview,
   CopilotSources,
   CopilotStatus,
+  CopilotSourceFile,
 } from "@/api/copilot";
+import { sourcePathError } from "@/api/copilot/source-selection";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/blueprint";
 
@@ -24,6 +26,51 @@ type ActiveRequest = {
   requestId?: string;
 };
 
+function EvidenceList({ evidence }: { evidence: CopilotResult["evidence"] }) {
+  return (
+    <ul className="space-y-2 break-words text-xs text-muted-foreground">
+      {evidence.map((item) => (
+        <li key={`${item.kind}/${item.id}`}>
+          {item.kind}: {item.name || item.id} · {item.bytes} bytes
+          {item.truncated ? " · truncated" : ""}
+          {item.kind === "source-file" && (
+            <dl className="mt-1 space-y-1">
+              <div>
+                <dt className="inline font-medium">Job: </dt>
+                <dd className="inline">{item.jobRunId || "Unavailable"}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Repository: </dt>
+                <dd className="inline">{item.repository || "Unavailable"}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Requested ref: </dt>
+                <dd className="inline">{item.requestedRef || "Unavailable"}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">
+                  Agent-reported initial commit:{" "}
+                </dt>
+                <dd className="inline">
+                  {item.resolvedCommit || "Unavailable"}
+                </dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Path: </dt>
+                <dd className="inline">{item.path || "Unavailable"}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Git blob: </dt>
+                <dd className="inline">{item.blobSHA || "Unavailable"}</dd>
+              </div>
+            </dl>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function CopilotConsole() {
   const [projectId, setProjectId] = useState("");
   const [runId, setRunId] = useState("");
@@ -32,6 +79,9 @@ export function CopilotConsole() {
   const [modelIndex, setModelIndex] = useState(0);
   const [steps, setSteps] = useState<string[]>([]);
   const [artifacts, setArtifacts] = useState<string[]>([]);
+  const [sourceFiles, setSourceFiles] = useState<CopilotSourceFile[]>([]);
+  const [sourceJobId, setSourceJobId] = useState("");
+  const [sourcePath, setSourcePath] = useState("");
   const [question, setQuestion] = useState("");
   const [fromLine, setFromLine] = useState(0);
   const [consent, setConsent] = useState(false);
@@ -59,7 +109,7 @@ export function CopilotConsole() {
     [],
   );
 
-  function resetScope(nextProject: string, nextRun: string) {
+  function invalidateContext() {
     version.current++;
     const pending = active.current;
     active.current = null;
@@ -68,18 +118,25 @@ export function CopilotConsole() {
       void cancelCopilot(pending.projectId, pending.requestId).catch(
         () => undefined,
       );
-    setProjectId(nextProject);
-    setRunId(nextRun);
-    setStatus(null);
-    setSources(null);
-    setSteps([]);
-    setArtifacts([]);
     setConsent(false);
     setPreview(null);
     setResult(null);
     setError("");
     setNotice("");
     setBusy(null);
+  }
+
+  function resetScope(nextProject: string, nextRun: string) {
+    invalidateContext();
+    setProjectId(nextProject);
+    setRunId(nextRun);
+    setStatus(null);
+    setSources(null);
+    setSteps([]);
+    setArtifacts([]);
+    setSourceFiles([]);
+    setSourceJobId("");
+    setSourcePath("");
   }
 
   async function loadContext() {
@@ -95,6 +152,9 @@ export function CopilotConsole() {
     setSources(null);
     setSteps([]);
     setArtifacts([]);
+    setSourceFiles([]);
+    setSourceJobId("");
+    setSourcePath("");
     setConsent(false);
     setPreview(null);
     try {
@@ -129,7 +189,7 @@ export function CopilotConsole() {
     if (
       active.current ||
       !model ||
-      (!steps.length && !artifacts.length) ||
+      (!steps.length && !artifacts.length && !sourceFiles.length) ||
       !question.trim()
     )
       return;
@@ -161,6 +221,12 @@ export function CopilotConsole() {
           context: {
             stepRunIds: [...steps],
             artifactIds: [...artifacts],
+            ...(sourceFiles.length > 0 && {
+              sourceFiles: sourceFiles.map(({ jobRunId, path }) => ({
+                jobRunId,
+                path,
+              })),
+            }),
             fromLine,
           },
           shareSelectedContext: false,
@@ -185,7 +251,7 @@ export function CopilotConsole() {
       !model ||
       !consent ||
       !preview ||
-      (!steps.length && !artifacts.length) ||
+      (!steps.length && !artifacts.length && !sourceFiles.length) ||
       !question.trim()
     )
       return;
@@ -219,6 +285,12 @@ export function CopilotConsole() {
           context: {
             stepRunIds: [...steps],
             artifactIds: [...artifacts],
+            ...(sourceFiles.length > 0 && {
+              sourceFiles: sourceFiles.map(({ jobRunId, path }) => ({
+                jobRunId,
+                path,
+              })),
+            }),
             fromLine,
           },
           shareSelectedContext: true,
@@ -276,11 +348,42 @@ export function CopilotConsole() {
         ? selected.filter((value) => value !== id)
         : [...selected, id],
     );
-    setConsent(false);
-    setPreview(null);
-    setResult(null);
+    invalidateContext();
   };
   const model = status?.models[modelIndex];
+  const sourceJobs = sources?.sourceJobs ?? [];
+  const selectedJob = sourceJobs.find((job) => job.jobRunId === sourceJobId);
+  const sourceEnabled = status?.sourceContextEnabled === true;
+  const maxSourceFiles = Math.max(0, Math.min(status?.maxSourceFiles ?? 0, 3));
+  const hasSelection = steps.length + artifacts.length + sourceFiles.length > 0;
+
+  function addSourceFile() {
+    if (
+      !sourceEnabled ||
+      !selectedJob?.available ||
+      sourceFiles.length >= maxSourceFiles
+    )
+      return;
+    const pathError = sourcePathError(sourcePath);
+    if (pathError) {
+      setError(pathError);
+      return;
+    }
+    if (
+      sourceFiles.some(
+        (file) => file.jobRunId === sourceJobId && file.path === sourcePath,
+      )
+    ) {
+      setError("This file is already selected for this job.");
+      return;
+    }
+    invalidateContext();
+    setSourceFiles([
+      ...sourceFiles,
+      { jobRunId: sourceJobId, path: sourcePath },
+    ]);
+    setSourcePath("");
+  }
 
   return (
     <div className="space-y-5">
@@ -293,9 +396,10 @@ export function CopilotConsole() {
         )}
       </div>
       <p className="text-sm text-muted-foreground">
-        Ask about explicitly selected run logs and registered text-code
-        artifacts. Direct repository browsing and conversation history are
-        unavailable. Suggestions never execute retries or deployments.
+        Ask about explicitly selected run logs, registered text-code artifacts,
+        and repository files when enabled for this project. Repository browsing
+        and conversation history are unavailable. Suggestions never execute
+        retries or deployments.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
@@ -353,12 +457,9 @@ export function CopilotConsole() {
             <select
               className={inputStyle}
               value={modelIndex}
-              disabled={!!busy}
               onChange={(event) => {
+                invalidateContext();
                 setModelIndex(Number(event.target.value));
-                setConsent(false);
-                setPreview(null);
-                setResult(null);
               }}
             >
               {status.models.map((value, index) => (
@@ -371,10 +472,7 @@ export function CopilotConsole() {
               ))}
             </select>
           </label>
-          <fieldset
-            className="space-y-2 rounded-md border p-3"
-            disabled={!!busy}
-          >
+          <fieldset className="space-y-2 rounded-md border p-3">
             <legend className="px-1 text-sm font-medium">
               Step logs (choose up to 4)
             </legend>
@@ -413,22 +511,18 @@ export function CopilotConsole() {
                 className={inputStyle}
                 value={fromLine}
                 onChange={(event) => {
+                  invalidateContext();
                   setFromLine(
                     Math.min(
                       2147483647,
                       Math.max(0, Math.floor(Number(event.target.value)) || 0),
                     ),
                   );
-                  setConsent(false);
-                  setPreview(null);
                 }}
               />
             </label>
           </fieldset>
-          <fieldset
-            className="space-y-2 rounded-md border p-3"
-            disabled={!!busy}
-          >
+          <fieldset className="space-y-2 rounded-md border p-3">
             <legend className="px-1 text-sm font-medium">
               Text-code artifacts (choose up to 3)
             </legend>
@@ -465,6 +559,149 @@ export function CopilotConsole() {
               </label>
             ))}
           </fieldset>
+          <fieldset className="space-y-3 rounded-md border p-3">
+            <legend className="px-1 text-sm font-medium">
+              Repository source files (choose up to 3)
+            </legend>
+            <p className="text-xs text-muted-foreground">
+              Select a job and type exact file paths. GitHub.com only, from the
+              Agent-reported initial checkout commit. This does not describe the
+              current workspace or attest to what was built. No repository
+              browsing is available. Only bounded UTF-8 source text is eligible,
+              up to{" "}
+              {Math.floor(
+                Math.min(status.maxSourceFileBytes ?? 8192, 8192) / 1024,
+              )}{" "}
+              KiB per file.
+            </p>
+            {!sourceEnabled ? (
+              <p className="text-sm text-muted-foreground">
+                Repository source context is unavailable for this project. An
+                administrator must explicitly enable it. Logs and registered
+                text-code artifacts remain available.
+              </p>
+            ) : sourceJobs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No source jobs are available for this run.
+              </p>
+            ) : (
+              <>
+                <label className="block space-y-1 text-sm">
+                  Source job
+                  <select
+                    className={inputStyle}
+                    value={sourceJobId}
+                    onChange={(event) => {
+                      invalidateContext();
+                      setSourceJobId(event.target.value);
+                    }}
+                  >
+                    <option value="">Choose a job</option>
+                    {sourceJobs.map((job) => (
+                      <option key={job.jobRunId} value={job.jobRunId}>
+                        {job.name || job.jobRunId} · {job.jobRunId}
+                        {job.available ? "" : " · unavailable"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedJob && (
+                  <div
+                    className="space-y-1 break-words text-xs text-muted-foreground"
+                    aria-label="Selected job source"
+                  >
+                    <p>
+                      Job: {selectedJob.name || selectedJob.jobRunId} ·{" "}
+                      {selectedJob.jobRunId}
+                    </p>
+                    <p>Repository: {selectedJob.repository || "Unavailable"}</p>
+                    <p>
+                      Requested ref: {selectedJob.requestedRef || "Unavailable"}
+                    </p>
+                    <p>
+                      Agent-reported initial commit:{" "}
+                      {selectedJob.resolvedCommit || "Unavailable"}
+                    </p>
+                    {!selectedJob.available && (
+                      <p role="status">
+                        {selectedJob.reason ||
+                          "This job has no available initial checkout source."}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <label className="block space-y-1 text-sm">
+                  Repository-relative path
+                  <input
+                    className={inputStyle}
+                    value={sourcePath}
+                    maxLength={512}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="src/main.go"
+                    disabled={!selectedJob?.available || maxSourceFiles === 0}
+                    onChange={(event) => {
+                      invalidateContext();
+                      setSourcePath(event.target.value);
+                    }}
+                  />
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    !selectedJob?.available ||
+                    !sourcePath ||
+                    sourceFiles.length >= maxSourceFiles
+                  }
+                  onClick={addSourceFile}
+                >
+                  Add source file
+                </Button>
+                {sourceFiles.length >= maxSourceFiles && (
+                  <p className="text-xs text-muted-foreground">
+                    Source file limit reached ({maxSourceFiles}). Remove a file
+                    to choose another.
+                  </p>
+                )}
+              </>
+            )}
+            {sourceFiles.length > 0 && (
+              <ul
+                aria-label="Selected source files"
+                className="space-y-2 text-sm"
+              >
+                {sourceFiles.map((file) => (
+                  <li
+                    key={`${file.jobRunId}/${file.path}`}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="min-w-0 break-words">
+                      {file.path}
+                      <span className="block text-xs text-muted-foreground">
+                        Job: {file.jobRunId}
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      aria-label={`Remove ${file.path} from ${file.jobRunId}`}
+                      onClick={() => {
+                        invalidateContext();
+                        setSourceFiles(
+                          sourceFiles.filter((value) => value !== file),
+                        );
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
           {sources.warnings.map((warning, i) => (
             <p key={i} className="text-sm text-muted-foreground">
               {warning}
@@ -476,11 +713,9 @@ export function CopilotConsole() {
               className={`${inputStyle} min-h-24`}
               value={question}
               maxLength={4096}
-              disabled={!!busy}
               onChange={(event) => {
+                invalidateContext();
                 setQuestion(event.target.value);
-                setConsent(false);
-                setPreview(null);
               }}
               placeholder="What likely caused this failure, and what should I check next?"
             />
@@ -488,9 +723,7 @@ export function CopilotConsole() {
           <Button
             type="button"
             variant="outline"
-            disabled={
-              !!busy || !question.trim() || (!steps.length && !artifacts.length)
-            }
+            disabled={!!busy || !model || !question.trim() || !hasSelection}
             onClick={() => void previewContext()}
           >
             {busy === "preview"
@@ -508,6 +741,8 @@ export function CopilotConsole() {
                 information. If the underlying logs change, a new preview is
                 required.
               </p>
+              <h4 className="text-sm font-medium">Preview evidence</h4>
+              <EvidenceList evidence={preview.evidence} />
               <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs">
                 {preview.text}
               </pre>
@@ -540,7 +775,7 @@ export function CopilotConsole() {
               !consent ||
               !preview ||
               !question.trim() ||
-              (!steps.length && !artifacts.length)
+              !hasSelection
             }
             onClick={() => void analyze()}
           >
@@ -576,14 +811,7 @@ export function CopilotConsole() {
             </p>
           ))}
           <h4 className="text-sm font-medium">Context sent</h4>
-          <ul className="space-y-1 text-xs text-muted-foreground">
-            {result.evidence.map((item) => (
-              <li key={`${item.kind}/${item.id}`}>
-                {item.kind}: {item.name || item.id} · {item.bytes} bytes
-                {item.truncated ? " · truncated" : ""}
-              </li>
-            ))}
-          </ul>
+          <EvidenceList evidence={result.evidence} />
         </section>
       )}
     </div>

@@ -5,11 +5,18 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { RunDetail } from "./run-detail";
-import { getRun, getRunJobs, getRunLogs, stopRun } from "@/api/pipeline";
+import {
+  getRun,
+  getRunJobs,
+  getRunLogs,
+  normalizeJob,
+  stopRun,
+} from "@/api/pipeline";
 import type { PipelineRun } from "@/api/pipeline/types";
 vi.mock("./run-approvals", () => ({
   RunApprovals: () => <div>Run approval panel</div>,
@@ -61,7 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getRun).mockResolvedValue(run);
   vi.mocked(getRunJobs).mockResolvedValue([
-    {
+    normalizeJob({
       jobRunId: "j1",
       jobName: "Compile",
       status: "running",
@@ -79,7 +86,7 @@ beforeEach(() => {
           exitCode: 0,
         },
       ],
-    },
+    }),
   ]);
   vi.mocked(getRunLogs).mockResolvedValue({
     entries: [
@@ -106,9 +113,17 @@ describe("RunDetail", () => {
     );
     expect(screen.getByText("Exit code 0")).toBeInTheDocument();
     expect(screen.getByText("definition-only-sha")).toBeInTheDocument();
-    expect(screen.getByText("Not verified by this run")).toBeInTheDocument();
+    expect(screen.getByText("Recorded trigger revision")).toBeInTheDocument();
+    expect(screen.getByText("legacy-source-unverified")).toBeInTheDocument();
+    expect(screen.getByText(/Ambiguous legacy value/)).toBeInTheDocument();
+    const checkout = within(
+      screen.getByRole("region", { name: "Compile initial checkout" }),
+    );
+    expect(checkout.getAllByText("Unknown")).toHaveLength(4);
+    expect(checkout.getByText(/Older runs remain unknown/)).toBeInTheDocument();
+    expect(checkout.queryByText("definition-only-sha")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("legacy-source-unverified"),
+      checkout.queryByText("legacy-source-unverified"),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/Select a step to browse/)).toBeInTheDocument();
   });
@@ -219,7 +234,7 @@ it.each([
   "labels an unassigned %s / %s step without inventing an agent or release",
   async (uses, action, label) => {
     vi.mocked(getRunJobs).mockResolvedValue([
-      {
+      normalizeJob({
         jobRunId: "pending-job",
         jobName: "Pending job",
         status: "pending",
@@ -239,10 +254,147 @@ it.each([
             action,
           },
         ],
-      },
+      }),
     ]);
     show();
     expect(await screen.findByText(label)).toBeInTheDocument();
     expect(screen.queryByText(/Kubernetes release:/)).not.toBeInTheDocument();
   },
 );
+
+it("shows each job's full Agent-reported initial SHA without conflating definitions, trigger revisions or repositories", async () => {
+  vi.mocked(getRunJobs).mockResolvedValue([
+    normalizeJob({
+      jobRunId: "frontend",
+      jobName: "Frontend",
+      status: 4,
+      agentId: "agent-1",
+      sourceExpectationCaptured: true,
+      sourceType: "git",
+      sourceRepository: "https://git.example/Team/Web.git",
+      sourceRef: "main",
+      sourceResolvedCommit: "a".repeat(40),
+      sourceProvenanceState: "reported",
+    }),
+    normalizeJob({
+      jobRunId: "backend",
+      jobName: "Backend",
+      status: 5,
+      agentId: "agent-2",
+      sourceExpectationCaptured: true,
+      sourceType: "git",
+      sourceRepository: "git@git.example:Team/API.git",
+      sourceRef: "release/v2",
+      sourceResolvedCommit: "b".repeat(64),
+      sourceProvenanceState: "reported",
+    }),
+  ]);
+  show();
+  const frontend = within(
+    await screen.findByRole("region", { name: "Frontend initial checkout" }),
+  );
+  const backend = within(
+    screen.getByRole("region", { name: "Backend initial checkout" }),
+  );
+  expect(frontend.getByText("a".repeat(40))).toBeInTheDocument();
+  expect(
+    frontend.getByText("https://git.example/Team/Web.git"),
+  ).toBeInTheDocument();
+  expect(frontend.getByText("main")).toBeInTheDocument();
+  expect(frontend.queryByText("b".repeat(64))).not.toBeInTheDocument();
+  expect(backend.getByText("b".repeat(64))).toBeInTheDocument();
+  expect(backend.getByText("git@git.example:Team/API.git")).toBeInTheDocument();
+  expect(backend.getByText("release/v2")).toBeInTheDocument();
+  expect(frontend.queryByRole("link")).not.toBeInTheDocument();
+  expect(backend.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.getAllByText("Agent-reported initial checkout")).toHaveLength(
+    2,
+  );
+  expect(
+    screen.getByText(
+      /not a build attestation or proof of the current workspace/,
+    ),
+  ).toHaveTextContent("artifacts, or image contents");
+});
+
+it.each([
+  ["old Agent", "success", "", "No Agent checkout report is recorded"],
+  [
+    "clone failure",
+    "failed",
+    "unknown",
+    "No Agent checkout report is recorded",
+  ],
+  [
+    "pending checkout",
+    "pending",
+    "unknown",
+    "No Agent checkout report is recorded",
+  ],
+])(
+  "keeps %s evidence explicitly unknown despite a run-level revision",
+  async (_name, status, state, message) => {
+    vi.mocked(getRunJobs).mockResolvedValue([
+      normalizeJob({
+        jobRunId: "j1",
+        jobName: "Source job",
+        status,
+        sourceExpectationCaptured: true,
+        sourceType: "git",
+        sourceRepository: "https://git.example/Team/Repo.git",
+        sourceRef: "main",
+        sourceProvenanceState: state,
+      }),
+    ]);
+    show();
+    const checkout = within(
+      await screen.findByRole("region", {
+        name: "Source job initial checkout",
+      }),
+    );
+    expect(checkout.getAllByText("Unknown")).toHaveLength(2);
+    expect(checkout.getByText(new RegExp(message))).toBeInTheDocument();
+    expect(
+      checkout.queryByText("Agent-reported initial checkout"),
+    ).not.toBeInTheDocument();
+    expect(
+      checkout.queryByText("legacy-source-unverified"),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it("keeps jobs without source explicitly unknown and displays untrusted repository/ref text without links", async () => {
+  vi.mocked(getRunJobs).mockResolvedValue([
+    normalizeJob({
+      jobRunId: "no-source",
+      jobName: "No source",
+      sourceExpectationCaptured: true,
+    }),
+    normalizeJob({
+      jobRunId: "untrusted",
+      jobName: "Untrusted",
+      sourceExpectationCaptured: true,
+      sourceType: "git",
+      sourceRepository: "<script>untrusted</script>",
+      sourceRef: "<img src=x onerror=alert(1)>",
+    }),
+  ]);
+  const { container } = show();
+  const noSource = within(
+    await screen.findByRole("region", { name: "No source initial checkout" }),
+  );
+  expect(
+    noSource.getByText("No source checkout was configured for this job."),
+  ).toBeInTheDocument();
+  expect(noSource.getByText("Not configured")).toBeInTheDocument();
+  expect(noSource.getAllByText("Unknown")).toHaveLength(3);
+  const untrusted = within(
+    screen.getByRole("region", { name: "Untrusted initial checkout" }),
+  );
+  expect(untrusted.getByText("<script>untrusted</script>")).toBeInTheDocument();
+  expect(
+    untrusted.getByText("<img src=x onerror=alert(1)>"),
+  ).toBeInTheDocument();
+  expect(untrusted.queryByRole("link")).not.toBeInTheDocument();
+  expect(container.querySelector("script, img")).toBeNull();
+});

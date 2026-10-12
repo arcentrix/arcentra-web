@@ -199,6 +199,14 @@ describe("Observe execution health", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("2 failed jobs")).toBeInTheDocument();
     expect(
+      screen.getAllByText("Recorded trigger revision: abc1234"),
+    ).toHaveLength(3);
+    expect(
+      screen.getAllByTitle(
+        "Ambiguous legacy run value; not per-job checkout evidence",
+      ),
+    ).toHaveLength(3);
+    expect(
       screen.getByRole("link", { name: "Inspect run run-failed and logs" }),
     ).toHaveAttribute("href", "/build?pipeline=p1&run=run-failed");
     expect(

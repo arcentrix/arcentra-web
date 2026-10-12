@@ -143,3 +143,80 @@ it("keeps definition provenance and release IDs from protojson or snake case", (
     }).steps[0].deploymentReleaseId,
   ).toBe("release-1");
 });
+
+it.each([40, 64])(
+  "normalizes per-job initial checkout evidence with a full %i-character SHA",
+  (length) => {
+    expect(
+      normalizeJob({
+        source_expectation_captured: true,
+        source_type: "git",
+        source_repository: "https://git.example/Case/Repo.git",
+        source_ref: "refs/heads/release",
+        source_resolved_commit: "a".repeat(length),
+        source_provenance_state: "reported",
+      }),
+    ).toMatchObject({
+      sourceExpectationCaptured: true,
+      sourceType: "git",
+      sourceRepository: "https://git.example/Case/Repo.git",
+      sourceRef: "refs/heads/release",
+      sourceResolvedCommit: "a".repeat(length),
+      sourceProvenanceState: "reported",
+    });
+  },
+);
+
+it("keeps legacy and absent-source jobs unknown without inventing checkout from other SHA fields", () => {
+  expect(
+    normalizeJob({
+      commitSha: "a".repeat(40),
+      definitionCommitSha: "b".repeat(40),
+    }),
+  ).toMatchObject({
+    sourceExpectationCaptured: false,
+    sourceType: "",
+    sourceRepository: "",
+    sourceRef: "",
+    sourceResolvedCommit: "",
+    sourceProvenanceState: "unknown",
+  });
+  expect(normalizeJob({ sourceExpectationCaptured: true })).toMatchObject({
+    sourceExpectationCaptured: true,
+    sourceRepository: "",
+    sourceResolvedCommit: "",
+    sourceProvenanceState: "unknown",
+  });
+});
+
+it.each([
+  { sourceExpectationCaptured: false },
+  { sourceProvenanceState: "verified" },
+  { sourceProvenanceState: "unknown" },
+  { sourceResolvedCommit: "abcdef1" },
+  { sourceResolvedCommit: "A".repeat(40) },
+  { sourceResolvedCommit: "z".repeat(40) },
+  { sourceResolvedCommit: "a".repeat(41) },
+  { sourceResolvedCommit: "" },
+  { sourceRepository: "" },
+  { sourceType: "" },
+  { sourceType: "svn" },
+])(
+  "fails closed for unrecognized or malformed checkout evidence %j",
+  (override) => {
+    expect(
+      normalizeJob({
+        sourceExpectationCaptured: true,
+        sourceType: "git",
+        sourceRepository: "https://git.example/Repo.git",
+        sourceRef: "main",
+        sourceResolvedCommit: "a".repeat(40),
+        sourceProvenanceState: "reported",
+        ...override,
+      }),
+    ).toMatchObject({
+      sourceResolvedCommit: "",
+      sourceProvenanceState: "unknown",
+    });
+  },
+);

@@ -59,4 +59,30 @@ describe("Copilot authenticated API contracts", () => {
       { silence: true, timeout: 10000 },
     );
   });
+  it("supports source-only context using job identity and path through the authenticated client", () => {
+    const input = {
+      requestId: "source-request",
+      runId: "run",
+      providerId: "approved",
+      model: "model",
+      question: "Why did this fail?",
+      context: {
+        stepRunIds: [],
+        artifactIds: [],
+        fromLine: 0,
+        sourceFiles: [{ jobRunId: "job", path: "src/main.go" }],
+      },
+      shareSelectedContext: false,
+    };
+    previewCopilot("project/a", input);
+    expect(post).toHaveBeenCalledWith(
+      "/projects/project%2Fa/copilot/preview",
+      input,
+      {
+        signal: undefined,
+        silence: true,
+        timeout: 20000,
+      },
+    );
+  });
 });

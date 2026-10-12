@@ -28,6 +28,7 @@ export interface PipelineRun {
   pipelineId: string;
   pipelineName: string;
   branch: string;
+  /** Ambiguous legacy trigger value; never per-job checkout evidence. */
   commitSha: string;
   definitionCommitSha?: string;
   allowDeployments?: boolean;
@@ -71,6 +72,13 @@ export interface JobRun {
   agentId: string;
   errorMessage: string;
   duration: number;
+  sourceExpectationCaptured: boolean;
+  sourceType: string;
+  sourceRepository: string;
+  sourceRef: string;
+  /** Agent-reported initial checkout only, not a current-workspace attestation. */
+  sourceResolvedCommit: string;
+  sourceProvenanceState: "unknown" | "reported";
   steps: StepRun[];
 }
 export interface Page<T> {

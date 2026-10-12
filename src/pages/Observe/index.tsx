@@ -232,9 +232,15 @@ function RunHealth({
                             </p>
                             <p className="mt-1 break-words text-xs text-fg-muted">
                               {run.branch || "—"}
+                            </p>
+                            <p
+                              className="mt-1 break-words text-xs text-fg-subtle"
+                              title="Ambiguous legacy run value; not per-job checkout evidence"
+                            >
+                              Recorded trigger revision:{" "}
                               {run.commitSha
-                                ? ` · ${run.commitSha.slice(0, 7)}`
-                                : ""}
+                                ? run.commitSha.slice(0, 7)
+                                : "Unknown"}
                             </p>
                           </TableCell>
                           <TableCell>

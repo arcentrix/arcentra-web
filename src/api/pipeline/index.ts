@@ -113,6 +113,19 @@ export function normalizeStep(input: unknown): StepRun {
 }
 export function normalizeJob(input: unknown): JobRun {
   const v = record(input);
+  const sourceExpectationCaptured =
+    field(v, "sourceExpectationCaptured") === true;
+  const sourceType = str(v, "sourceType");
+  const sourceRepository = str(v, "sourceRepository");
+  const sourceResolvedCommit = str(v, "sourceResolvedCommit");
+  // Missing, abbreviated or unrecognized evidence remains unknown. In
+  // particular, the run's legacy commitSha is never a source fallback.
+  const reported =
+    sourceExpectationCaptured &&
+    sourceType === "git" &&
+    !!sourceRepository &&
+    field(v, "sourceProvenanceState") === "reported" &&
+    /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sourceResolvedCommit);
   return {
     jobRunId: str(v, "jobRunId"),
     jobName: str(v, "jobName"),
@@ -120,6 +133,12 @@ export function normalizeJob(input: unknown): JobRun {
     agentId: str(v, "agentId"),
     errorMessage: str(v, "errorMessage"),
     duration: num(v, "duration"),
+    sourceExpectationCaptured,
+    sourceType: sourceExpectationCaptured ? sourceType : "",
+    sourceRepository: sourceExpectationCaptured ? sourceRepository : "",
+    sourceRef: sourceExpectationCaptured ? str(v, "sourceRef") : "",
+    sourceResolvedCommit: reported ? sourceResolvedCommit : "",
+    sourceProvenanceState: reported ? "reported" : "unknown",
     steps: Array.isArray(v.steps) ? v.steps.map(normalizeStep) : [],
   };
 }
