@@ -56,7 +56,7 @@ const PAGE_ITEMS: Omit<CommandItem, "group">[] = [
   {
     id: "deploy",
     title: "Deploy",
-    description: "Deployments · Environments · Releases",
+    description: "Deployment integration status · Not integrated",
     icon: Rocket,
     to: "/deploy",
   },
@@ -70,7 +70,7 @@ const PAGE_ITEMS: Omit<CommandItem, "group">[] = [
   {
     id: "observe",
     title: "Observe",
-    description: "Logs · Metrics · Traces · Audit",
+    description: "Pipeline runs · Durations · Agent health",
     icon: Activity,
     to: "/observe",
   },
@@ -108,8 +108,8 @@ const ACTION_ITEMS: Omit<CommandItem, "group">[] = [
   },
   {
     id: "action-ask-arcentra",
-    title: "Ask AI",
-    description: "Open the AI copilot panel",
+    title: "Copilot status",
+    description: "AI chat is not integrated in this build",
     icon: Sparkles,
     onSelect: () => uiShellStore.openCopilot(),
     keywords: ["ai", "copilot", "llm", "chat"],
@@ -270,6 +270,9 @@ export function CommandPalette() {
           <DialogPrimitive.Title className="sr-only">
             Command Palette
           </DialogPrimitive.Title>
+          <DialogPrimitive.Description className="sr-only">
+            Navigate to pages, open quick actions, or check integration status.
+          </DialogPrimitive.Description>
           <div className="flex items-center gap-2 border-b px-3">
             <Search className="h-4 w-4 text-muted-foreground" />
             <input

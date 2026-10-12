@@ -1,12 +1,14 @@
-import { useNavigate } from "react-router-dom";
-import { ArrowRight, MessageSquare, Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bot, Hammer, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/blueprint";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  SheetTrigger,
 } from "@/components/ui/sheet";
 import {
   Tooltip,
@@ -16,108 +18,78 @@ import {
 import { cn } from "@/lib/utils";
 import { uiShellStore } from "@/store/ui-shell";
 
-const DEFAULT_WORKSPACE = "Copilot";
-
-const SUGGESTED_PROMPTS = [
-  "Why did this pipeline fail?",
-  "Generate a deploy config for staging.",
-  "Explain recent failures across projects.",
-  "Create a GitOps app from this repo.",
-  "Summarize last 24h of pipeline activity.",
-];
-
-function CopilotFab() {
-  const { copilotOpen } = uiShellStore.useState();
-
-  return (
-    <Tooltip delayDuration={200}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label="Ask AI"
-          onClick={() => uiShellStore.toggleCopilot()}
-          className={cn(
-            "fixed bottom-6 right-6 z-30 flex h-12 w-12 items-center justify-center rounded-full border bg-background shadow-lg transition-colors duration-150 cursor-pointer",
-            "hover:bg-accent/60 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            copilotOpen && "bg-accent/60",
-          )}
-        >
-          <Sparkles className="h-5 w-5 text-foreground" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="left" sideOffset={8}>
-        Ask AI
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 export function CopilotPanel() {
-  const navigate = useNavigate();
   const { copilotOpen } = uiShellStore.useState();
 
-  const openFullChat = (prompt?: string) => {
-    uiShellStore.closeCopilot();
-    const search = prompt ? `?title=${encodeURIComponent(prompt)}` : "";
-    navigate(
-      `/workspace/${encodeURIComponent(DEFAULT_WORKSPACE)}/chat${search}`,
-    );
-  };
-
   return (
-    <>
-      <CopilotFab />
-      <Sheet open={copilotOpen} onOpenChange={uiShellStore.setCopilotOpen}>
-        <SheetContent
-          side="right"
-          className="flex w-[420px] flex-col gap-0 p-0 sm:max-w-[420px]"
-        >
-          <SheetHeader className="border-b p-4 text-left">
-            <SheetTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="h-4 w-4" />
-              Ask AI
-            </SheetTitle>
-            <SheetDescription>
-              Talk to your platform — ask about pipelines, deployments, agents,
-              or generate config.
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-            <div>
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Suggested prompts
-              </div>
-              <ul className="grid gap-1.5">
-                {SUGGESTED_PROMPTS.map((prompt) => (
-                  <li key={prompt}>
-                    <button
-                      type="button"
-                      onClick={() => openFullChat(prompt)}
-                      className="group flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-accent/60 cursor-pointer"
-                    >
-                      <span className="line-clamp-1">{prompt}</span>
-                      <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              The full Copilot keeps context across sessions — pick a prompt
-              above, or open it for the complete experience.
-            </div>
+    <Sheet open={copilotOpen} onOpenChange={uiShellStore.setCopilotOpen}>
+      <Tooltip delayDuration={200}>
+        <TooltipTrigger asChild>
+          <SheetTrigger asChild>
+            <button
+              type="button"
+              aria-label="Copilot status"
+              className={cn(
+                "fixed bottom-6 right-6 z-30 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border bg-background shadow-lg transition-colors duration-150",
+                "outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                copilotOpen && "bg-accent/60",
+              )}
+            >
+              <Sparkles className="h-5 w-5 text-foreground" aria-hidden />
+            </button>
+          </SheetTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="left" sideOffset={8}>
+          Copilot status · Not integrated
+        </TooltipContent>
+      </Tooltip>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]"
+      >
+        <SheetHeader className="border-b p-4 pr-10 text-left">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4" aria-hidden />
+            Copilot status
+          </SheetTitle>
+          <SheetDescription>
+            AI chat is not integrated in this build.
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <div>
+            <StatusBadge tone="muted">Not integrated</StatusBadge>
           </div>
-
-          <div className="flex flex-col gap-2 border-t p-4">
-            <Button size="sm" className="gap-2" onClick={() => openFullChat()}>
-              <MessageSquare className="h-4 w-4" />
-              Open Copilot
+          <p className="text-sm text-muted-foreground">
+            Messages, conversation history, and AI tool actions are unavailable.
+            This panel does not send prompts or project data to an AI provider.
+          </p>
+          <nav aria-label="Available platform tools" className="grid gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/build" onClick={uiShellStore.closeCopilot}>
+                <Hammer aria-hidden />
+                Open Build
+              </Link>
             </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-    </>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/agents" onClick={uiShellStore.closeCopilot}>
+                <Bot aria-hidden />
+                View Agents
+              </Link>
+            </Button>
+          </nav>
+        </div>
+        <div className="border-t p-4">
+          <Button asChild size="sm" className="w-full">
+            <Link
+              to="/workspace/Copilot/chat"
+              onClick={uiShellStore.closeCopilot}
+            >
+              View Copilot status
+            </Link>
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

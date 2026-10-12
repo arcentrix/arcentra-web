@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { AxiosResponse } from "axios";
 import { toast } from "@/lib/toast";
 import { ENV } from "@/constants/env";
 import { isDev } from "@/lib/is";
@@ -82,6 +83,9 @@ client.interceptors.request.use(
 // 响应拦截器
 client.interceptors.response.use(
   (response) => {
+    // Downloads need the bytes and response headers, not the JSON envelope.
+    // Only explicit blob requests use this branch; regular API behavior stays intact.
+    if (response.config.responseType === "blob") return response;
     const data: ApiClientResponse | ApiClientErrorResponse = response.data;
 
     if (data.code === 200) {
@@ -140,7 +144,17 @@ client.interceptors.response.use(
 
     return Promise.reject(apiError);
   },
-  (error) => {
+  async (error) => {
+    // Axios also returns JSON error bodies as Blob for binary requests. Decode
+    // bounded error responses so 403/404/410 messages remain actionable in the UI.
+    const body = error.response?.data;
+    if (body instanceof Blob && body.size <= 1024 * 1024) {
+      try {
+        error.response.data = JSON.parse(await body.text());
+      } catch {
+        // A non-JSON transport failure still exposes its status and request ID.
+      }
+    }
     const requestId = extractRequestId(error.response?.headers);
     const status = error.response?.status as number | undefined;
 
@@ -234,6 +248,14 @@ export function dedupeRequest<T>(
 
 export function get<T = unknown>(url: string, config?: RequestConfig) {
   return client.get<unknown, T>(url, config);
+}
+
+/** A session-aware binary request. Callers must validate the download response. */
+export function getBlob(url: string, config?: RequestConfig) {
+  return client.get<Blob, AxiosResponse<Blob>>(url, {
+    ...config,
+    responseType: "blob",
+  });
 }
 
 export function post<T = unknown, D = unknown>(

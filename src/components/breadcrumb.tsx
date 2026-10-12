@@ -154,9 +154,8 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
           title: "Copilot",
           url: `/workspace/${workspaceName}/chat`,
         });
-        // 当前对话标题（取自 URL 查询参数）
-        const titleParam = new URLSearchParams(location.search).get("title");
-        items.push({ title: titleParam || "New chat" });
+        // Chat is not integrated; legacy query parameters are not conversation data.
+        items.push({ title: "Integration status" });
       }
       return items;
     }

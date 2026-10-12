@@ -1,22 +1,19 @@
-/**
- * Project Artifacts 标签面板 — Engineering Blueprint 重做
- * Panel + 表格：Name / Tag / Type / Size / SHA / Pushed。
- * 保留全部筛选/分页/下载/刷新逻辑。
- */
-
-import type { FC } from "react";
-import { useParams } from "react-router-dom";
-import { useState, useMemo, useEffect } from "react";
-import { RefreshCw, Download, Filter } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Download, RefreshCw } from "lucide-react";
+import {
+  artifactStatuses,
+  downloadProjectArtifact,
+  listProjectArtifacts,
+  saveArtifactDownload,
+  type ArtifactStatus,
+  type ProjectArtifact,
+} from "@/api/artifact";
+import { useApiResource } from "@/hooks/use-api-resource";
+import { isApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { InlineErrorState } from "@/components/inline-error-state";
 import {
   Table,
   TableBody,
@@ -25,296 +22,461 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DataTablePagination } from "@/components/data-table-pagination";
 import {
   Panel,
   PanelHeader,
   StatusBadge,
   ColumnHead,
-  type BadgeTone,
 } from "@/components/blueprint";
 
-interface Artifact {
-  id: string;
+const pageSize = 20;
+
+function formatSize(artifact: ProjectArtifact): string {
+  if (
+    artifact.sizeKnown === false ||
+    !Number.isFinite(artifact.size) ||
+    artifact.size < 0
+  )
+    return "Unknown";
+  if (artifact.size < 1024) return `${artifact.size} B`;
+  const unit = Math.min(
+    Math.floor(Math.log(artifact.size) / Math.log(1024)),
+    4,
+  );
+  return `${(artifact.size / 1024 ** unit).toFixed(1)} ${["B", "KB", "MB", "GB", "TB"][unit]}`;
+}
+
+function formatDate(value?: string): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+}
+
+function ArtifactFilters({
+  name,
+  runId,
+  onApply,
+}: {
   name: string;
-  type: string;
-  size: string;
-  createdAt: string;
-  pipelineId?: string;
-  pipelineName?: string;
-  status: "available" | "expired" | "archived";
-}
-
-function artifactStatusToBadgeTone(status: string): BadgeTone {
-  switch (status) {
-    case "available":
-      return "ok";
-    case "expired":
-      return "fail";
-    case "archived":
-      return "muted";
-    default:
-      return "muted";
-  }
-}
-
-/** Derive a docker-style tag from artifact data */
-function artifactTag(artifact: Artifact): string {
-  if (artifact.name.includes("v1.2.3")) return "v1.2.3";
-  if (artifact.name.includes("latest")) return "latest";
-  if (artifact.type === "json") return "latest";
-  if (artifact.type === "html") return "latest";
-  if (artifact.type === "yaml") return "v1.0.0";
-  return "latest";
-}
-
-/** Derive a fake short SHA */
-function artifactSha(artifact: Artifact): string {
-  const map: Record<string, string> = {
-    "1": "a4f9c2",
-    "2": "0bcf81",
-    "3": "92ad11",
-    "4": "ee2207",
-    "5": "8a31fc",
-  };
-  return map[artifact.id] ?? "—";
-}
-
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}/${month}/${day} ${hours}:${minutes}`;
-}
-
-const Artifacts: FC = () => {
-  const { projectId: _projectId } = useParams<{ projectId: string }>();
-  const [searchText, setSearchText] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [loading, setLoading] = useState(false);
-  const [pageNum, setPageNum] = useState(1);
-  const [pageSize] = useState(10);
-
-  const artifacts: Artifact[] = [
-    {
-      id: "1",
-      name: "build-artifact-v1.2.3.tar.gz",
-      type: "archive",
-      size: "45.2 MB",
-      createdAt: "2024-01-20T14:30:00Z",
-      pipelineId: "pipeline-1",
-      pipelineName: "Main Deployment Pipeline",
-      status: "available",
-    },
-    {
-      id: "2",
-      name: "test-results.json",
-      type: "json",
-      size: "2.1 MB",
-      createdAt: "2024-01-20T10:15:00Z",
-      pipelineId: "pipeline-2",
-      pipelineName: "Testing Pipeline",
-      status: "available",
-    },
-    {
-      id: "3",
-      name: "docker-image:latest",
-      type: "docker",
-      size: "128.5 MB",
-      createdAt: "2024-01-19T18:20:00Z",
-      pipelineId: "pipeline-1",
-      pipelineName: "Main Deployment Pipeline",
-      status: "available",
-    },
-    {
-      id: "4",
-      name: "coverage-report.html",
-      type: "html",
-      size: "856 KB",
-      createdAt: "2024-01-19T12:00:00Z",
-      pipelineId: "pipeline-1",
-      pipelineName: "Main Deployment Pipeline",
-      status: "expired",
-    },
-    {
-      id: "5",
-      name: "deployment-config.yaml",
-      type: "yaml",
-      size: "12 KB",
-      createdAt: "2024-01-18T16:45:00Z",
-      pipelineId: "pipeline-3",
-      pipelineName: "Staging Pipeline",
-      status: "archived",
-    },
-  ];
-
-  const filteredArtifacts = useMemo(() => {
-    return artifacts.filter((artifact) => {
-      const matchesSearch =
-        artifact.name.toLowerCase().includes(searchText.toLowerCase()) ||
-        artifact.pipelineName?.toLowerCase().includes(searchText.toLowerCase());
-      const matchesType = typeFilter === "all" || artifact.type === typeFilter;
-      const matchesStatus = statusFilter === "all" || artifact.status === statusFilter;
-      return matchesSearch && matchesType && matchesStatus;
-    });
-  }, [artifacts, searchText, typeFilter, statusFilter]);
-
-  const totalPages = Math.ceil(filteredArtifacts.length / pageSize);
-  const paginatedArtifacts = useMemo(() => {
-    const startIndex = (pageNum - 1) * pageSize;
-    return filteredArtifacts.slice(startIndex, startIndex + pageSize);
-  }, [filteredArtifacts, pageNum, pageSize]);
-
-  useEffect(() => {
-    setPageNum(1);
-  }, [searchText, typeFilter, statusFilter]);
-
-  const handleRefresh = () => {
-    setLoading(true);
-    setTimeout(() => setLoading(false), 1000);
-  };
-
-  const handleDownload = (artifact: Artifact) => {
-    console.log("Downloading artifact:", artifact.name);
-  };
-
+  runId: string;
+  onApply: (name: string, runId: string) => void;
+}) {
+  const [draftName, setDraftName] = useState(name);
+  const [draftRun, setDraftRun] = useState(runId);
   return (
-    <div className="flex flex-col gap-4">
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
-          <Input
-            placeholder="Search artifacts or pipeline…"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="h-8 w-[240px] text-[13px]"
-          />
-        </div>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="h-8 w-auto min-w-[130px] gap-1.5 text-[13px]">
-            <Filter className="h-3.5 w-3.5 shrink-0" />
-            <SelectValue placeholder="Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
-            <SelectItem value="archive">Archive</SelectItem>
-            <SelectItem value="json">JSON</SelectItem>
-            <SelectItem value="docker">Docker</SelectItem>
-            <SelectItem value="html">HTML</SelectItem>
-            <SelectItem value="yaml">YAML</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-8 w-auto min-w-[130px] gap-1.5 text-[13px]">
-            <Filter className="h-3.5 w-3.5 shrink-0" />
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="available">Available</SelectItem>
-            <SelectItem value="expired">Expired</SelectItem>
-            <SelectItem value="archived">Archived</SelectItem>
-          </SelectContent>
-        </Select>
+    <form
+      className="flex min-w-0 flex-wrap items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply(draftName.trim(), draftRun.trim());
+      }}
+    >
+      <Input
+        aria-label="Artifact name"
+        placeholder="Search artifact names…"
+        value={draftName}
+        onChange={(event) => setDraftName(event.target.value)}
+        className="h-8 w-full text-[13px] sm:w-56"
+      />
+      <Input
+        aria-label="Run ID"
+        placeholder="Filter by exact run ID…"
+        value={draftRun}
+        onChange={(event) => setDraftRun(event.target.value)}
+        className="h-8 w-full text-[13px] sm:w-52"
+      />
+      <Button variant="outline" size="sm" type="submit" className="h-8">
+        Apply filters
+      </Button>
+    </form>
+  );
+}
+
+function ArtifactWorkspace({ projectId }: { projectId: string }) {
+  const [params, setParams] = useSearchParams();
+  const name = params.get("name") ?? "";
+  const runId = params.get("runId") ?? "";
+  const requestedStatus = params.get("status");
+  const status = artifactStatuses.find((value) => value === requestedStatus);
+  const requestedPage = Number(params.get("page") ?? 1);
+  const page =
+    Number.isSafeInteger(requestedPage) && requestedPage > 0
+      ? requestedPage
+      : 1;
+  const queryKey = JSON.stringify([projectId, page, name, runId, status]);
+  const artifacts = useApiResource(
+    // The server filters by each pipeline's grants. Project-wide effective
+    // actions cannot represent a user's pipeline-only access.
+    `artifacts:${queryKey}`,
+    (signal) =>
+      listProjectArtifacts(
+        projectId,
+        {
+          page,
+          pageSize,
+          name: name || undefined,
+          runId: runId || undefined,
+          status,
+        },
+        signal,
+      ),
+  );
+  const updateQuery = (values: Record<string, string | undefined>) => {
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(values)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
+  };
+  const downloadScope = queryKey;
+  const latestScope = useRef(downloadScope);
+  latestScope.current = downloadScope;
+  const operation = useRef<{
+    controller: AbortController;
+    scope: string;
+  } | null>(null);
+  const [download, setDownload] = useState<{
+    scope: string;
+    artifactId?: string;
+    error?: string;
+    message?: string;
+  }>();
+  useEffect(
+    () => () => {
+      operation.current?.controller.abort();
+      operation.current = null;
+    },
+    [downloadScope],
+  );
+  const currentDownload =
+    download?.scope === downloadScope ? download : undefined;
+  const startDownload = async (artifact: ProjectArtifact) => {
+    if (
+      artifacts.loading ||
+      artifacts.error ||
+      !artifact.downloadAvailable ||
+      artifact.status !== "available" ||
+      operation.current
+    )
+      return;
+    const request = { controller: new AbortController(), scope: downloadScope };
+    operation.current = request;
+    setDownload({ scope: downloadScope, artifactId: artifact.artifactId });
+    try {
+      const file = await downloadProjectArtifact(
+        projectId,
+        artifact.artifactId,
+        artifact.name,
+        request.controller.signal,
+      );
+      if (
+        request.controller.signal.aborted ||
+        operation.current !== request ||
+        request.scope !== latestScope.current
+      )
+        return;
+      saveArtifactDownload(file);
+      setDownload({
+        scope: downloadScope,
+        message: `Download started for ${file.filename}.`,
+      });
+    } catch (error) {
+      if (
+        request.controller.signal.aborted ||
+        operation.current !== request ||
+        request.scope !== latestScope.current
+      )
+        return;
+      setDownload({
+        scope: downloadScope,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Download failed. Try again.",
+      });
+    } finally {
+      if (operation.current === request) operation.current = null;
+    }
+  };
+
+  const filtered = !!(name || runId || status);
+  const total = artifacts.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const accessDenied =
+    isApiError(artifacts.error) && artifacts.error.status === 403;
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <ArtifactFilters
+          key={JSON.stringify([name, runId])}
+          name={name}
+          runId={runId}
+          onApply={(nextName, nextRun) =>
+            updateQuery({ name: nextName, runId: nextRun, page: undefined })
+          }
+        />
+        <select
+          aria-label="Artifact status"
+          value={status ?? "all"}
+          onChange={(event) =>
+            updateQuery({
+              status:
+                event.target.value === "all"
+                  ? undefined
+                  : (event.target.value as ArtifactStatus),
+              page: undefined,
+            })
+          }
+          className="h-8 rounded-md border border-input bg-background px-2 text-[13px]"
+        >
+          <option value="all">All statuses</option>
+          <option value="available">Available</option>
+          <option value="expired">Expired</option>
+          <option value="unavailable">Unavailable</option>
+        </select>
+        {filtered && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8"
+            onClick={() =>
+              updateQuery({
+                name: undefined,
+                runId: undefined,
+                status: undefined,
+                page: undefined,
+              })
+            }
+          >
+            Clear filters
+          </Button>
+        )}
         <Button
+          aria-label="Refresh artifacts"
           variant="outline"
           size="sm"
-          onClick={handleRefresh}
-          disabled={loading}
           className="ml-auto h-8 gap-1.5"
+          disabled={artifacts.loading}
+          onClick={artifacts.refresh}
         >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw
+            aria-hidden
+            className={`h-3.5 w-3.5 ${artifacts.loading ? "animate-spin" : ""}`}
+          />
           Refresh
         </Button>
       </div>
-
-      <Panel>
+      {currentDownload?.error && (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/30 p-3 text-sm text-destructive"
+        >
+          Download failed: {currentDownload.error}
+        </p>
+      )}
+      {currentDownload?.message && (
+        <p role="status" className="text-sm text-fg-muted">
+          {currentDownload.message}
+        </p>
+      )}
+      <Panel className="min-w-0">
         <PanelHeader
           title="Artifacts"
-          sub={`${filteredArtifacts.length} recent · ${artifacts.length} total`}
+          sub={
+            artifacts.error
+              ? "Could not refresh artifacts"
+              : artifacts.data
+                ? `${total} ${filtered ? "matching" : "total"} artifacts`
+                : "Stored run outputs"
+          }
         />
-
-        {filteredArtifacts.length === 0 ? (
-          <div className="flex items-center justify-center py-16 text-[13px] text-fg-muted">
-            No artifacts match your filters.
-          </div>
+        {artifacts.error ? (
+          <InlineErrorState
+            title={
+              accessDenied
+                ? "Artifact access restricted"
+                : "Artifacts unavailable"
+            }
+            description={artifacts.error.message}
+            requestId={
+              isApiError(artifacts.error)
+                ? artifacts.error.requestId
+                : undefined
+            }
+            onRetry={artifacts.refresh}
+            retryLabel={accessDenied ? "Check access again" : "Retry"}
+            retrying={artifacts.loading}
+          />
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead><ColumnHead>Name</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>Tag</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>Type</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>Size</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>SHA</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>Status</ColumnHead></TableHead>
-                  <TableHead className="text-right"><ColumnHead>Pushed</ColumnHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedArtifacts.map((artifact) => (
-                  <TableRow key={artifact.id}>
-                    <TableCell className="font-mono text-[12.5px] font-medium">
-                      {artifact.name}
-                    </TableCell>
-                    <TableCell className="font-mono text-[12px]">
-                      {artifactTag(artifact)}
-                    </TableCell>
-                    <TableCell className="font-mono text-[12px] text-fg-muted">
-                      {artifact.type}
-                    </TableCell>
-                    <TableCell className="font-mono text-[12px] text-fg-muted">
-                      {artifact.size}
-                    </TableCell>
-                    <TableCell className="font-mono text-[11.5px] text-fg-subtle">
-                      {artifactSha(artifact)}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge tone={artifactStatusToBadgeTone(artifact.status)}>
-                        {artifact.status}
-                      </StatusBadge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <span className="font-mono text-[11px] text-fg-subtle">
-                          {formatDate(artifact.createdAt)}
-                        </span>
+            {artifacts.loading && (
+              <p role="status" className="px-5 py-3 text-sm text-fg-muted">
+                {artifacts.data
+                  ? "Refreshing artifacts…"
+                  : "Loading artifacts…"}
+              </p>
+            )}
+            {artifacts.data?.list.length === 0 && (
+              <div className="space-y-3 px-5 py-12 text-center text-[13px] text-fg-muted">
+                <p>
+                  {page > 1
+                    ? "No artifacts on this page."
+                    : filtered
+                      ? "No artifacts match your filters."
+                      : "No artifacts yet. Artifacts uploaded by pipeline runs will appear here."}
+                </p>
+                {page > 1 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => updateQuery({ page: undefined })}
+                  >
+                    Back to first page
+                  </Button>
+                )}
+              </div>
+            )}
+            {!!artifacts.data?.list.length && (
+              <Table aria-label="Project artifacts">
+                <TableHeader>
+                  <TableRow>
+                    {[
+                      "Name",
+                      "Run",
+                      "Size",
+                      "Storage",
+                      "Status",
+                      "Created",
+                      "Download",
+                    ].map((label) => (
+                      <TableHead key={label}>
+                        <ColumnHead>{label}</ColumnHead>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {artifacts.data.list.map((artifact) => (
+                    <TableRow key={artifact.artifactId}>
+                      <TableCell className="max-w-64 break-words font-mono text-[12.5px] font-medium">
+                        {artifact.name}
+                      </TableCell>
+                      <TableCell className="max-w-48 break-all font-mono text-xs">
+                        {artifact.pipelineId && artifact.pipelineRunId ? (
+                          <Link
+                            className="text-primary underline underline-offset-2"
+                            to={`/projects/${encodeURIComponent(projectId)}/pipelines/${encodeURIComponent(artifact.pipelineId)}?run=${encodeURIComponent(artifact.pipelineRunId)}`}
+                          >
+                            {artifact.pipelineRunId}
+                          </Link>
+                        ) : (
+                          artifact.pipelineRunId || "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-fg-muted">
+                        {formatSize(artifact)}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-fg-muted">
+                        {artifact.storageType || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          tone={
+                            artifact.status === "available"
+                              ? "ok"
+                              : artifact.status === "expired"
+                                ? "fail"
+                                : "muted"
+                          }
+                        >
+                          {artifact.status}
+                        </StatusBadge>
+                        {(artifact.unavailableReason || artifact.expiresAt) && (
+                          <p className="mt-1 max-w-56 text-xs text-fg-muted">
+                            {artifact.unavailableReason ||
+                              `Expires ${formatDate(artifact.expiresAt)}`}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-[11px] text-fg-subtle">
+                        {formatDate(artifact.createdAt)}
+                      </TableCell>
+                      <TableCell>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDownload(artifact)}
-                          disabled={artifact.status !== "available"}
-                          className="h-7 gap-1"
+                          className="h-8 gap-1.5"
+                          aria-label={`Download ${artifact.name}`}
+                          disabled={
+                            !artifact.downloadAvailable ||
+                            artifact.status !== "available" ||
+                            !!currentDownload?.artifactId ||
+                            artifacts.loading
+                          }
+                          onClick={() => void startDownload(artifact)}
                         >
-                          <Download className="h-3 w-3" />
+                          {currentDownload?.artifactId ===
+                          artifact.artifactId ? (
+                            <RefreshCw
+                              aria-hidden
+                              className="size-3.5 animate-spin"
+                            />
+                          ) : (
+                            <Download aria-hidden className="size-3.5" />
+                          )}
+                          {currentDownload?.artifactId === artifact.artifactId
+                            ? "Downloading…"
+                            : "Download"}
                         </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-
-            {totalPages > 1 && (
-              <div className="border-t px-5 py-3">
-                <DataTablePagination
-                  page={pageNum}
-                  pageSize={pageSize}
-                  total={filteredArtifacts.length}
-                  onPageChange={setPageNum}
-                />
-              </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {artifacts.data && (totalPages > 1 || page > 1) && (
+              <nav
+                aria-label="Artifact pages"
+                className="flex items-center justify-between gap-2 border-t p-3 text-xs text-fg-muted"
+              >
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={page <= 1 || artifacts.loading}
+                  onClick={() =>
+                    updateQuery({
+                      page: page > 2 ? String(page - 1) : undefined,
+                    })
+                  }
+                >
+                  Previous
+                </Button>
+                <span>
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={page >= totalPages || artifacts.loading}
+                  onClick={() => updateQuery({ page: String(page + 1) })}
+                >
+                  Next
+                </Button>
+              </nav>
             )}
           </>
         )}
       </Panel>
     </div>
   );
-};
+}
 
-export default Artifacts;
+export default function Artifacts() {
+  const { projectId } = useParams<{ projectId: string }>();
+  if (!projectId)
+    return <p role="alert">Select a project to view artifacts.</p>;
+  return <ArtifactWorkspace key={projectId} projectId={projectId} />;
+}

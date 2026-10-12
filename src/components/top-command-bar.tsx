@@ -34,11 +34,7 @@ function WorkspaceLabel() {
       className="flex shrink-0 items-center gap-2 px-1"
       aria-label={`Workspace: ${WORKSPACE_NAME}`}
     >
-      <img
-        src={APP_LOGO_ICON}
-        alt=""
-        className="h-5 w-5 shrink-0 rounded-sm"
-      />
+      <img src={APP_LOGO_ICON} alt="" className="h-5 w-5 shrink-0 rounded-sm" />
       <span className="font-mono text-[13px] font-medium">
         {WORKSPACE_NAME}
       </span>
@@ -132,7 +128,7 @@ export function TopCommandBar() {
             onClick={() => navigate("/deploy")}
           >
             <Rocket className="h-4 w-4 text-muted-foreground" />
-            New deployment
+            Deploy status · Not integrated
           </DropdownMenuItem>
           <DropdownMenuItem
             className="gap-2"
@@ -147,7 +143,7 @@ export function TopCommandBar() {
             onClick={() => uiShellStore.toggleCopilot()}
           >
             <Sparkles className="h-4 w-4 text-muted-foreground" />
-            Ask AI
+            Copilot status · Not integrated
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
