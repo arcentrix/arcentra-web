@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,9 +8,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunPipelineDialog } from "./pipeline-dialogs";
-import { triggerPipeline } from "@/api/pipeline";
-import type { Pipeline } from "@/api/pipeline/types";
-vi.mock("@/api/pipeline", () => ({ triggerPipeline: vi.fn() }));
+import { getPipelineSpec, triggerPipeline } from "@/api/pipeline";
+import type { Pipeline, PipelineSpec } from "@/api/pipeline/types";
+import { ApiError } from "@/lib/api-error";
+vi.mock("@/api/pipeline", () => ({
+  triggerPipeline: vi.fn(),
+  getPipelineSpec: vi.fn(),
+}));
 const pipeline: Pipeline = {
   pipelineId: "p1",
   projectId: "pr1",
@@ -24,45 +29,198 @@ const pipeline: Pipeline = {
   successRuns: 0,
   failedRuns: 0,
 };
+const definition: PipelineSpec = {
+  spec: { jobs: [{ name: "build" }] },
+  format: "json",
+  headCommitSha: "a".repeat(40),
+  branch: "main",
+  pipelineFilePath: ".arcentra/pipeline.yaml",
+  deploymentPlan: null,
+  deploymentPlanHash: "",
+};
+const deployment: PipelineSpec = {
+  ...definition,
+  deploymentPlanHash: "c".repeat(64),
+  deploymentPlan: {
+    jobName: "release",
+    stepName: "deploy",
+    environmentId: "env-staging",
+    timeoutSeconds: 120,
+    artifact: { job: "build", step: "publish", name: "image.json" },
+    target: {
+      environmentId: "env-staging",
+      projectId: "pr1",
+      name: "Staging",
+      targetRef: "operator-staging",
+      namespace: "stage",
+      deployment: "web",
+      container: "app",
+      configured: true,
+      allowPipelineDeployments: true,
+    },
+  },
+};
+function show(props: Partial<Parameters<typeof RunPipelineDialog>[0]> = {}) {
+  return render(
+    <RunPipelineDialog
+      pipeline={pipeline}
+      onClose={vi.fn()}
+      onStarted={vi.fn()}
+      {...props}
+    />,
+  );
+}
+async function ready() {
+  await screen.findByText(/Definition revision: aaaaa/);
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Loading current definition and deployment review…"),
+    ).not.toBeInTheDocument(),
+  );
+}
+const start = () => screen.getByRole("button", { name: "Start run" });
+const consent = () =>
+  screen.getByRole("checkbox", { name: /Allow Kubernetes deployment/ });
 afterEach(cleanup);
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(getPipelineSpec).mockResolvedValue(definition);
+  vi.mocked(triggerPipeline).mockResolvedValue({ runID: "run-1" });
+});
 describe("RunPipelineDialog", () => {
-  it("requires string variables before executing", async () => {
-    render(
-      <RunPipelineDialog
-        pipeline={pipeline}
-        onClose={vi.fn()}
-        onStarted={vi.fn()}
-      />,
+  it("fetches a fresh definition and keeps deployment opt-in false for an ordinary run", async () => {
+    show();
+    expect(start()).toBeDisabled();
+    await ready();
+    expect(getPipelineSpec).toHaveBeenCalledWith("p1", expect.any(AbortSignal));
+    expect(screen.getByText(/Source commit: not verified/)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Reviewed pipeline definition"),
+    ).toHaveTextContent('"build"');
+    fireEvent.click(start());
+    await waitFor(() =>
+      expect(triggerPipeline).toHaveBeenCalledWith("p1", {
+        variables: {},
+        requestId: expect.any(String),
+        allowDeployments: false,
+        expectedDefinitionCommitSha: definition.headCommitSha,
+      }),
     );
+  });
+  it("requires string variables before executing", async () => {
+    show();
+    await ready();
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: '{"bad": 123}' },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    fireEvent.click(start());
     expect(await screen.findByRole("alert")).toHaveTextContent("string values");
     expect(triggerPipeline).not.toHaveBeenCalled();
   });
-  it("retries an uncertain start with the same idempotency key", async () => {
+  it("requires default-off explicit consent for the exact reviewed target and producer", async () => {
+    vi.mocked(getPipelineSpec).mockResolvedValue(deployment);
+    show();
+    await ready();
+    expect(consent()).not.toBeChecked();
+    expect(start()).toBeDisabled();
+    expect(screen.getByText("stage / web / app")).toBeInTheDocument();
+    expect(
+      screen.getByText("build / publish / image.json"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/image digest is not known yet/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/same release ID, rather than create a duplicate/),
+    ).toBeInTheDocument();
+    fireEvent.submit(start().closest("form")!);
+    expect(triggerPipeline).not.toHaveBeenCalled();
+    fireEvent.click(consent());
+    fireEvent.click(start());
+    await waitFor(() =>
+      expect(triggerPipeline).toHaveBeenCalledWith("p1", {
+        variables: {},
+        requestId: expect.any(String),
+        allowDeployments: true,
+        expectedDefinitionCommitSha: deployment.headCommitSha,
+        expectedDeploymentPlanHash: deployment.deploymentPlanHash,
+      }),
+    );
+  });
+  it("clears consent immediately on variable changes and refresh, including a changed target at the same revision", async () => {
+    vi.mocked(getPipelineSpec).mockResolvedValue(deployment);
+    show();
+    await ready();
+    fireEvent.click(consent());
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: '{"ENV":"test"}' },
+    });
+    expect(consent()).not.toBeChecked();
+    expect(start()).toBeDisabled();
+    fireEvent.click(consent());
+    vi.mocked(getPipelineSpec).mockResolvedValue({
+      ...deployment,
+      deploymentPlanHash: "d".repeat(64),
+      deploymentPlan: {
+        ...deployment.deploymentPlan!,
+        target: {
+          ...deployment.deploymentPlan!.target,
+          namespace: "stage-new",
+        },
+      },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh definition and review" }),
+    );
+    expect(consent()).not.toBeChecked();
+    expect(start()).toBeDisabled();
+    await screen.findByText("stage-new / web / app");
+    expect(consent()).not.toBeChecked();
+    fireEvent.click(consent());
+    fireEvent.click(start());
+    await waitFor(() =>
+      expect(triggerPipeline).toHaveBeenCalledWith(
+        "p1",
+        expect.objectContaining({
+          expectedDeploymentPlanHash: "d".repeat(64),
+        }),
+      ),
+    );
+  });
+  it("loads a stale definition rejection again and requires new consent", async () => {
+    vi.mocked(getPipelineSpec)
+      .mockResolvedValueOnce(deployment)
+      .mockResolvedValue({ ...deployment, headCommitSha: "b".repeat(40) });
+    vi.mocked(triggerPipeline).mockRejectedValueOnce(
+      new ApiError({ code: 409, message: "definition changed; review again" }),
+    );
+    show();
+    await ready();
+    fireEvent.click(consent());
+    fireEvent.click(start());
+    await screen.findByText(/Definition revision: bbbbb/);
+    expect(consent()).not.toBeChecked();
+    expect(start()).toBeDisabled();
+    expect(triggerPipeline).toHaveBeenCalledTimes(1);
+  });
+  it("retries an uncertain deployment start with the exact same payload and idempotency key", async () => {
+    vi.mocked(getPipelineSpec).mockResolvedValue(deployment);
     vi.mocked(triggerPipeline)
       .mockRejectedValueOnce(new Error("Network interrupted"))
       .mockResolvedValueOnce({ runID: "run-1" });
-    const started = vi.fn();
-    render(
-      <RunPipelineDialog
-        pipeline={pipeline}
-        onClose={vi.fn()}
-        onStarted={started}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    const onStarted = vi.fn();
+    show({ onStarted });
+    await ready();
+    fireEvent.click(consent());
+    fireEvent.click(start());
     await screen.findByText("Network interrupted");
-    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-    await waitFor(() => expect(started).toHaveBeenCalledWith("run-1"));
-    expect(vi.mocked(triggerPipeline).mock.calls[0][2]).toBe(
-      vi.mocked(triggerPipeline).mock.calls[1][2],
+    fireEvent.click(start());
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith("run-1"));
+    expect(vi.mocked(triggerPipeline).mock.calls[0]).toEqual(
+      vi.mocked(triggerPipeline).mock.calls[1],
     );
   });
-  it("prevents duplicate submissions and cancellation while starting", async () => {
+  it("prevents repeated starts and cancellation while starting, including a successful form still mounted", async () => {
     let finish!: (value: { runID: string }) => void;
     vi.mocked(triggerPipeline).mockImplementation(
       () =>
@@ -70,58 +228,145 @@ describe("RunPipelineDialog", () => {
           finish = resolve;
         }),
     );
-    const onClose = vi.fn();
-    const onStarted = vi.fn();
-    render(
-      <RunPipelineDialog
-        pipeline={pipeline}
-        onClose={onClose}
-        onStarted={onStarted}
-      />,
-    );
-    const start = screen.getByRole("button", { name: "Start run" });
-    fireEvent.click(start);
-    fireEvent.click(start);
+    const onClose = vi.fn(),
+      onStarted = vi.fn();
+    show({ onClose, onStarted });
+    await ready();
+    const button = start();
+    fireEvent.click(button);
+    fireEvent.submit(button.closest("form")!);
     expect(triggerPipeline).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    finish({ runID: "run-2" });
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith("run-2"));
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
-  });
-  it("dismisses without triggering when cancelled", () => {
-    const onClose = vi.fn();
-    render(
-      <RunPipelineDialog
-        pipeline={pipeline}
-        onClose={onClose}
-        onStarted={vi.fn()}
-      />,
+    await act(async () => finish({ runID: "run-2" }));
+    expect(onStarted).toHaveBeenCalledWith("run-2");
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Run started" }).closest("form")!,
     );
+    expect(triggerPipeline).toHaveBeenCalledTimes(1);
+  });
+  it("dismisses without triggering and resets consent when reopened", async () => {
+    vi.mocked(getPipelineSpec).mockResolvedValue(deployment);
+    const onClose = vi.fn();
+    const view = show({ onClose });
+    await ready();
+    fireEvent.click(consent());
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(triggerPipeline).not.toHaveBeenCalled();
+    view.unmount();
+    show();
+    await ready();
+    expect(consent()).not.toBeChecked();
   });
-});
-
-it("does not navigate back after the user has left a pending run form", async () => {
-  let finish!: (value: { runID: string }) => void;
-  vi.mocked(triggerPipeline).mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const onStarted = vi.fn();
-  const view = render(
-    <RunPipelineDialog
-      pipeline={pipeline}
-      onClose={vi.fn()}
-      onStarted={onStarted}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-  view.unmount();
-  finish({ runID: "late-run" });
-  await waitFor(() => expect(triggerPipeline).toHaveBeenCalledTimes(1));
-  expect(onStarted).not.toHaveBeenCalled();
+  it.each([
+    ["missing backend review", { ...definition, deploymentPlan: undefined }],
+    ["missing revision", { ...definition, headCommitSha: "" }],
+    [
+      "missing target",
+      {
+        ...deployment,
+        deploymentPlan: { ...deployment.deploymentPlan!, target: undefined },
+      },
+    ],
+    [
+      "wrong project",
+      {
+        ...deployment,
+        deploymentPlan: {
+          ...deployment.deploymentPlan!,
+          target: { ...deployment.deploymentPlan!.target, projectId: "other" },
+        },
+      },
+    ],
+    [
+      "unconfigured target",
+      {
+        ...deployment,
+        deploymentPlan: {
+          ...deployment.deploymentPlan!,
+          target: { ...deployment.deploymentPlan!.target, configured: false },
+        },
+      },
+    ],
+    [
+      "pipeline target permission disabled",
+      {
+        ...deployment,
+        deploymentPlan: {
+          ...deployment.deploymentPlan!,
+          target: {
+            ...deployment.deploymentPlan!.target,
+            allowPipelineDeployments: false,
+          },
+        },
+      },
+    ],
+  ])("fails closed for %s", async (_label, data) => {
+    vi.mocked(getPipelineSpec).mockResolvedValue(data as PipelineSpec);
+    show();
+    await screen.findByRole("alert");
+    expect(start()).toBeDisabled();
+    expect(triggerPipeline).not.toHaveBeenCalled();
+  });
+  it("does not use retained review data after a refresh error", async () => {
+    vi.mocked(getPipelineSpec)
+      .mockResolvedValueOnce(deployment)
+      .mockRejectedValueOnce(new Error("Review unavailable"));
+    show();
+    await ready();
+    fireEvent.click(consent());
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh definition and review" }),
+    );
+    await screen.findByText(/Could not review the current definition/);
+    expect(start()).toBeDisabled();
+    expect(consent()).not.toBeChecked();
+  });
+  it("ignores a late definition after pipeline navigation and resets consent", async () => {
+    vi.mocked(getPipelineSpec).mockResolvedValue(deployment);
+    const view = show();
+    await ready();
+    fireEvent.click(consent());
+    let finish!: (value: PipelineSpec) => void;
+    vi.mocked(getPipelineSpec).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh definition and review" }),
+    );
+    view.rerender(
+      <RunPipelineDialog
+        pipeline={{ ...pipeline, pipelineId: "p2" }}
+        onClose={vi.fn()}
+        onStarted={vi.fn()}
+      />,
+    );
+    await ready();
+    expect(consent()).not.toBeChecked();
+    await act(async () =>
+      finish({ ...deployment, headCommitSha: "old-late-revision" }),
+    );
+    expect(screen.queryByText(/old-late-revision/)).not.toBeInTheDocument();
+  });
+  it("does not navigate back after leaving a pending run form", async () => {
+    let finish!: (value: { runID: string }) => void;
+    vi.mocked(triggerPipeline).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const onStarted = vi.fn();
+    const view = show({ onStarted });
+    await ready();
+    fireEvent.click(start());
+    view.unmount();
+    await act(async () => finish({ runID: "late-run" }));
+    expect(onStarted).not.toHaveBeenCalled();
+  });
 });

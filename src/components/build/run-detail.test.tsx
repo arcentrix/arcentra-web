@@ -26,7 +26,8 @@ const run: PipelineRun = {
   pipelineId: "p1",
   pipelineName: "CI",
   branch: "main",
-  commitSha: "abc1234",
+  commitSha: "legacy-source-unverified",
+  definitionCommitSha: "definition-only-sha",
   status: "running",
   triggeredBy: "tester",
   totalJobs: 1,
@@ -101,6 +102,11 @@ describe("RunDetail", () => {
       "Actual fixture output",
     );
     expect(screen.getByText("Exit code 0")).toBeInTheDocument();
+    expect(screen.getByText("definition-only-sha")).toBeInTheDocument();
+    expect(screen.getByText("Not verified by this run")).toBeInTheDocument();
+    expect(
+      screen.queryByText("legacy-source-unverified"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(/Select a step to browse/)).toBeInTheDocument();
   });
   it("requires confirmation to cancel and refreshes the terminal state", async () => {
@@ -201,3 +207,39 @@ it("collects delayed logs for 15 seconds after completion, then supports manual 
   expect(getRunLogs).toHaveBeenCalledTimes(calls + 1);
   view.unmount();
 });
+
+it.each([
+  ["builtin:kubernetes", "deploy", "Controller-managed deployment"],
+  ["builtin:kubernetes", "other", "Agent: Not assigned"],
+  ["custom:kubernetes", "deploy", "Agent: Not assigned"],
+])(
+  "labels an unassigned %s / %s step without inventing an agent or release",
+  async (uses, action, label) => {
+    vi.mocked(getRunJobs).mockResolvedValue([
+      {
+        jobRunId: "pending-job",
+        jobName: "Pending job",
+        status: "pending",
+        agentId: "",
+        errorMessage: "",
+        duration: 0,
+        steps: [
+          {
+            stepRunId: "pending-step",
+            name: "Pending deployment",
+            status: "pending",
+            agentId: "",
+            errorMessage: "",
+            duration: 0,
+            exitCode: null,
+            uses,
+            action,
+          },
+        ],
+      },
+    ]);
+    show();
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(/Kubernetes release:/)).not.toBeInTheDocument();
+  },
+);

@@ -154,8 +154,8 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
           title: "Copilot",
           url: `/workspace/${workspaceName}/chat`,
         });
-        // Chat is not integrated; legacy query parameters are not conversation data.
-        items.push({ title: "Integration status" });
+        // Stateless analysis does not interpret legacy query parameters as conversation data.
+        items.push({ title: "Read-only analysis" });
       }
       return items;
     }

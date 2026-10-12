@@ -32,6 +32,24 @@ vi.mock("@/hooks/use-theme", () => ({
 }));
 vi.mock("@/api", () => ({ Apis: { agent: { getAgentById: vi.fn() } } }));
 
+vi.mock("@/api/project", () => ({
+  listProjects: vi
+    .fn()
+    .mockResolvedValue({ list: [], total: 0, pageNum: 1, pageSize: 20 }),
+}));
+vi.mock("@/api/deploy", () => ({
+  listEnvironments: vi
+    .fn()
+    .mockResolvedValue({ list: [], total: 0, page: 1, pageSize: 20 }),
+  listReleases: vi
+    .fn()
+    .mockResolvedValue({ list: [], total: 0, page: 1, pageSize: 20 }),
+  createEnvironment: vi.fn(),
+  createRelease: vi.fn(),
+  cancelRelease: vi.fn(),
+  advanceRelease: vi.fn(),
+}));
+
 function renderWorkspace(initial: string, shell?: ReactNode) {
   let navigate!: ReturnType<typeof useNavigate>;
   let location!: ReturnType<typeof useLocation>;
@@ -99,85 +117,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const deployRoutes = [
-  { path: "/deploy", title: "Deployment integration unavailable" },
-  { path: "/projects/project-1/deployments", title: "Deployments unavailable" },
-  {
-    path: "/projects/project-1/environments",
-    title: "Environments unavailable",
-  },
-];
-
-describe("unavailable deployment integration", () => {
-  it.each(deployRoutes)(
-    "makes $path unavailable without fabricated records or actions",
-    ({ path, title }) => {
-      const fetch = vi.fn();
-      vi.stubGlobal("fetch", fetch);
-      renderWorkspace(path);
-      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
-      expect(screen.getByText("Not integrated")).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          /Environment health, rollout progress, and release history cannot be loaded/,
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByRole("table")).not.toBeInTheDocument();
-      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button")).not.toBeInTheDocument();
-      expect(document.body).not.toHaveTextContent(
-        /v2\.|eu-west-1|us-east-2|rolling 4\/8|4\/8 pods|e\.chen|prod\.example\.com|Last \d+ releases/,
-      );
-      expect(fetch).not.toHaveBeenCalled();
-    },
-  );
-
-  it("keeps Build and Agents navigation working", () => {
-    const router = renderWorkspace("/deploy");
-    fireEvent.click(screen.getByRole("link", { name: "Open Build" }));
-    expect(router.location.pathname).toBe("/build");
-    expect(screen.getByText("Build destination")).toBeInTheDocument();
-    act(() => router.navigate(-1));
-    fireEvent.click(screen.getByRole("link", { name: "View Agents" }));
-    expect(router.location.pathname).toBe("/agents");
-    expect(screen.getByText("Agents destination")).toBeInTheDocument();
-  });
-
-  it.each(["deployments", "environments"])(
-    "keeps %s links scoped to the current project after navigation",
-    (tab) => {
-      const router = renderWorkspace(`/projects/project-1/${tab}`);
-      expect(
-        screen.getByRole("link", { name: "View project pipelines" }),
-      ).toHaveAttribute("href", "/projects/project-1/pipelines");
-      act(() => router.navigate(`/projects/project%20two/${tab}`));
-      expect(
-        screen.getByRole("link", { name: "View project pipelines" }),
-      ).toHaveAttribute("href", "/projects/project%20two/pipelines");
-      fireEvent.click(
-        screen.getByRole("link", { name: "View project artifacts" }),
-      );
-      expect(router.location.pathname).toBe(
-        "/projects/project%20two/artifacts",
-      );
-      expect(
-        screen.getByText("Project artifacts destination"),
-      ).toBeInTheDocument();
-      act(() => router.navigate(-1));
-      fireEvent.click(
-        screen.getByRole("link", { name: "View project pipelines" }),
-      );
-      expect(router.location.pathname).toBe(
-        "/projects/project%20two/pipelines",
-      );
-      expect(
-        screen.getByText("Project pipelines destination"),
-      ).toBeInTheDocument();
-    },
-  );
-});
-
-describe("unavailable Copilot integration", () => {
+describe("read-only Copilot integration", () => {
   it("does not manufacture conversations, models, connected state, or delayed replies for legacy URLs", () => {
     vi.useFakeTimers();
     const fetch = vi.fn();
@@ -189,13 +129,15 @@ describe("unavailable Copilot integration", () => {
     );
     act(() => vi.advanceTimersByTime(5000));
     expect(
-      screen.getByRole("heading", { name: "AI chat is unavailable" }),
+      screen.getByRole("heading", { name: "Copilot" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Not integrated")).toBeInTheDocument();
-    expect(screen.getByText("Integration status")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Read-only analysis").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Project ID")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Question")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Load context choices" }),
+    ).toBeDisabled();
     expect(document.body).not.toHaveTextContent(
       /Invented conversation|New chat|connected ·|14 tools|14 tool calls|GPT-4o|Claude Sonnet|模拟的 AI 回复|Why is the api/,
     );
@@ -214,7 +156,7 @@ describe("unavailable Copilot integration", () => {
       original,
     );
     expect(
-      screen.getByRole("heading", { name: "AI chat is unavailable" }),
+      screen.getByRole("heading", { name: "Copilot" }),
     ).toBeInTheDocument();
     act(() => router.navigate(1));
     expect(screen.getByText("Build destination")).toBeInTheDocument();
@@ -224,17 +166,15 @@ describe("unavailable Copilot integration", () => {
 describe("Copilot status drawer and entry points", () => {
   it("opens an honest status panel and can be closed, reopened, and dismissed with Escape", async () => {
     const router = renderWorkspace("/build", <CopilotPanel />);
-    const trigger = screen.getByRole("button", { name: "Copilot status" });
+    const trigger = screen.getByRole("button", { name: "Open Copilot" });
     await act(async () => {
       fireEvent.click(trigger);
     });
     const dialog = await screen.findByRole("dialog", {
-      name: "Copilot status",
+      name: "Copilot",
     });
-    expect(
-      within(dialog).getByText("AI chat is not integrated in this build."),
-    ).toBeInTheDocument();
-    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Read-only analysis")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Project ID")).toBeInTheDocument();
     expect(
       within(dialog).queryByRole("button", {
         name: /send|attach|new conversation/i,
@@ -262,14 +202,13 @@ describe("Copilot status drawer and entry points", () => {
 
   it.each([
     { label: "Open Build", path: "/build" },
-    { label: "View Agents", path: "/agents" },
-    { label: "View Copilot status", path: "/workspace/Copilot/chat" },
+    { label: "Open full Copilot", path: "/workspace/Copilot/chat" },
   ])(
     "closes the drawer when navigating with $label and leaves it closed on Back",
     async ({ label, path }) => {
       const router = renderWorkspace("/deploy", <CopilotPanel />);
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Copilot status" }));
+        fireEvent.click(screen.getByRole("button", { name: "Open Copilot" }));
       });
       const dialog = await screen.findByRole("dialog");
       await act(async () => {
@@ -285,7 +224,7 @@ describe("Copilot status drawer and entry points", () => {
     },
   );
 
-  it("labels the palette's Deploy and Copilot entries as unavailable and opens status", async () => {
+  it("labels the palette entries accurately and opens Copilot", async () => {
     renderWorkspace(
       "/build",
       <>
@@ -299,7 +238,7 @@ describe("Copilot status drawer and entry points", () => {
     });
     expect(
       within(palette).getByRole("button", {
-        name: /Deploy Deployment integration status · Not integrated/,
+        name: /Deploy Pipeline Kubernetes releases/,
       }),
     ).toBeInTheDocument();
     expect(
@@ -308,7 +247,7 @@ describe("Copilot status drawer and entry points", () => {
     await act(async () => {
       fireEvent.click(
         within(palette).getByRole("button", {
-          name: /Copilot status AI chat is not integrated/,
+          name: /Copilot Read-only run analysis/,
         }),
       );
     });
@@ -316,8 +255,8 @@ describe("Copilot status drawer and entry points", () => {
       screen.queryByRole("dialog", { name: "Command Palette" }),
     ).not.toBeInTheDocument();
     expect(
-      await screen.findByRole("dialog", { name: "Copilot status" }),
-    ).toHaveTextContent("Not integrated");
+      await screen.findByRole("dialog", { name: "Copilot" }),
+    ).toHaveTextContent("Read-only analysis");
   });
 
   it("uses honest quick-action labels and links deployment status without creating anything", async () => {
@@ -331,18 +270,20 @@ describe("Copilot status drawer and entry points", () => {
     ).not.toBeInTheDocument();
     expect(
       within(menu).getByRole("menuitem", {
-        name: "Copilot status · Not integrated",
+        name: "Copilot · Read-only analysis",
       }),
     ).toBeInTheDocument();
-    fireEvent.click(
-      within(menu).getByRole("menuitem", {
-        name: "Deploy status · Not integrated",
-      }),
-    );
+    await act(async () => {
+      fireEvent.click(
+        within(menu).getByRole("menuitem", {
+          name: "View Deploy",
+        }),
+      );
+    });
     expect(router.location.pathname).toBe("/deploy");
     expect(
       screen.getByRole("heading", {
-        name: "Deployment integration unavailable",
+        name: "Deploy",
       }),
     ).toBeInTheDocument();
   });

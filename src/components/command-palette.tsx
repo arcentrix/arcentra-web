@@ -56,7 +56,7 @@ const PAGE_ITEMS: Omit<CommandItem, "group">[] = [
   {
     id: "deploy",
     title: "Deploy",
-    description: "Deployment integration status · Not integrated",
+    description: "Pipeline Kubernetes releases",
     icon: Rocket,
     to: "/deploy",
   },
@@ -108,8 +108,8 @@ const ACTION_ITEMS: Omit<CommandItem, "group">[] = [
   },
   {
     id: "action-ask-arcentra",
-    title: "Copilot status",
-    description: "AI chat is not integrated in this build",
+    title: "Copilot",
+    description: "Read-only run analysis",
     icon: Sparkles,
     onSelect: () => uiShellStore.openCopilot(),
     keywords: ["ai", "copilot", "llm", "chat"],

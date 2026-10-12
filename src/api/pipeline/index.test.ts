@@ -9,6 +9,7 @@ import {
   triggerPipeline,
   stopRun,
   getRunJobs,
+  getPipelineSpec,
 } from "./index";
 import { get, post } from "../client";
 vi.mock("../client", () => ({ get: vi.fn(), post: vi.fn() }));
@@ -66,10 +67,20 @@ describe("pipeline API contracts", () => {
       "/pipelines/pipeline%2Fa/runs/run%2Fa",
       expect.any(Object),
     );
-    await triggerPipeline("p1", { ENV: "test" }, "request-1");
+    await triggerPipeline("p1", {
+      variables: { ENV: "test" },
+      requestId: "request-1",
+      allowDeployments: false,
+      expectedDefinitionCommitSha: "definition-1",
+    });
     expect(post).toHaveBeenCalledWith(
       "/pipelines/p1/trigger",
-      { variables: { ENV: "test" }, requestId: "request-1" },
+      {
+        variables: { ENV: "test" },
+        requestId: "request-1",
+        allowDeployments: false,
+        expectedDefinitionCommitSha: "definition-1",
+      },
       { silence: true },
     );
     await stopRun("p1", "r1");
@@ -79,4 +90,56 @@ describe("pipeline API contracts", () => {
       { silence: true },
     );
   });
+});
+
+it("carries the exact reviewed deployment definition and target hash to the real trigger route", async () => {
+  const input = {
+    variables: {},
+    requestId: "request-k8s",
+    allowDeployments: true,
+    expectedDefinitionCommitSha: "reviewed-definition",
+    expectedDeploymentPlanHash: "reviewed-target-hash",
+  };
+  await triggerPipeline("pipe/a", input);
+  expect(post).toHaveBeenCalledWith("/pipelines/pipe%2Fa/trigger", input, {
+    silence: true,
+  });
+  const controller = new AbortController();
+  const review = {
+    headCommitSha: "reviewed-definition",
+    deploymentPlanHash: "reviewed-target-hash",
+    deploymentPlan: { environmentId: "env" },
+  };
+  vi.mocked(get).mockResolvedValue(review);
+  expect(await getPipelineSpec("pipe/a", controller.signal)).toEqual(review);
+  expect(get).toHaveBeenCalledWith("/pipelines/pipe%2Fa/spec", {
+    signal: controller.signal,
+    silence: true,
+  });
+});
+it("keeps definition provenance and release IDs from protojson or snake case", () => {
+  expect(
+    normalizeRun({
+      definition_commit_sha: "definition",
+      commit_sha: "legacy",
+      allow_deployments: true,
+      deployment_plan_hash: "hash",
+    }),
+  ).toMatchObject({
+    definitionCommitSha: "definition",
+    commitSha: "legacy",
+    allowDeployments: true,
+    deploymentPlanHash: "hash",
+  });
+  expect(
+    normalizeJob({
+      steps: [
+        {
+          deployment_release_id: "release-1",
+          uses: "builtin:kubernetes",
+          action: "deploy",
+        },
+      ],
+    }).steps[0].deploymentReleaseId,
+  ).toBe("release-1");
 });

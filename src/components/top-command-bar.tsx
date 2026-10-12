@@ -128,7 +128,7 @@ export function TopCommandBar() {
             onClick={() => navigate("/deploy")}
           >
             <Rocket className="h-4 w-4 text-muted-foreground" />
-            Deploy status · Not integrated
+            View Deploy
           </DropdownMenuItem>
           <DropdownMenuItem
             className="gap-2"
@@ -143,7 +143,7 @@ export function TopCommandBar() {
             onClick={() => uiShellStore.toggleCopilot()}
           >
             <Sparkles className="h-4 w-4 text-muted-foreground" />
-            Copilot status · Not integrated
+            Copilot · Read-only analysis
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

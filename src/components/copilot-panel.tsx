@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
-import { Bot, Hammer, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/blueprint";
+import { CopilotConsole } from "@/components/copilot-console";
 import {
   Sheet,
   SheetContent,
@@ -20,7 +20,6 @@ import { uiShellStore } from "@/store/ui-shell";
 
 export function CopilotPanel() {
   const { copilotOpen } = uiShellStore.useState();
-
   return (
     <Sheet open={copilotOpen} onOpenChange={uiShellStore.setCopilotOpen}>
       <Tooltip delayDuration={200}>
@@ -28,7 +27,7 @@ export function CopilotPanel() {
           <SheetTrigger asChild>
             <button
               type="button"
-              aria-label="Copilot status"
+              aria-label="Open Copilot"
               className={cn(
                 "fixed bottom-6 right-6 z-30 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border bg-background shadow-lg transition-colors duration-150",
                 "outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
@@ -40,55 +39,43 @@ export function CopilotPanel() {
           </SheetTrigger>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={8}>
-          Copilot status · Not integrated
+          Copilot · Read-only analysis
         </TooltipContent>
       </Tooltip>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-[480px]"
       >
         <SheetHeader className="border-b p-4 pr-10 text-left">
           <SheetTitle className="flex items-center gap-2 text-base">
             <Sparkles className="h-4 w-4" aria-hidden />
-            Copilot status
+            Copilot
           </SheetTitle>
           <SheetDescription>
-            AI chat is not integrated in this build.
+            Analyze selected run context with an approved provider.
           </SheetDescription>
         </SheetHeader>
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-          <div>
-            <StatusBadge tone="muted">Not integrated</StatusBadge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Messages, conversation history, and AI tool actions are unavailable.
-            This panel does not send prompts or project data to an AI provider.
-          </p>
-          <nav aria-label="Available platform tools" className="grid gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link to="/build" onClick={uiShellStore.closeCopilot}>
-                <Hammer aria-hidden />
-                Open Build
-              </Link>
-            </Button>
-            <Button asChild size="sm" variant="outline">
-              <Link to="/agents" onClick={uiShellStore.closeCopilot}>
-                <Bot aria-hidden />
-                View Agents
-              </Link>
-            </Button>
-          </nav>
+        <div className="flex-1 overflow-y-auto p-4">
+          {copilotOpen && <CopilotConsole />}
         </div>
-        <div className="border-t p-4">
-          <Button asChild size="sm" className="w-full">
+        <nav
+          className="flex gap-2 border-t p-4"
+          aria-label="Available platform tools"
+        >
+          <Button asChild size="sm" variant="outline">
+            <Link to="/build" onClick={uiShellStore.closeCopilot}>
+              Open Build
+            </Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
             <Link
               to="/workspace/Copilot/chat"
               onClick={uiShellStore.closeCopilot}
             >
-              View Copilot status
+              Open full Copilot
             </Link>
           </Button>
-        </div>
+        </nav>
       </SheetContent>
     </Sheet>
   );

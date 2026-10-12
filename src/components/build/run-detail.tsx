@@ -9,6 +9,8 @@ import {
   isTerminalRun,
   stopRun,
 } from "@/api/pipeline";
+import type { JobRun } from "@/api/pipeline/types";
+import { RunDeployment } from "./run-deployment";
 import { useApiResource } from "@/hooks/use-api-resource";
 import { useScopedPermission } from "@/hooks/use-scoped-permission";
 import { Panel, PanelHeader } from "@/components/blueprint";
@@ -29,6 +31,14 @@ import {
   formatLogTime,
   errorMessage,
 } from "./run-status";
+
+function controllerManaged(job: JobRun) {
+  return job.steps.some(
+    (step) =>
+      !!step.deploymentReleaseId ||
+      (step.uses === "builtin:kubernetes" && step.action === "deploy"),
+  );
+}
 
 export function RunDetail({
   pipelineId,
@@ -170,10 +180,14 @@ export function RunDetail({
                 </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Commit</dt>
-                <dd className="mt-1 font-mono">
-                  {resource.data.commitSha.slice(0, 12) || "—"}
+                <dt className="text-muted-foreground">Definition revision</dt>
+                <dd className="mt-1 break-all font-mono">
+                  {resource.data.definitionCommitSha || "Unknown"}
                 </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Source commit</dt>
+                <dd className="mt-1">Not verified by this run</dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">Started</dt>
@@ -224,7 +238,7 @@ export function RunDetail({
       <Panel>
         <PanelHeader
           title="Jobs & steps"
-          sub="Persisted execution state from the agents"
+          sub="Persisted execution state from agents and the controller"
         />
         <div className="border-t">
           {jobs.error && (
@@ -257,7 +271,9 @@ export function RunDetail({
                 <RunStatusBadge status={job.status} />
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Agent:{" "}
+                {controllerManaged(job)
+                  ? "Controller-managed deployment"
+                  : "Agent: "}
                 {job.agentId ? (
                   <Link
                     className="underline underline-offset-2"
@@ -265,6 +281,8 @@ export function RunDetail({
                   >
                     {job.agentId}
                   </Link>
+                ) : controllerManaged(job) ? (
+                  ""
                 ) : (
                   "Not assigned"
                 )}
@@ -272,6 +290,15 @@ export function RunDetail({
               {job.errorMessage && (
                 <p className="mt-2 break-words text-xs text-destructive">
                   {job.errorMessage}
+                </p>
+              )}
+              {job.steps.some((step) => step.retryMode) && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Every attempt keeps separate logs and artifacts. Unused
+                  attempts are skipped. Retrying a completed job is unavailable
+                  without a verified workspace checkpoint. Before starting a new
+                  run, inspect any existing deployment release; an unresolved
+                  apply must be recovered using its original release ID.
                 </p>
               )}
               <ol className="mt-3 space-y-2">
@@ -283,12 +310,24 @@ export function RunDetail({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="min-w-0 flex-1 text-xs">
                         {step.name}
+                        {step.retryMode
+                          ? ` · attempt ${step.attempt ?? 1} · ${step.retryMode === "whole_job" ? "whole job" : "failed step"}`
+                          : ""}
                       </span>
                       <span className="font-mono text-xs text-muted-foreground">
                         {formatDuration(step.duration)}
                       </span>
                       <RunStatusBadge status={step.status} />
                     </div>
+                    {step.deploymentReleaseId && (
+                      <RunDeployment
+                        key={`${projectId}:${step.deploymentReleaseId}`}
+                        projectId={projectId}
+                        pipelineId={pipelineId}
+                        runId={runId}
+                        releaseId={step.deploymentReleaseId}
+                      />
+                    )}
                     {step.exitCode !== null && (
                       <p className="mt-2 font-mono text-xs text-muted-foreground">
                         Exit code {step.exitCode}
@@ -351,6 +390,7 @@ export function RunDetail({
               job.steps.map((step) => (
                 <option key={step.stepRunId} value={step.stepRunId}>
                   {job.jobName} / {step.name}
+                  {step.retryMode ? ` / attempt ${step.attempt ?? 1}` : ""}
                 </option>
               )),
             )}
@@ -431,6 +471,9 @@ export function RunDetail({
             <DialogDescription>
               Running jobs will be interrupted and pending jobs will be
               cancelled. This cannot undo steps that have already completed.
+              Kubernetes changes already applied will not be rolled back. An
+              unresolved apply keeps its target reserved; inspect and explicitly
+              recover the same release ID in Deployments.
             </DialogDescription>
           </DialogHeader>
           {actionError && (
