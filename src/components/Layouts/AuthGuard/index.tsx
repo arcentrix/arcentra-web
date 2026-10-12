@@ -8,9 +8,7 @@ import storage from "@/lib/storage";
 import { getCookie } from "@/lib/utils";
 import { Apis } from "@/api";
 
-interface AuthGuardProps {}
-
-const AuthGuard: FC<AuthGuardProps> = () => {
+const AuthGuard: FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = authStore.useState();

@@ -1,9 +1,7 @@
 import type { FC } from "react";
 import { LoginForm } from "@/components/login-form";
 
-interface LoginProps {}
-
-const Login: FC<LoginProps> = () => {
+const Login: FC = () => {
   return (
     <div className="relative flex min-h-svh flex-col overflow-hidden bg-background">
       {/* dot-grid background — gentler than blueprint-bg for full-bleed login surfaces */}

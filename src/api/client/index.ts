@@ -145,7 +145,7 @@ client.interceptors.response.use(
     const status = error.response?.status as number | undefined;
 
     // 处理网络错误或其他 axios 错误
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       // 使用动态导入避免循环依赖
       import("@/lib/auth").then(({ clearLocalAuth }) => {
         clearLocalAuth();

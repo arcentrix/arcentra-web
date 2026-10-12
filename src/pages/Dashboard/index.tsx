@@ -78,9 +78,7 @@ function DashCard({
   );
 }
 
-interface DashboardProps {}
-
-const Dashboard: FC<DashboardProps> = () => {
+const Dashboard: FC = () => {
   const [agentStats, setAgentStats] = useState<{
     total: number;
     online: number;

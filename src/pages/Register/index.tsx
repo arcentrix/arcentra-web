@@ -1,9 +1,7 @@
 import type { FC } from "react";
 import { RegisterForm } from "@/components/register-form";
 
-interface RegisterProps {}
-
-const Register: FC<RegisterProps> = () => {
+const Register: FC = () => {
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
       <div className="w-full max-w-sm">

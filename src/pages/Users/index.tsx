@@ -96,7 +96,7 @@ export function UsersPanel({
   // 当筛选条件变化时，重置到第一页
   useEffect(() => {
     setPageNum(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [searchTerm, filterRole, filterStatus]);
 
   // 当页码、搜索条件或筛选条件变化时，加载用户列表
