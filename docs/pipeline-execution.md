@@ -56,6 +56,6 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium pnpm test:ui
 
 In a restricted executor, Chromium may be unable to create a Unix socket. That is a blocked browser test, not a pass; run it in a compatible development/CI environment. Unit/component tests do not depend on a browser binary.
 
-Other product areas such as Deploy, Dashboard, Artifacts, and Environments remain outside this execution integration and may still contain their existing prototypes.
+The project Artifacts tab now uses persisted metadata and authenticated attachment downloads; see [Artifact workspace](artifact-workspace.md). Other product areas such as Deploy, Dashboard, and Environments remain outside this execution integration and may still contain their existing prototypes.
 
 Build-log transport can replay delayed output after a network outage or process restart. A terminal run is not a guarantee that all output has arrived. The detail view retains its final catch-up window and manual Refresh, and now explains delayed replay after that window. The backend persists redacted output in a bounded private spool; failed local acceptance is reported as a failed step rather than silent log loss.

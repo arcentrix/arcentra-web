@@ -6,7 +6,13 @@ type ModuleLoader = () => Promise<PageModule>;
 export type RegistryComponent = LazyExoticComponent<ComponentType<any>>;
 export type ComponentRegistry = Record<string, RegistryComponent>;
 
-const pageModules = import.meta.glob<PageModule>("../pages/**/*.tsx");
+// Co-located regression tests are not routable production pages.
+const pageModules = import.meta.glob<PageModule>([
+  "../pages/**/*.tsx",
+  "!../pages/**/*.test.tsx",
+  "!../pages/**/*.spec.tsx",
+  "!../pages/**/__tests__/**",
+]);
 
 function toRegistryKey(modulePath: string) {
   const normalized = modulePath
@@ -25,7 +31,9 @@ const componentRegistry: ComponentRegistry = Object.entries(pageModules).reduce(
   {} as ComponentRegistry,
 );
 
-export function resolveRouteComponent(componentKey: string): RegistryComponent | null {
+export function resolveRouteComponent(
+  componentKey: string,
+): RegistryComponent | null {
   if (!componentKey) return null;
   return componentRegistry[componentKey] ?? null;
 }

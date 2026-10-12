@@ -1,316 +1,495 @@
-import { type FC } from "react";
-import { ArrowUpRight, Clock, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { ArrowUpRight, GitBranch, RefreshCw } from "lucide-react";
+import { getPipeline, listPipelines, listRuns } from "@/api/pipeline";
+import type { Pipeline } from "@/api/pipeline/types";
+import { useApiResource } from "@/hooks/use-api-resource";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/page-header";
 import {
   Panel,
   PanelHeader,
+  ColumnHead,
   SectionEyebrow,
-  StatusDot,
-  type DotTone,
 } from "@/components/blueprint";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  RunStatusBadge,
+  formatDuration,
+  formatRunTime,
+} from "@/components/build/run-status";
+import { AgentHealth } from "@/components/observe/agent-health";
+import {
+  buildRunLink,
+  positivePage,
+  summarizeRuns,
+} from "@/components/observe/health";
+import { SnapshotError, SnapshotPages } from "@/components/observe/shared";
 
-/* ─────────────────────────── types ─────────────────────────── */
+const statuses = [
+  "pending",
+  "running",
+  "success",
+  "failed",
+  "cancelled",
+  "paused",
+];
 
-interface Service {
+function PipelineSearch({
+  name,
+  onApply,
+}: {
   name: string;
-  env: string;
-  latency: string;
-  rps: string;
-  errors: string;
-  status: DotTone;
-}
-
-interface Alert {
-  sev: DotTone;
-  title: string;
-  ago: string;
-  rule: string;
-}
-
-/* ─────────────────────────── data ──────────────────────────── */
-
-const SERVICES: Service[] = [
-  { name: "api-gateway",    env: "production", latency: "42ms",  rps: "8.2k", errors: "0.04%", status: "ok"   },
-  { name: "auth-service",   env: "production", latency: "18ms",  rps: "2.1k", errors: "0.00%", status: "ok"   },
-  { name: "billing",        env: "production", latency: "104ms", rps: "640",  errors: "0.41%", status: "warn" },
-  { name: "search-indexer", env: "production", latency: "212ms", rps: "180",  errors: "0.01%", status: "ok"   },
-  { name: "notifications",  env: "production", latency: "31ms",  rps: "1.4k", errors: "0.02%", status: "ok"   },
-  { name: "worker-async",   env: "production", latency: "—",     rps: "—",    errors: "—",     status: "info" },
-  { name: "ml-inference",   env: "production", latency: "318ms", rps: "94",   errors: "2.14%", status: "fail" },
-  { name: "data-warehouse", env: "production", latency: "—",     rps: "—",    errors: "—",     status: "muted"},
-];
-
-const ALERTS: Alert[] = [
-  { sev: "fail", title: "ml-inference · 5xx rate above 2%",  ago: "4m",  rule: "p95 errors > 1%" },
-  { sev: "warn", title: "billing · latency p95 above 100ms", ago: "12m", rule: "p95 > 100ms · 5m" },
-  { sev: "warn", title: "agent runner-29 marked unhealthy",  ago: "1h",  rule: "missed 3 heartbeats" },
-  { sev: "info", title: "deploy api-gateway · v2.3.8",       ago: "12m", rule: "canary 25%" },
-];
-
-/* ─────────────────────── SloSummary ────────────────────────── */
-
-function SloSummary() {
+  onApply: (name: string) => void;
+}) {
+  const [draft, setDraft] = useState(name);
   return (
-    <Panel className="p-5">
-      <SectionEyebrow>service level · last 30d</SectionEyebrow>
-
-      {/* Big reading */}
-      <div className="reading mt-2 font-mono text-[36px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
-        99.94<span className="text-[24px] text-fg-muted">%</span>
-      </div>
-
-      {/* Error budget */}
-      <p className="mt-2 text-[12px] text-fg-muted">
-        <span className="text-accent-success">14m</span> error budget remaining of 21m monthly
-      </p>
-
-      {/* Progress bar */}
-      <div className="mt-3.5 h-1.5 overflow-hidden rounded-full border">
-        <div
-          className="h-full rounded-full opacity-70"
-          style={{ width: "67%", background: "var(--accent-success)" }}
-        />
-      </div>
-
-      {/* Meta grid */}
-      <div
-        className="mt-4 grid gap-3 border-t pt-3.5"
-        style={{ gridTemplateColumns: "1fr 1fr" }}
-      >
-        <MetaItem label="MTTR"   value="9m"   />
-        <MetaItem label="MTBF"   value="6.4d" />
-        <MetaItem label="Burn"   value="0.4x" />
-        <MetaItem label="Window" value="30d"  />
-      </div>
-    </Panel>
+    <form
+      className="flex gap-2 border-b p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply(draft.trim());
+      }}
+    >
+      <Input
+        aria-label="Search pipelines"
+        placeholder="Pipeline name…"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-w-0 text-sm"
+      />
+      <Button type="submit" variant="outline" size="sm">
+        Search
+      </Button>
+    </form>
   );
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
+function RunHealth({
+  pipeline,
+  page,
+  status,
+  revision,
+  onPage,
+  onStatus,
+}: {
+  pipeline: Pipeline;
+  page: number;
+  status: string;
+  revision: number;
+  onPage: (page: number) => void;
+  onStatus: (status: string) => void;
+}) {
+  const runs = useApiResource(
+    `observe:runs:${JSON.stringify([pipeline.pipelineId, page, status, revision])}`,
+    (signal) =>
+      listRuns(
+        pipeline.pipelineId,
+        { page, status: status || undefined },
+        signal,
+      ),
+  );
+  const snapshot = runs.error || runs.loading ? undefined : runs.data;
+  const summary = snapshot ? summarizeRuns(snapshot.list) : undefined;
+  const maxDuration = Math.max(
+    1,
+    ...(snapshot?.list.map((run) =>
+      Number.isFinite(run.duration) ? run.duration : 0,
+    ) ?? []),
+  );
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-subtle">
-        {label}
-      </span>
-      <span className="font-mono text-[13px] text-foreground">{value}</span>
+    <div className="min-w-0 space-y-4">
+      <Panel>
+        <div className="flex flex-wrap items-start justify-between gap-3 p-5">
+          <div className="min-w-0">
+            <SectionEyebrow>pipeline execution</SectionEyebrow>
+            <h2 className="mt-2 break-words text-xl font-semibold">
+              {pipeline.name || pipeline.pipelineId}
+            </h2>
+            <p className="mt-2 break-words text-sm text-fg-muted">
+              {pipeline.description ||
+                "Run state and recorded durations from the control plane."}
+            </p>
+            <p className="mt-3 break-all font-mono text-xs text-fg-subtle">
+              {pipeline.defaultBranch || "—"} /{" "}
+              {pipeline.pipelineFilePath || "—"}
+            </p>
+          </div>
+          <Link
+            to={buildRunLink(pipeline.pipelineId)}
+            className="flex items-center gap-1 text-sm text-primary underline underline-offset-2"
+          >
+            Open in Build <ArrowUpRight aria-hidden className="size-3.5" />
+          </Link>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+          <h3 className="text-sm font-semibold">Run health</h3>
+          <select
+            aria-label="Run status"
+            value={status}
+            onChange={(event) => onStatus(event.target.value)}
+            className="rounded-md border bg-background px-2 py-1 text-xs"
+          >
+            <option value="">All statuses</option>
+            {statuses.map((value) => (
+              <option key={value} value={value}>
+                {value.charAt(0).toUpperCase() + value.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+        {runs.error ? (
+          <SnapshotError
+            subject="Run history"
+            permission="pipeline:read for this pipeline"
+            error={runs.error}
+            retry={runs.refresh}
+            loading={runs.loading}
+          />
+        ) : (
+          <>
+            {runs.loading && (
+              <p role="status" className="px-5 py-3 text-sm text-fg-muted">
+                {snapshot ? "Refreshing runs…" : "Loading runs…"}
+              </p>
+            )}
+            {snapshot && summary && (
+              <>
+                <div className="border-t p-5">
+                  <p className="text-xs text-fg-muted">
+                    {snapshot.total} {status ? "matching" : "total"} runs ·
+                    metrics below describe only the {summary.loaded} runs on
+                    this page
+                  </p>
+                  <dl
+                    aria-label="Current run page summary"
+                    className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4"
+                  >
+                    {[
+                      ["Loaded runs", summary.loaded],
+                      ["Failed runs", summary.failed],
+                      ["Active runs", summary.active],
+                      [
+                        "Completed mean",
+                        summary.meanDuration === null
+                          ? "—"
+                          : formatDuration(summary.meanDuration),
+                      ],
+                    ].map(([label, value]) => (
+                      <div key={label}>
+                        <dt className="text-xs text-fg-muted">{label}</dt>
+                        <dd className="mt-1 font-mono text-2xl font-semibold">
+                          {value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-3 text-xs text-fg-subtle">
+                    Mean uses {summary.durationCount} completed runs with a
+                    recorded positive duration. Pending and active runs are
+                    excluded.
+                  </p>
+                </div>
+                {snapshot.list.length === 0 ? (
+                  <p className="border-t p-8 text-sm text-fg-muted">
+                    {page > 1
+                      ? "No runs on this page."
+                      : status
+                        ? "No runs match this status."
+                        : "No runs yet for this pipeline."}
+                  </p>
+                ) : (
+                  <Table aria-label="Pipeline execution health">
+                    <TableHeader>
+                      <TableRow>
+                        {[
+                          "Run / branch",
+                          "Status",
+                          "Started",
+                          "Recorded duration",
+                          "Inspect",
+                        ].map((label) => (
+                          <TableHead key={label}>
+                            <ColumnHead>{label}</ColumnHead>
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {snapshot.list.map((run) => (
+                        <TableRow key={run.runId}>
+                          <TableCell className="max-w-52">
+                            <p className="break-all font-mono text-xs">
+                              {run.runId}
+                            </p>
+                            <p className="mt-1 break-words text-xs text-fg-muted">
+                              {run.branch || "—"}
+                              {run.commitSha
+                                ? ` · ${run.commitSha.slice(0, 7)}`
+                                : ""}
+                            </p>
+                          </TableCell>
+                          <TableCell>
+                            <RunStatusBadge status={run.status} />
+                            {run.failedJobs > 0 && (
+                              <p className="mt-1 text-xs text-destructive">
+                                {run.failedJobs} failed jobs
+                              </p>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap font-mono text-xs text-fg-muted">
+                            {formatRunTime(run.startTime)}
+                          </TableCell>
+                          <TableCell className="min-w-28">
+                            <span className="font-mono text-xs">
+                              {Number.isFinite(run.duration) && run.duration > 0
+                                ? formatDuration(run.duration)
+                                : "—"}
+                            </span>
+                            {Number.isFinite(run.duration) &&
+                              run.duration > 0 && (
+                                <div
+                                  aria-hidden
+                                  className="mt-2 h-1 rounded-full bg-muted"
+                                >
+                                  <div
+                                    className="h-1 rounded-full bg-primary/50"
+                                    style={{
+                                      width: `${Math.max(1, (run.duration / maxDuration) * 100)}%`,
+                                    }}
+                                  />
+                                </div>
+                              )}
+                          </TableCell>
+                          <TableCell>
+                            <Link
+                              to={buildRunLink(pipeline.pipelineId, run.runId)}
+                              className="whitespace-nowrap text-xs text-primary underline underline-offset-2"
+                              aria-label={`Inspect run ${run.runId} and logs`}
+                            >
+                              Run & logs{" "}
+                              <ArrowUpRight
+                                aria-hidden
+                                className="ml-1 inline size-3"
+                              />
+                            </Link>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+                <SnapshotPages
+                  name="Run"
+                  page={page}
+                  total={snapshot.total}
+                  loading={runs.loading}
+                  onPage={onPage}
+                />
+              </>
+            )}
+          </>
+        )}
+      </Panel>
     </div>
   );
 }
 
-/* ───────────────────── LatencyChart ────────────────────────── */
-
-const P95_POINTS = "0,90 20,85 40,80 60,82 80,75 100,72 120,65 140,68 160,60 180,55 200,58 220,50 240,45 260,52 280,40 300,38 320,30 340,32 360,28 380,25 400,32";
-const P50_POINTS = "0,110 20,108 40,105 60,109 80,100 100,98 120,92 140,94 160,85 180,82 200,86 220,78 240,72 260,80 280,65 300,62 320,55 340,58 360,52 380,48 400,55";
-const P50_AREA   = "M0 110 L20,108 L40,105 L60,109 L80,100 L100,98 L120,92 L140,94 L160,85 L180,82 L200,86 L220,78 L240,72 L260,80 L280,65 L300,62 L320,55 L340,58 L360,52 L380,48 L400,55 L400 140 L0 140 Z";
-
-function LatencyChart() {
-  return (
-    <Panel className="p-5">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-4">
-        <SectionEyebrow>p50 / p95 latency · last 6h</SectionEyebrow>
-        <div className="flex shrink-0 items-center gap-3 font-mono text-[11px] text-fg-subtle">
-          <span className="flex items-center gap-1.5">
-            <span
-              className="inline-block h-px w-2"
-              style={{ background: "var(--fg)" }}
-            />
-            p50 42ms
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className="inline-block h-px w-2"
-              style={{ background: "var(--brand-signal)" }}
-            />
-            p95 138ms
-          </span>
-        </div>
-      </div>
-
-      {/* SVG chart */}
-      <svg
-        viewBox="0 0 400 140"
-        preserveAspectRatio="none"
-        style={{ width: "100%", height: 140, marginTop: 12 }}
-      >
-        <defs>
-          <linearGradient id="obs-grad-p50" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%"   stopColor="var(--fg)" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="var(--fg)" stopOpacity="0"    />
-          </linearGradient>
-        </defs>
-
-        {/* dashed gridlines */}
-        {([28, 56, 84, 112] as const).map((y) => (
-          <line
-            key={y}
-            x1="0" y1={y} x2="400" y2={y}
-            stroke="var(--border)"
-            strokeDasharray="2 4"
-            strokeWidth="1"
-          />
-        ))}
-
-        {/* p95 line */}
-        <polyline
-          fill="none"
-          stroke="var(--brand-signal)"
-          strokeOpacity="0.7"
-          strokeWidth="1.6"
-          points={P95_POINTS}
-        />
-
-        {/* p50 area fill */}
-        <path fill="url(#obs-grad-p50)" d={P50_AREA} />
-
-        {/* p50 line */}
-        <polyline
-          fill="none"
-          stroke="var(--fg)"
-          strokeWidth="1.4"
-          points={P50_POINTS}
-        />
-      </svg>
-    </Panel>
+export default function Observe() {
+  const [params, setParams] = useSearchParams();
+  const [revision, setRevision] = useState(0);
+  const pipelinePage = positivePage(params.get("pipelinePage"));
+  const runPage = positivePage(params.get("runPage"));
+  const agentPage = positivePage(params.get("agentPage"));
+  const name = params.get("pipelineName") ?? "";
+  const requestedStatus = params.get("runStatus") ?? "";
+  const status = statuses.includes(requestedStatus) ? requestedStatus : "";
+  // The server's collection API filters per-pipeline grants. A platform-only
+  // action check would incorrectly reject users with project/pipeline access.
+  const pipelines = useApiResource(
+    `observe:pipelines:${JSON.stringify([pipelinePage, name, revision])}`,
+    (signal) =>
+      listPipelines(
+        { page: pipelinePage, pageSize: 20, name: name || undefined },
+        signal,
+      ),
   );
-}
-
-/* ─────────────────────── ServicesTable ─────────────────────── */
-
-function errorColor(svc: Service): string {
-  if (svc.status === "fail") return "var(--accent-danger)";
-  if (svc.status === "warn") return "var(--accent-warn)";
-  return "var(--fg-muted)";
-}
-
-function ServicesTable() {
-  return (
-    <Panel>
-      <PanelHeader title="Services" sub={`${SERVICES.length} monitored`} />
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
-          <thead>
-            <tr className="text-left">
-              {(["Service", "Env", "Latency p95", "RPS", "Errors", "Status", ""] as const).map(
-                (col, i) => (
-                  <th
-                    key={col || `action-${i}`}
-                    className={
-                      "px-5 py-3 font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-fg-subtle" +
-                      (i === 6 ? " text-right" : "")
-                    }
-                  >
-                    {col}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {SERVICES.map((svc) => (
-              <tr key={svc.name} className="border-t border-border">
-                <td className="px-5 py-3 font-medium">{svc.name}</td>
-                <td className="px-5 py-3 text-fg-muted">{svc.env}</td>
-                <td className="px-5 py-3 font-mono">{svc.latency}</td>
-                <td className="px-5 py-3 font-mono">{svc.rps}</td>
-                <td
-                  className="px-5 py-3 font-mono"
-                  style={{ color: errorColor(svc) }}
-                >
-                  {svc.errors}
-                </td>
-                <td className="px-5 py-3">
-                  <StatusDot tone={svc.status} pulse={svc.status === "info"} />
-                </td>
-                <td className="px-5 py-3 text-right">
-                  <Button variant="ghost" size="sm" className="gap-1.5">
-                    Open
-                    <ArrowUpRight className="h-3.5 w-3.5" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
+  const visiblePipelines =
+    pipelines.error || pipelines.loading ? undefined : pipelines.data;
+  const pipelineId =
+    params.get("pipeline") ||
+    (!pipelines.error ? visiblePipelines?.list[0]?.pipelineId : undefined);
+  const pipeline = useApiResource(
+    pipelineId
+      ? `observe:pipeline:${JSON.stringify([pipelineId, revision])}`
+      : null,
+    (signal) => getPipeline(pipelineId!, signal),
   );
-}
-
-/* ──────────────────────── AlertsFeed ───────────────────────── */
-
-function AlertsFeed() {
+  const updateQuery = (values: Record<string, string | undefined>) =>
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(values)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
   return (
-    <Panel>
-      <PanelHeader title="Active alerts" sub={`${ALERTS.length} firing`} />
-      <ul className="m-0 list-none p-0">
-        {ALERTS.map((alert, i) => (
-          <li
-            key={i}
-            className={
-              "flex items-center gap-3.5 px-5 py-3.5" +
-              (i > 0 ? " border-t border-border" : "")
-            }
-          >
-            <StatusDot tone={alert.sev} pulse={alert.sev === "info"} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-foreground">
-                {alert.title}
-              </div>
-              <div className="mt-0.5 font-mono text-[11px] text-fg-subtle">
-                {alert.rule}
-              </div>
-            </div>
-            <span className="shrink-0 font-mono text-[11px] text-fg-subtle">
-              {alert.ago} ago
-            </span>
-            <Button variant="outline" size="sm">
-              Ack
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
-
-/* ────────────────────────── Page ───────────────────────────── */
-
-const Observe: FC = () => {
-  return (
-    <section className="flex flex-1 flex-col gap-6 p-8">
+    <section className="flex min-w-0 flex-1 flex-col gap-6 p-4 sm:p-8">
       <PageHeader
-        eyebrow="observe / runtime"
+        eyebrow="observe / execution health"
         title="Observe"
-        sub="Runtime health, latency, throughput and error budget for every service."
+        sub="Inspect pipeline runs, failures, recorded durations and agent heartbeats. Refresh to fetch a new snapshot."
         action={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Clock className="h-3.5 w-3.5" />
-              Last 6h
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            <RefreshCw aria-hidden className="size-3.5" />
+            Refresh
+          </Button>
         }
       />
-
-      {/* Top split: SLO summary + latency chart */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1.5fr" }}>
-        <SloSummary />
-        <LatencyChart />
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(260px,0.7fr)_minmax(0,1.8fr)]">
+        <Panel className="min-w-0">
+          <PanelHeader
+            title="Pipelines"
+            sub={
+              !pipelines.error && visiblePipelines
+                ? `${visiblePipelines.total} accessible ${name ? "matches" : "definitions"}`
+                : "Permitted pipeline definitions"
+            }
+          />
+          <PipelineSearch
+            key={name}
+            name={name}
+            onApply={(value) =>
+              updateQuery({
+                pipelineName: value || undefined,
+                pipelinePage: undefined,
+                pipeline: undefined,
+                runPage: undefined,
+              })
+            }
+          />
+          {pipelines.error ? (
+            <SnapshotError
+              subject="Pipeline list"
+              permission="pipeline:read on an accessible pipeline"
+              error={pipelines.error}
+              retry={pipelines.refresh}
+              loading={pipelines.loading}
+            />
+          ) : (
+            <>
+              {pipelines.loading && (
+                <p role="status" className="p-5 text-sm text-fg-muted">
+                  {visiblePipelines
+                    ? "Refreshing pipelines…"
+                    : "Loading pipelines…"}
+                </p>
+              )}
+              {visiblePipelines?.list.length === 0 && (
+                <p className="p-5 text-sm text-fg-muted">
+                  {pipelinePage > 1
+                    ? "No pipelines on this page."
+                    : name
+                      ? "No accessible pipelines match this search."
+                      : "No readable pipelines found. Runs and logs require pipeline:read permission on a pipeline."}
+                </p>
+              )}
+              {visiblePipelines?.list.map((item) => (
+                <button
+                  type="button"
+                  key={item.pipelineId}
+                  aria-pressed={pipelineId === item.pipelineId}
+                  onClick={() =>
+                    updateQuery({
+                      pipeline: item.pipelineId,
+                      runPage: undefined,
+                    })
+                  }
+                  className={`w-full border-b p-4 text-left last:border-b-0 hover:bg-muted ${pipelineId === item.pipelineId ? "bg-muted shadow-[inset_2px_0_0_var(--brand-signal)]" : ""}`}
+                >
+                  <p className="break-words text-sm font-medium">
+                    {item.name || item.pipelineId}
+                  </p>
+                  <p className="mt-2 flex items-center gap-2 font-mono text-xs text-fg-muted">
+                    <GitBranch aria-hidden className="size-3 shrink-0" />
+                    <span className="truncate">
+                      {item.defaultBranch || "—"}
+                    </span>
+                    {item.isEnabled === 0 && (
+                      <span className="ml-auto">Disabled</span>
+                    )}
+                  </p>
+                </button>
+              ))}
+              {visiblePipelines && (
+                <SnapshotPages
+                  name="Pipeline"
+                  page={pipelinePage}
+                  total={visiblePipelines.total}
+                  loading={pipelines.loading}
+                  onPage={(page) =>
+                    updateQuery({
+                      pipelinePage: String(page),
+                      pipeline: undefined,
+                      runPage: undefined,
+                    })
+                  }
+                />
+              )}
+            </>
+          )}
+        </Panel>
+        {pipeline.error ? (
+          <Panel>
+            <SnapshotError
+              subject="Pipeline"
+              permission="pipeline:read for this pipeline"
+              error={pipeline.error}
+              retry={pipeline.refresh}
+              loading={pipeline.loading}
+            />
+          </Panel>
+        ) : pipeline.data && !pipeline.loading ? (
+          <RunHealth
+            key={pipeline.data.pipelineId}
+            pipeline={pipeline.data}
+            page={runPage}
+            status={status}
+            revision={revision}
+            onPage={(page) => updateQuery({ runPage: String(page) })}
+            onStatus={(value) =>
+              updateQuery({ runStatus: value || undefined, runPage: undefined })
+            }
+          />
+        ) : (
+          <Panel>
+            <p role="status" className="p-8 text-sm text-fg-muted">
+              {pipeline.loading
+                ? "Loading pipeline…"
+                : "Select a readable pipeline to inspect its execution health."}
+            </p>
+          </Panel>
+        )}
       </div>
-
-      {/* Services table */}
-      <ServicesTable />
-
-      {/* Active alerts feed */}
-      <AlertsFeed />
+      <AgentHealth
+        page={agentPage}
+        revision={revision}
+        onPage={(page) => updateQuery({ agentPage: String(page) })}
+      />
     </section>
   );
-};
-
-export default Observe;
+}

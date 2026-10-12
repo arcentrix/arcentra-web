@@ -1,6 +1,6 @@
 /** Fixture-driven browser regression test. This does not replace real backend integration tests. */
 import assert from "node:assert/strict";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 
@@ -89,6 +89,27 @@ try {
     startTime: Math.floor(Date.now() / 1000),
     duration: 1234,
   };
+  let artifactMode = "normal";
+  let artifactLists = 0;
+  let artifactDownloads = 0;
+  const artifactBytes = '{"fixture":"artifact download bytes"}\n';
+  const artifactRows = Array.from({ length: 21 }, (_, index) => ({
+    artifactId: `artifact-${index + 1}`,
+    projectId: project.projectId,
+    pipelineId: pipeline.pipelineId,
+    pipelineRunId: "run-1",
+    jobRunId: "job-1",
+    stepRunId: "step-1",
+    name: `report-${String(index + 1).padStart(2, "0")}.json`,
+    size: artifactBytes.length,
+    sizeKnown: true,
+    mediaType: "application/json",
+    storageType: "local",
+    createdAt: "2026-10-12T00:00:00Z",
+    status: index === 20 ? "expired" : "available",
+    downloadAvailable: index !== 20,
+    ...(index === 20 ? { unavailableReason: "Retention period ended" } : {}),
+  }));
   let mode = "normal";
   let starts = 0;
   let cancellations = 0;
@@ -116,7 +137,52 @@ try {
         },
       ]);
     if (path === "/me/routes") return ok(["/build", "/projects"]);
-    if (path === "/me/effective-actions") return ok(["*:*"]);
+    if (path === "/me/effective-actions")
+      return ok(artifactMode === "restricted" ? [] : ["*:*"]);
+    if (path === "/projects/project-1/artifacts") {
+      artifactLists++;
+      if (artifactMode === "restricted")
+        return route.fulfill({
+          status: 403,
+          json: { code: 403, errMsg: "Artifact access denied" },
+        });
+      if (artifactMode === "error")
+        return route.fulfill({
+          status: 503,
+          json: { code: 500, errMsg: "Artifact storage unavailable" },
+        });
+      const pageNum = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 20);
+      const name = url.searchParams.get("name") || "";
+      const runId = url.searchParams.get("runId");
+      const status = url.searchParams.get("status");
+      const rows =
+        artifactMode === "empty"
+          ? []
+          : artifactRows.filter(
+              (row) =>
+                row.name.includes(name) &&
+                (!runId || row.pipelineRunId === runId) &&
+                (!status || row.status === status),
+            );
+      return ok({
+        list: rows.slice((pageNum - 1) * pageSize, pageNum * pageSize),
+        total: rows.length,
+        page: pageNum,
+        pageSize,
+      });
+    }
+    if (path === "/projects/project-1/artifacts/artifact-1/download") {
+      artifactDownloads++;
+      return route.fulfill({
+        status: 200,
+        body: artifactBytes,
+        headers: {
+          "content-type": "application/json",
+          "content-disposition": 'attachment; filename="report-01.json"',
+        },
+      });
+    }
     if (path === "/users/fetch")
       return ok({
         userId: "ui-test",
@@ -348,13 +414,87 @@ try {
     .waitFor();
   await page.goBack();
   await page.getByRole("heading", { name: "Pipeline definitions" }).waitFor();
+  await page.goto(`${base}/projects/project-1/artifacts`);
+  await page.getByRole("table", { name: "Project artifacts" }).waitFor();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByText("Page 2 of 2").waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Download report-21.json" })
+      .isDisabled(),
+    true,
+  );
+  await page
+    .getByRole("combobox", { name: "Artifact status" })
+    .selectOption("available");
+  await page.waitForURL(/status=available/);
+  await page.getByText("report-01.json", { exact: true }).waitFor();
+  assert.equal(new URL(page.url()).searchParams.has("page"), false);
+  await page.goBack();
+  await page.getByText("Page 2 of 2").waitFor();
+  await page.getByRole("button", { name: "Previous", exact: true }).click();
+  const downloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download report-01.json" }).click();
+  const downloaded = await downloadEvent;
+  assert.equal(downloaded.suggestedFilename(), "report-01.json");
+  assert.equal(await readFile(await downloaded.path(), "utf8"), artifactBytes);
+  assert.equal(artifactDownloads, 1);
+  await page
+    .getByRole("textbox", { name: "Run ID", exact: true })
+    .fill("missing-run");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await page.getByText("No artifacts match your filters.").waitFor();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.getByText("report-01.json", { exact: true }).waitFor();
+  const previousLists = artifactLists;
+  const refreshResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+      "/api/v1/projects/project-1/artifacts",
+  );
+  await page.getByRole("button", { name: "Refresh artifacts" }).click();
+  await refreshResponse;
+  await page
+    .getByRole("button", { name: "Download report-01.json" })
+    .waitFor({ state: "visible" });
+  assert.ok(artifactLists > previousLists);
+  await page.screenshot({
+    path: `${output}/artifacts-desktop-fixture.png`,
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: `${output}/artifacts-mobile-fixture.png`,
+    fullPage: true,
+  });
+  assert.ok(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    "Artifact table must scroll within its panel on mobile",
+  );
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  artifactMode = "error";
+  await page.getByRole("button", { name: "Refresh artifacts" }).click();
+  await page.getByRole("heading", { name: "Artifacts unavailable" }).waitFor();
+  artifactMode = "empty";
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByText("No artifacts yet.", { exact: false }).waitFor();
+  artifactMode = "restricted";
+  await page.reload();
+  await page
+    .getByRole("heading", { name: "Artifact access restricted" })
+    .waitFor();
+  artifactMode = "normal";
+  await page.getByRole("button", { name: "Check access again" }).click();
+  await page.getByText("report-01.json", { exact: true }).waitFor();
   assert.deepEqual(
     errors,
     [],
     "Browser must not report uncaught application errors",
   );
   console.log(
-    `UI fixture smoke passed: run/dismiss/cancel, definition validate/save, mobile layout, empty/error/retry, project navigation/back. Screenshots: ${output}`,
+    `UI fixture smoke passed: run/dismiss/cancel, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile. Screenshots: ${output}`,
   );
 } finally {
   await browser?.close();

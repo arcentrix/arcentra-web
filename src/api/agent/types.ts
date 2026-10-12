@@ -27,6 +27,7 @@ export interface Agent {
   labels: Record<string, string>; // 标签（JSON对象）
   metrics: string; // 指标路径（如：/metrics）
   isEnabled: number; // 是否启用：0-禁用, 1-启用
+  lastHeartbeat?: string | null; // 控制平面记录的最后一次心跳时间
   registeredBy?: string; // 注册方式：admin, dynamic
 }
 

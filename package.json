@@ -18,7 +18,8 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "test:ui": "node tests/ui-fixture-smoke.mjs",
-    "format:check": "prettier --check src/api/pipeline src/api/project src/components/build src/hooks/use-api-resource* tests/ui-fixture-smoke.mjs"
+    "format:check": "prettier --check src/api/artifact src/api/client/index.ts src/api/client/index.test.ts src/api/pipeline src/api/project src/components/build src/hooks/use-api-resource* src/pages/Project/Artifacts src/router/component-registry* tests/ui-fixture-smoke.mjs src/api/observe src/api/agent/types.ts src/pages/Observe src/components/observe src/components/deploy-unavailable.tsx src/components/integration-availability.test.tsx src/pages/Deploy src/pages/Project/Deployments src/pages/Project/Environments src/pages/Copilot src/components/copilot-panel.tsx src/components/breadcrumb.tsx src/components/command-palette.tsx src/components/top-command-bar.tsx src/pages/Settings/Notifications",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -87,5 +88,6 @@
     "typescript-eslint": "^8.46.2",
     "vite": "^7.1.12",
     "vitest": "^2.1.9"
-  }
+  },
+  "packageManager": "pnpm@10.30.3"
 }
