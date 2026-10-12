@@ -11,6 +11,9 @@ import { MemoryRouter } from "react-router-dom";
 import { RunDetail } from "./run-detail";
 import { getRun, getRunJobs, getRunLogs, stopRun } from "@/api/pipeline";
 import type { PipelineRun } from "@/api/pipeline/types";
+vi.mock("./run-approvals", () => ({
+  RunApprovals: () => <div>Run approval panel</div>,
+}));
 vi.mock("@/hooks/use-scoped-permission", () => ({
   useScopedPermission: () => ({ has: () => true }),
 }));

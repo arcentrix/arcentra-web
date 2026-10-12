@@ -370,3 +370,93 @@ describe("RunPipelineDialog", () => {
     expect(onStarted).not.toHaveBeenCalled();
   });
 });
+
+it("discloses the operator-defined durable approval policy without prechecking deployment opt-in", async () => {
+  vi.mocked(getPipelineSpec).mockResolvedValue({
+    ...deployment,
+    deploymentPlan: {
+      ...deployment.deploymentPlan!,
+      approvalRequired: true,
+      target: {
+        ...deployment.deploymentPlan!.target,
+        pipelineApproval: {
+          approvers: ["operator-1", "operator-2"],
+          minApprovals: 2,
+          timeoutSeconds: 90,
+        },
+      },
+    },
+  });
+  show();
+  await ready();
+  expect(
+    screen.getByText("Final deployment requires durable manual approval"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Operator-defined approvers: operator-1, operator-2"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/Run opt-in does not grant approval/),
+  ).toBeInTheDocument();
+  expect(consent()).not.toBeChecked();
+  expect(start()).toBeDisabled();
+  fireEvent.click(consent());
+  fireEvent.click(start());
+  await waitFor(() => expect(triggerPipeline).toHaveBeenCalledOnce());
+  const input = vi.mocked(triggerPipeline).mock.calls[0][1];
+  expect(input).toMatchObject({
+    allowDeployments: true,
+    expectedDeploymentPlanHash: deployment.deploymentPlanHash,
+  });
+  expect(input).not.toHaveProperty("approvers");
+  expect(input).not.toHaveProperty("approval");
+});
+
+it.each(["missing policy", "omitted requirement", "invalid quorum"])(
+  "fails closed when the approval review has %s",
+  async (problem) => {
+    const plan = {
+      ...deployment.deploymentPlan!,
+      approvalRequired: true,
+      target: {
+        ...deployment.deploymentPlan!.target,
+        pipelineApproval: {
+          approvers: ["operator"],
+          minApprovals: 1,
+          timeoutSeconds: 90,
+        },
+      },
+    };
+    if (problem === "missing policy") plan.target.pipelineApproval = undefined!;
+    if (problem === "omitted requirement") plan.approvalRequired = false;
+    if (problem === "invalid quorum")
+      plan.target.pipelineApproval.minApprovals = 2;
+    vi.mocked(getPipelineSpec).mockResolvedValue({
+      ...deployment,
+      deploymentPlan: plan,
+    });
+    show();
+    await ready();
+    expect(screen.getByRole("alert")).toHaveTextContent(/approval/);
+    expect(start()).toBeDisabled();
+    expect(triggerPipeline).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps an unsupported gate diagnosis visible and blocks trigger instead of silently skipping approval", async () => {
+  vi.mocked(getPipelineSpec).mockResolvedValue({
+    ...deployment,
+    deploymentReviewError:
+      "Unsupported gate: stage approvals are not supported for this deployment.",
+  });
+  show();
+  await ready();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Unsupported gate: stage approvals",
+  );
+  expect(
+    screen.queryByRole("checkbox", { name: /Allow Kubernetes deployment/ }),
+  ).not.toBeInTheDocument();
+  expect(start()).toBeDisabled();
+  expect(triggerPipeline).not.toHaveBeenCalled();
+});

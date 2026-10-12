@@ -11,6 +11,7 @@ import {
 } from "@/api/pipeline";
 import type { JobRun } from "@/api/pipeline/types";
 import { RunDeployment } from "./run-deployment";
+import { RunApprovals } from "./run-approvals";
 import { useApiResource } from "@/hooks/use-api-resource";
 import { useScopedPermission } from "@/hooks/use-scoped-permission";
 import { Panel, PanelHeader } from "@/components/blueprint";
@@ -235,6 +236,11 @@ export function RunDetail({
           </>
         )}
       </Panel>
+      <RunApprovals
+        projectId={projectId}
+        pipelineId={pipelineId}
+        runId={runId}
+      />
       <Panel>
         <PanelHeader
           title="Jobs & steps"

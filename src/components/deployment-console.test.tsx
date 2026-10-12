@@ -521,3 +521,30 @@ it("records an observing rollout explicitly so the server can finalize and relea
   ).not.toBeInTheDocument();
   expect(deploy.recoverRelease).not.toHaveBeenCalled();
 });
+
+it("can cancel an unapplied pipeline approval release without exposing execution or recovery", async () => {
+  vi.mocked(deploy.listReleases).mockResolvedValue(
+    page([{ ...release, origin: "pipeline_job", approvalId: "approval-1" }]),
+  );
+  renderPage();
+  expect(
+    await screen.findByText(/interrupted or stopped run cannot be resumed/),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Review execution" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Review same-release recovery" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Cancel queued release" }),
+  );
+  await waitFor(() =>
+    expect(deploy.cancelRelease).toHaveBeenCalledWith("one", "release-one"),
+  );
+  expect(
+    await screen.findByText(/historical decisions remain in the audit record/),
+  ).toBeInTheDocument();
+  expect(deploy.advanceRelease).not.toHaveBeenCalled();
+  expect(deploy.recoverRelease).not.toHaveBeenCalled();
+});

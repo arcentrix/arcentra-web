@@ -37,6 +37,28 @@ export function deploymentReviewError(
     !target.container
   )
     return "The backend deployment review is incomplete or belongs to a different project. Refresh before starting a run.";
+  if (target.pipelineApproval && !plan.approvalRequired)
+    return "The reviewed approval requirement does not match the operator policy. Refresh before starting a run.";
+  if (plan.approvalRequired) {
+    const policy = target.pipelineApproval;
+    if (
+      !policy ||
+      !Array.isArray(policy.approvers) ||
+      policy.approvers.length > 100 ||
+      policy.approvers.some(
+        (id) =>
+          typeof id !== "string" || !id || id.length > 64 || id.trim() !== id,
+      ) ||
+      new Set(policy.approvers).size !== policy.approvers.length ||
+      !Number.isInteger(policy.minApprovals) ||
+      policy.minApprovals < 1 ||
+      policy.minApprovals > policy.approvers.length ||
+      !Number.isInteger(policy.timeoutSeconds) ||
+      policy.timeoutSeconds < 1 ||
+      policy.timeoutSeconds > 3600
+    )
+      return "The operator-defined deployment approval policy is unavailable or incomplete. Refresh before starting a run.";
+  }
   if (!target.configured)
     return "The reviewed Kubernetes target is not configured. Ask an operator to configure it before starting this run.";
   if (!target.allowPipelineDeployments)

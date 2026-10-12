@@ -538,6 +538,21 @@ export function DeploymentConsole({
                       {release.commitSha}
                     </p>
                     <p className="break-all">Artifact: {release.artifactId}</p>
+                    {release.approvalId && (
+                      <p className="break-all">
+                        Durable approval: {release.approvalId}. Open the
+                        pipeline run to review the decision and immutable
+                        release evidence.
+                      </p>
+                    )}
+                    {release.status === "queued" &&
+                      release.origin === "pipeline_job" && (
+                        <p>
+                          Only the original live controller can release this
+                          queued deployment after approval. An interrupted or
+                          stopped run cannot be resumed by approval or refresh.
+                        </p>
+                      )}
                     <p>{release.reason}</p>
                     {release.lastObservedAt ? (
                       <p>
@@ -600,20 +615,6 @@ export function DeploymentConsole({
                           >
                             Review execution
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={busy}
-                            onClick={() =>
-                              void mutate(
-                                () =>
-                                  cancelRelease(projectId, release.releaseId),
-                                "Queued release cancelled before apply.",
-                              )
-                            }
-                          >
-                            Cancel queued release
-                          </Button>
                           {!target?.configured && (
                             <span className="self-center text-xs text-muted-foreground">
                               Execution requires a configured target on the
@@ -622,6 +623,21 @@ export function DeploymentConsole({
                           )}
                         </>
                       )}
+                    {release.status === "queued" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() =>
+                          void mutate(
+                            () => cancelRelease(projectId, release.releaseId),
+                            "Unapplied release cancelled. A pending linked approval is cancelled; historical decisions remain in the audit record. This does not roll back any Kubernetes change.",
+                          )
+                        }
+                      >
+                        Cancel queued release
+                      </Button>
+                    )}
                     {release.status === "applying" && (
                       <Button
                         size="sm"
@@ -742,6 +758,14 @@ export function DeploymentConsole({
                       never guarantees rollback.
                     </p>
                   </div>
+                )}
+                {review.approvalId && (
+                  <p className="text-xs">
+                    Any new image apply still requires a valid, unexpired
+                    approval and current approver permissions. Same-release
+                    recovery cannot bypass an expired, rejected, cancelled, or
+                    revoked gate.
+                  </p>
                 )}
                 <label className="flex items-start gap-2 text-sm">
                   <input

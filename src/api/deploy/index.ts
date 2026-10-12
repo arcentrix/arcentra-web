@@ -1,5 +1,18 @@
 import { get, post } from "../client";
 
+export interface PipelineApprovalPolicy {
+  approvers: string[];
+  minApprovals: number;
+  timeoutSeconds: number;
+}
+export interface ApprovalTarget {
+  projectId: string;
+  environmentId: string;
+  targetRef: string;
+  namespace: string;
+  deployment: string;
+  container: string;
+}
 export interface DeploymentEnvironment {
   environmentId: string;
   projectId: string;
@@ -10,6 +23,7 @@ export interface DeploymentEnvironment {
   container: string;
   configured: boolean;
   activeReleaseId?: string;
+  pipelineApproval?: PipelineApprovalPolicy;
 }
 export type ReleaseStatus =
   | "queued"
@@ -20,6 +34,9 @@ export type ReleaseStatus =
   | "superseded"
   | "cancelled";
 export interface DeploymentRelease {
+  approvalId?: string;
+  approvalEvidenceHash?: string;
+  approvalTarget?: ApprovalTarget;
   origin?: "manual" | "pipeline_job";
   executionJobRunId?: string;
   executionStepRunId?: string;

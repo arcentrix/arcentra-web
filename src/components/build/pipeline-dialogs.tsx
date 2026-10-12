@@ -471,6 +471,29 @@ function ReviewedRunDialog({
                 reserved; an operator must inspect and explicitly recover the
                 same release ID, rather than create a duplicate.
               </p>
+              {plan.approvalRequired && plan.target.pipelineApproval && (
+                <div className="space-y-1 rounded border p-3 text-xs">
+                  <p className="font-medium">
+                    Final deployment requires durable manual approval
+                  </p>
+                  <p>
+                    Operator-defined approvers:{" "}
+                    {plan.target.pipelineApproval.approvers.join(", ")}
+                  </p>
+                  <p>
+                    {plan.target.pipelineApproval.minApprovals} approval(s)
+                    required · expires after{" "}
+                    {plan.target.pipelineApproval.timeoutSeconds} seconds,
+                    within the deployment timeout.
+                  </p>
+                  <p>
+                    The exact artifact and image will be reviewed after they are
+                    produced. Run opt-in does not grant approval. Approving can
+                    release a live wait but never resumes a stopped or
+                    interrupted pipeline.
+                  </p>
+                </div>
+              )}
               <label className="flex items-start gap-2">
                 <input
                   type="checkbox"
