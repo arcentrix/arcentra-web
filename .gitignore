@@ -21,3 +21,5 @@ tsconfig.tsbuildinfo
 
 # 保留示例文件
 !.env.example
+# Disposable local browser acceptance evidence
+test-results/

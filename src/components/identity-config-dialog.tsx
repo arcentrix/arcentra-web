@@ -26,6 +26,9 @@ import type {
   IdentityProviderConfig,
 } from "@/api/identity/types";
 
+const isCredentialKey = (key: string) =>
+  /secret|password|token|private.?key/i.test(key);
+
 interface IdentityConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -71,11 +74,24 @@ export function IdentityConfigDialog({
 
       // 将 config 对象转换为键值对数组
       if (provider.config && typeof provider.config === "object") {
-        const items = Object.entries(provider.config).map(([key, value]) => ({
-          key,
-          value:
-            typeof value === "object" ? JSON.stringify(value) : String(value),
-        }));
+        const items = Array.from(
+          new Set([
+            ...Object.keys(provider.config),
+            ...(provider.configuredFields ?? []).filter(
+              (key) => !key.includes("."),
+            ),
+          ]),
+        ).map((key) => {
+          const value = provider.config[key];
+          return {
+            key,
+            value: provider.configuredFields?.includes(key)
+              ? ""
+              : typeof value === "object"
+                ? JSON.stringify(value)
+                : String(value ?? ""),
+          };
+        });
         setConfigItems(items.length > 0 ? items : [{ key: "", value: "" }]);
       } else {
         setConfigItems([{ key: "", value: "" }]);
@@ -119,6 +135,24 @@ export function IdentityConfigDialog({
       const config: IdentityProviderConfig = {};
       configItems.forEach((item) => {
         if (item.key) {
+          if (
+            provider?.configuredFields?.some((path) =>
+              path.startsWith(`${item.key}.`),
+            )
+          )
+            return;
+          if (
+            provider?.configuredFields?.includes(item.key) &&
+            item.value === ""
+          )
+            return;
+          if (
+            provider?.configuredFields?.includes(item.key) ||
+            isCredentialKey(item.key)
+          ) {
+            config[item.key] = item.value;
+            return;
+          }
           // 尝试解析 JSON，如果失败则作为字符串
           try {
             config[item.key] = JSON.parse(item.value);
@@ -139,11 +173,10 @@ export function IdentityConfigDialog({
           : "Provider created successfully",
       );
       onOpenChange(false);
-    } catch (error) {
+    } catch {
       toast.error(
         provider ? "Failed to update provider" : "Failed to create provider",
       );
-      console.error("Submit failed:", error);
     } finally {
       setLoading(false);
     }
@@ -254,38 +287,79 @@ export function IdentityConfigDialog({
             </div>
 
             <div className="space-y-2 border rounded-md p-4">
-              {configItems.map((item, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <Input
-                    placeholder="Key (e.g.: clientId)"
-                    value={item.key}
-                    onChange={(e) =>
-                      handleConfigItemChange(index, "key", e.target.value)
-                    }
-                    className="flex-1"
-                    disabled={!!provider && !!item.key}
-                  />
-                  <Input
-                    placeholder="Value (e.g.: YOUR_CLIENT_ID)"
-                    value={item.value}
-                    onChange={(e) =>
-                      handleConfigItemChange(index, "value", e.target.value)
-                    }
-                    className="flex-[2]"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleRemoveConfigItem(index)}
-                    disabled={
-                      configItems.length === 1 || (!!provider && !!item.key)
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+              {provider?.configuredFields
+                ?.filter((key) => key.includes("."))
+                .map((key) => (
+                  <p key={key} className="text-xs text-muted-foreground">
+                    {key}: Configured (write-only)
+                  </p>
+                ))}
+              {configItems.map((item, index) => {
+                const configured = !!provider?.configuredFields?.includes(
+                  item.key,
+                );
+                const nestedConfigured = !!provider?.configuredFields?.some(
+                  (path) => path.startsWith(`${item.key}.`),
+                );
+                return (
+                  <div key={index} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        aria-label={`Configuration key ${index + 1}`}
+                        placeholder="Key (e.g.: clientId)"
+                        value={item.key}
+                        onChange={(e) =>
+                          handleConfigItemChange(index, "key", e.target.value)
+                        }
+                        className="flex-1"
+                        disabled={!!provider && !!item.key}
+                      />
+                      <Input
+                        aria-label={`Configuration ${item.key || index + 1}`}
+                        type={
+                          configured || isCredentialKey(item.key)
+                            ? "password"
+                            : "text"
+                        }
+                        readOnly={nestedConfigured}
+                        autoComplete={
+                          configured || isCredentialKey(item.key)
+                            ? "new-password"
+                            : "off"
+                        }
+                        placeholder="Value (e.g.: YOUR_CLIENT_ID)"
+                        value={item.value}
+                        onChange={(e) =>
+                          handleConfigItemChange(index, "value", e.target.value)
+                        }
+                        className="flex-[2]"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveConfigItem(index)}
+                        disabled={
+                          configItems.length === 1 || (!!provider && !!item.key)
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {configured && (
+                      <p className="text-xs text-muted-foreground">
+                        Configured; leave blank to keep the existing value.
+                      </p>
+                    )}
+                    {nestedConfigured && (
+                      <p className="text-xs text-muted-foreground">
+                        This nested object contains write-only values and is
+                        read-only here.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <p className="text-xs text-muted-foreground">

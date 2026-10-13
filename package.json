@@ -18,8 +18,10 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "test:ui": "node tests/ui-fixture-smoke.mjs",
-    "format:check": "prettier --check src/api/artifact src/api/client/index.ts src/api/client/index.test.ts src/api/pipeline src/api/project src/components/build src/hooks/use-api-resource* src/pages/Project/Artifacts src/router/component-registry* tests/ui-fixture-smoke.mjs src/api/observe src/api/agent/types.ts src/pages/Observe src/components/observe src/components/deploy-unavailable.tsx src/components/integration-availability.test.tsx src/pages/Deploy src/pages/Project/Deployments src/pages/Project/Environments src/pages/Copilot src/components/copilot-panel.tsx src/components/breadcrumb.tsx src/components/command-palette.tsx src/components/top-command-bar.tsx src/pages/Settings/Notifications src/api/copilot src/api/deploy src/components/copilot-console* src/components/deployment-console* src/api/approval",
-    "typecheck": "tsc --noEmit"
+    "format:check": "prettier --check src/api/artifact src/api/client/index.ts src/api/client/index.test.ts src/api/pipeline src/api/project src/components/build src/hooks/use-api-resource* src/pages/Project/Artifacts src/router/component-registry* tests/*.mjs src/api/observe src/api/agent/types.ts src/pages/Observe src/components/observe src/components/deploy-unavailable.tsx src/components/integration-availability.test.tsx src/pages/Deploy src/pages/Project/Deployments src/pages/Project/Environments src/pages/Copilot src/components/copilot-panel.tsx src/components/breadcrumb.tsx src/components/command-palette.tsx src/components/top-command-bar.tsx src/pages/Settings/Notifications src/api/copilot src/api/deploy src/components/copilot-console* src/components/deployment-console* src/api/approval src/components/login-form* src/api/general-settings src/components/general-settings-sheet* src/pages/GeneralSettings src/api/auth/types.ts src/api/user-management src/components/identity-config-dialog* src/api/identity/types.ts",
+    "typecheck": "tsc --noEmit",
+    "test:browser:harness": "node --test tests/browser-harness.check.mjs",
+    "test:acceptance": "node tests/actual-backend-acceptance.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -79,7 +81,7 @@
     "globals": "^16.5.0",
     "jsdom": "^24.1.3",
     "less": "^4.4.2",
-    "playwright": "^1.64.0",
+    "playwright": "1.64.0",
     "postcss": "^8.5.6",
     "prettier": "^3.9.10",
     "rollup-plugin-visualizer": "^6.0.5",

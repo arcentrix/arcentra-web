@@ -93,18 +93,27 @@ export function LoginForm({
       .catch(() => {});
   }, []);
 
-  const applyLoginSession = (
+  const applyLoginSession = async (
     response: Awaited<ReturnType<typeof Apis.auth.login>>,
   ) => {
     const normalizedRole = Array.isArray(response.role)
       ? ((response.role[0] as any)?.roleId ?? "user")
       : response.role;
-    userStore.updateState((state) => {
-      state.userinfo = response.userinfo;
-      state.role = normalizedRole as any;
-    });
     authStore.setTokens(response.token);
-    navigate("/");
+    try {
+      // Standard login returns tokens and roles, not a user profile. Fetch it
+      // through the authenticated endpoint before showing the workspace.
+      const userinfo = await Apis.user.getUserInfo();
+      userStore.updateState((state) => {
+        state.userinfo = userinfo;
+        state.role = normalizedRole as any;
+      });
+      navigate("/");
+    } catch (error) {
+      authStore.clearTokens();
+      userStore.clearUserinfo();
+      throw error;
+    }
   };
 
   // 后端约定 authUrl 始终是相对路径（如 /identity/authorize/github），统一拼接 API base
@@ -168,12 +177,15 @@ export function LoginForm({
     setIsLoading(true);
 
     try {
+      const identifier = String(data.username).trim();
       const response = await Apis.auth.login({
-        username: data.username,
+        ...(identifier.includes("@")
+          ? { email: identifier }
+          : { username: identifier }),
         password: data.password,
         authMethod: "standard",
       });
-      applyLoginSession(response);
+      await applyLoginSession(response);
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -189,7 +201,7 @@ export function LoginForm({
         username: data.username,
         password: data.password,
       });
-      applyLoginSession(response);
+      await applyLoginSession(response);
       setLdapProvider(null);
     } catch (error) {
       toast.error((error as Error).message);

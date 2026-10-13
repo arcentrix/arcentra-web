@@ -13,6 +13,8 @@ export interface SettingItem {
   name: string;
   /** 配置项实际数据，结构因 name 而异 */
   value: SettingValue;
+  /** Write-only field names that have a stored value; secret bytes are omitted. */
+  configuredFields?: string[];
 }
 
 export interface UpdateSettingRequest {

@@ -9,6 +9,8 @@ export interface IdentityProvider {
   name: string;
   providerType: ProviderType; // 后端使用驼峰命名
   config: IdentityProviderConfig;
+  /** Names/paths of write-only credentials already stored by the provider. */
+  configuredFields?: string[];
   description?: string;
   priority: number;
   isEnabled: number; // 后端返回 0/1

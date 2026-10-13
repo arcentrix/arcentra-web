@@ -1,5 +1,5 @@
 import type { AuthToken } from "@/models/auth";
-import type { UserInfo, UserRole } from "@/models/user";
+import type { UserRole } from "@/models/user";
 
 export type AuthMethod = "standard" | "ldap" | "oauth2" | "oidc";
 
@@ -11,7 +11,6 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  userinfo: UserInfo;
   token: AuthToken;
   role: UserRole | UserRole[];
   initialRoutes?: string[];
