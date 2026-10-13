@@ -37,3 +37,5 @@ pnpm format:check
 Component tests cover pipeline-only grants and endpoint authorization/retry, server loading/error/retry/empty states, server-side filters and paging, history restoration, newer project reads winning over late responses, repeated refresh/download clicks, missing/expired outputs, unknown sizes, download errors, and cancellation on project/filter/page navigation. API tests verify actual binary responses, encoded IDs, filename safety, object URL cleanup and rejection of non-attachment responses.
 
 The existing `pnpm test:ui` browser fixture now also exercises artifact filters, pagination/history, real browser attachment bytes, responsive overflow, refresh, empty/error/retry and access recovery. These are fixture-driven browser tests, not evidence of a live storage/control integration. Browser execution must occur in an environment that permits Chromium sockets; this restricted executor's previously denied browser route was not retried or bypassed.
+
+The official Chromium CI jobs and distinct simulated-transport versus real-Control/Agent journey contracts are documented in [Browser acceptance](browser-acceptance.md).

@@ -121,3 +121,7 @@ location / {
 1. **打包时环境变量**：`VITE_API_CLIENT_URL` 会在构建时被打包进代码，修改后需要重新构建
 2. **Vite Preview**：`pnpm preview` 不支持 Vite proxy，如需测试请使用模式 2 或部署到实际环境
 3. **协议自动添加**：如果只设置域名+路径（如 `localhost:8080/api/v1/`），会自动添加 `https://`，如需 HTTP 请明确指定
+
+## Browser acceptance
+
+See [Browser acceptance](docs/browser-acceptance.md) for the official Chromium CI regression and the separate real-Control/Agent build-to-artifact journey. Simulated API regression is labeled explicitly and does not count as backend integration evidence.

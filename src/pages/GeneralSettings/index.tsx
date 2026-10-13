@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState, type FC } from "react";
-import {
-  Eye,
-  EyeOff,
-  Pencil,
-  RefreshCw,
-  Search,
-  SearchX,
-} from "lucide-react";
+import { Eye, EyeOff, Pencil, RefreshCw, Search, SearchX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +63,9 @@ function renderScalar(label: string, value: unknown): React.ReactNode {
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return (
-      <span className="font-mono text-[13px] text-foreground">{String(value)}</span>
+      <span className="font-mono text-[13px] text-foreground">
+        {String(value)}
+      </span>
     );
   }
   return (
@@ -91,7 +86,9 @@ function renderRawValue(key: string, value: unknown): React.ReactNode {
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return (
-      <span className="font-mono text-[13px] text-foreground">{String(value)}</span>
+      <span className="font-mono text-[13px] text-foreground">
+        {String(value)}
+      </span>
     );
   }
   if (Array.isArray(value)) {
@@ -114,15 +111,16 @@ function renderRawValue(key: string, value: unknown): React.ReactNode {
       <div className="space-y-0.5">
         {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
           <div key={k} className="text-[13px]">
-            <span className="text-fg-muted">{k}:</span>{" "}
-            {renderRawValue(k, v)}
+            <span className="text-fg-muted">{k}:</span> {renderRawValue(k, v)}
           </div>
         ))}
       </div>
     );
   }
   return (
-    <span className="font-mono text-[13px] text-foreground">{String(value)}</span>
+    <span className="font-mono text-[13px] text-foreground">
+      {String(value)}
+    </span>
   );
 }
 
@@ -174,7 +172,13 @@ const GroupSettingsCard: FC<GroupCardProps> = ({
             hint={field.suffix ? `Unit: ${field.suffix}` : undefined}
           >
             <div className="flex items-center gap-1.5">
-              {renderScalar(field.label, value)}
+              {field.path && item?.configuredFields?.includes(field.path) ? (
+                <span className="text-[13px] text-fg-muted">
+                  Configured (write-only)
+                </span>
+              ) : (
+                renderScalar(field.label, value)
+              )}
             </div>
           </FormRow>
         );
@@ -188,7 +192,10 @@ function CardsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-4">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="overflow-hidden rounded-md border bg-background">
+        <div
+          key={i}
+          className="overflow-hidden rounded-md border bg-background"
+        >
           <div className="flex items-center justify-between gap-3 border-b px-5 py-[18px]">
             <div className="space-y-1.5">
               <Skeleton className="h-5 w-48" />
@@ -198,7 +205,10 @@ function CardsSkeleton({ count = 3 }: { count?: number }) {
           </div>
           <div className="space-y-0 p-5">
             {Array.from({ length: 3 }).map((__, j) => (
-              <div key={j} className="grid gap-6 border-b py-3.5 last:border-b-0 [grid-template-columns:200px_1fr]">
+              <div
+                key={j}
+                className="grid gap-6 border-b py-3.5 last:border-b-0 [grid-template-columns:200px_1fr]"
+              >
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-4 w-40" />
               </div>
@@ -233,15 +243,23 @@ const AdvancedItem: FC<AdvancedItemProps> = ({ item, onEdit }) => (
       </Button>
     </div>
     <div className="mt-3 space-y-1 rounded-md bg-bg-elevated px-3 py-2.5">
-      {Object.entries(item.value).length === 0 ? (
+      {(item.configuredFields ?? []).map((key) => (
+        <div key={key} className="text-[13px] text-fg-muted">
+          {key}: Configured (write-only)
+        </div>
+      ))}
+      {Object.entries(item.value).length === 0 &&
+      !item.configuredFields?.length ? (
         <span className="text-[13px] text-fg-muted">No value</span>
       ) : (
-        Object.entries(item.value).map(([key, value]) => (
-          <div key={key} className="flex items-start gap-2 text-[13px]">
-            <span className="shrink-0 text-fg-muted">{key}:</span>
-            <span className="min-w-0">{renderRawValue(key, value)}</span>
-          </div>
-        ))
+        Object.entries(item.value)
+          .filter(([key]) => !item.configuredFields?.includes(key))
+          .map(([key, value]) => (
+            <div key={key} className="flex items-start gap-2 text-[13px]">
+              <span className="shrink-0 text-fg-muted">{key}:</span>
+              <span className="min-w-0">{renderRawValue(key, value)}</span>
+            </div>
+          ))
       )}
     </div>
   </div>
@@ -266,7 +284,9 @@ const GeneralSettingsPage: FC<GeneralSettingsPageProps> = ({
   const [editingGroup, setEditingGroup] = useState<SettingsGroup | null>(null);
 
   const [singleSheetOpen, setSingleSheetOpen] = useState(false);
-  const [editingSetting, setEditingSetting] = useState<SettingItem | null>(null);
+  const [editingSetting, setEditingSetting] = useState<SettingItem | null>(
+    null,
+  );
 
   const loadSettings = async () => {
     setLoading(true);
@@ -292,7 +312,9 @@ const GeneralSettingsPage: FC<GeneralSettingsPageProps> = ({
   }, [settings]);
 
   const advancedItems = useMemo(() => {
-    const ungrouped = settings.filter((s) => !GROUPED_SETTING_NAMES.has(s.name));
+    const ungrouped = settings.filter(
+      (s) => !GROUPED_SETTING_NAMES.has(s.name),
+    );
     if (!searchText.trim()) return ungrouped;
     const q = searchText.toLowerCase();
     return ungrouped.filter((item) => {
@@ -360,7 +382,9 @@ const GeneralSettingsPage: FC<GeneralSettingsPageProps> = ({
     }
   };
 
-  const outer = headless ? "flex flex-col gap-4" : "flex flex-1 flex-col gap-4 p-4 pt-6 md:p-8";
+  const outer = headless
+    ? "flex flex-col gap-4"
+    : "flex flex-1 flex-col gap-4 p-4 pt-6 md:p-8";
 
   return (
     <div className={outer}>
@@ -427,7 +451,10 @@ const GeneralSettingsPage: FC<GeneralSettingsPageProps> = ({
                         className="pl-8 h-[34px] text-[13px]"
                       />
                     </div>
-                    <Badge variant="secondary" className="gap-1.5 px-2 py-1 text-[11px]">
+                    <Badge
+                      variant="secondary"
+                      className="gap-1.5 px-2 py-1 text-[11px]"
+                    >
                       {advancedItems.length} of {ungroupedCount}
                     </Badge>
                   </div>
@@ -471,7 +498,9 @@ const GeneralSettingsPage: FC<GeneralSettingsPageProps> = ({
                 </>
               ) : (
                 <p className="text-[13px] text-fg-muted">
-                  {ungroupedCount} raw configuration{ungroupedCount === 1 ? "" : "s"} available. Click Show to expand.
+                  {ungroupedCount} raw configuration
+                  {ungroupedCount === 1 ? "" : "s"} available. Click Show to
+                  expand.
                 </p>
               )}
             </SettingsCard>

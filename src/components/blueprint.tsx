@@ -136,9 +136,9 @@ export function PanelHeader({
       )}
     >
       <div className="min-w-0">
-        <div className="text-[14px] font-semibold leading-tight tracking-[-0.01em]">
+        <h2 className="text-[14px] font-semibold leading-tight tracking-[-0.01em]">
           {title}
-        </div>
+        </h2>
         {sub && (
           <div className="mt-0.5 truncate font-mono text-[12px] text-fg-muted">
             {sub}

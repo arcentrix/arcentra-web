@@ -67,7 +67,10 @@ export const GroupEditSheet: FC<GroupEditSheetProps> = ({
     const next: Record<string, unknown> = {};
     group.fields.forEach((field, idx) => {
       const item = settingsByName.get(field.settingName);
-      next[`f${idx}`] = getByPath(item?.value, field.path);
+      next[`f${idx}`] =
+        field.path && item?.configuredFields?.includes(field.path)
+          ? ""
+          : getByPath(item?.value, field.path);
     });
     return next;
   }, [group, settingsByName]);
@@ -126,7 +129,19 @@ export const GroupEditSheet: FC<GroupEditSheetProps> = ({
       const current = updatedValueByName.get(field.settingName) ?? {
         ...item.value,
       };
+      // Never submit a displayed configured marker or an old secret value.
+      if (!updatedValueByName.has(field.settingName))
+        for (const configured of item.configuredFields ?? [])
+          delete current[configured];
       let v = draft[key];
+      if (
+        field.path &&
+        item.configuredFields?.includes(field.path) &&
+        (v === "" || v == null)
+      ) {
+        updatedValueByName.set(field.settingName, current);
+        return;
+      }
       const original = getByPath(item.value, field.path);
       const type = detectType(original);
       if (type === "number") v = Number(v);
@@ -185,8 +200,14 @@ export const GroupEditSheet: FC<GroupEditSheetProps> = ({
                   field.path,
                 );
                 const type = detectType(original);
+                const configured =
+                  !!field.path &&
+                  !!settingsByName
+                    .get(field.settingName)
+                    ?.configuredFields?.includes(field.path);
                 const sensitive =
-                  isSensitiveLabel(field.label) && type === "string";
+                  (configured || isSensitiveLabel(field.label)) &&
+                  type === "string";
 
                 return (
                   <div
@@ -285,6 +306,11 @@ export const GroupEditSheet: FC<GroupEditSheetProps> = ({
                       </div>
                     )}
 
+                    {configured && (
+                      <p className="text-xs text-muted-foreground">
+                        Configured; leave blank to keep the existing value.
+                      </p>
+                    )}
                     {field.description && (
                       <p className="text-xs text-muted-foreground">
                         {field.description}

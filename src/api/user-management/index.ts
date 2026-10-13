@@ -15,7 +15,9 @@ export interface ListUsersOptions {
   silence?: boolean;
 }
 
-function toRequestConfig(options?: ListUsersOptions): RequestConfig | undefined {
+function toRequestConfig(
+  options?: ListUsersOptions,
+): RequestConfig | undefined {
   if (!options?.silence) return undefined;
   return { silence: true };
 }
@@ -56,7 +58,7 @@ export const listUsersByRole = async (
   options?: ListUsersOptions,
 ): Promise<UserListResponse> => {
   const params = new URLSearchParams();
-  params.append("roleId", roleId);
+  params.append("roleID", roleId);
   if (page) params.append("page", page.toString());
   if (pageSize) params.append("pageSize", pageSize.toString());
   const url = `/users/by-role?${params.toString()}`;
@@ -105,8 +107,8 @@ export const resetUserPassword = async (
   userId: string,
   newPassword: string,
 ): Promise<void> => {
-  await put(`/users/${userId}/password`, {
-    password: btoa(newPassword),
+  await put(`/users/${encodeURIComponent(userId)}/password`, {
+    newPassword: btoa(newPassword),
   });
 };
 

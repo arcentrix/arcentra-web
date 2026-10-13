@@ -53,16 +53,26 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
 
   useEffect(() => {
     if (!open || !setting) return;
-    setDraft({ ...setting.value });
+    const next = { ...setting.value };
+    for (const key of setting.configuredFields ?? [])
+      if (!key.includes(".")) next[key] = "";
+    setDraft(next);
     setErrors({});
     setRevealed({});
   }, [open, setting]);
 
   const fields = useMemo(() => {
     if (!setting) return [] as Array<{ key: string; type: FieldType }>;
-    return Object.entries(setting.value).map(([key, value]) => ({
+    return Array.from(
+      new Set([
+        ...Object.keys(setting.value),
+        ...(setting.configuredFields ?? []).filter((key) => !key.includes(".")),
+      ]),
+    ).map((key) => ({
       key,
-      type: detectType(value),
+      type: setting.configuredFields?.includes(key)
+        ? ("string" as const)
+        : detectType(setting.value[key]),
     }));
   }, [setting]);
 
@@ -82,6 +92,15 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
 
     for (const { key, type } of fields) {
       const raw = draft[key];
+      // Nested configured paths are status-only in this generic editor. Never
+      // submit a literal dotted key or replace an entire secret-bearing object.
+      if (setting?.configuredFields?.some((path) => path.startsWith(`${key}.`)))
+        continue;
+      if (
+        setting?.configuredFields?.includes(key) &&
+        (raw === "" || raw == null)
+      )
+        continue;
       if (type === "number") {
         const n = typeof raw === "number" ? raw : Number(raw);
         if (
@@ -154,10 +173,22 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
                 </div>
               )}
 
+              {setting?.configuredFields
+                ?.filter((key) => key.includes("."))
+                .map((key) => (
+                  <p key={key} className="text-xs text-muted-foreground">
+                    {key}: Configured (write-only)
+                  </p>
+                ))}
               {fields.map(({ key, type }) => {
                 const value = draft[key];
                 const error = errors[key];
-                const sensitive = isSensitiveField(key) && type === "string";
+                const configured = !!setting?.configuredFields?.includes(key);
+                const nestedConfigured = !!setting?.configuredFields?.some(
+                  (path) => path.startsWith(`${key}.`),
+                );
+                const sensitive =
+                  (configured || isSensitiveField(key)) && type === "string";
 
                 return (
                   <div key={key} className="space-y-1.5">
@@ -247,6 +278,7 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
                       <Textarea
                         id={`field-${key}`}
                         rows={6}
+                        readOnly={nestedConfigured}
                         className="font-mono text-xs"
                         value={
                           typeof value === "string"
@@ -257,6 +289,17 @@ export const GeneralSettingsSheet: FC<GeneralSettingsSheetProps> = ({
                       />
                     )}
 
+                    {nestedConfigured && (
+                      <p className="text-xs text-muted-foreground">
+                        This nested object contains write-only values and is
+                        read-only here.
+                      </p>
+                    )}
+                    {configured && (
+                      <p className="text-xs text-muted-foreground">
+                        Configured; leave blank to keep the existing value.
+                      </p>
+                    )}
                     {error && (
                       <p className="text-xs text-destructive">{error}</p>
                     )}
