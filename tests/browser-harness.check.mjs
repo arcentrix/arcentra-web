@@ -8,6 +8,78 @@ import {
   selectedRunStatus,
 } from "./browser-harness.mjs";
 import { fileURLToPath } from "node:url";
+import { assertControlReachable } from "./artifact-controls.mjs";
+
+test("control reachability rejects partial overlays even when bounds and center are visible", async () => {
+  const previous = ["document", "innerWidth", "innerHeight"].map((key) => [
+    key,
+    Object.getOwnPropertyDescriptor(globalThis, key),
+  ]);
+  let obstruction = "none";
+  let trialClicks = 0;
+  let hitTests = 0;
+  const rect = {
+    left: 100,
+    right: 196,
+    top: 100,
+    bottom: 132,
+    width: 96,
+    height: 32,
+  };
+  const element = {
+    getBoundingClientRect: () => rect,
+    getAttribute: () => "Refresh artifacts",
+    contains: (target) => target === element,
+  };
+  const launcher = {
+    getBoundingClientRect: () => ({
+      left: obstruction === "copilot" ? 190 : 300,
+      right: 348,
+      top: 100,
+      bottom: 148,
+    }),
+  };
+  const control = {
+    scrollIntoViewIfNeeded: async () => {},
+    evaluate: async (callback) => callback(element),
+    click: async (options) => {
+      assert.deepEqual(options, { trial: true });
+      trialClicks++;
+    },
+  };
+  try {
+    globalThis.innerWidth = 390;
+    globalThis.innerHeight = 844;
+    globalThis.document = {
+      querySelector: () => launcher,
+      elementFromPoint: (x) => {
+        hitTests++;
+        return obstruction === "edge" && x < 130 ? launcher : element;
+      },
+    };
+    await assertControlReachable(control);
+    assert.equal(
+      hitTests,
+      9,
+      "Check the center and surrounding pointer targets",
+    );
+    assert.equal(trialClicks, 1);
+    obstruction = "edge";
+    await assert.rejects(assertControlReachable(control), /pointer input/);
+    obstruction = "copilot";
+    await assert.rejects(assertControlReachable(control), /overlap Copilot/);
+    assert.equal(
+      trialClicks,
+      1,
+      "An obstruction must fail before an automated click can scroll it away",
+    );
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
 
 test("status locator is scoped to the exact selected run before matching text", () => {
   const calls = [];

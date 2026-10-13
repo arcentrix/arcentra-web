@@ -40,6 +40,7 @@ export function safeFailureEvidence(stage, error) {
     "actual-backend-acceptance.mjs",
     "ui-fixture-smoke.mjs",
     "browser-harness.mjs",
+    "artifact-controls.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
     if (!/^\s+at /.test(frame)) continue;

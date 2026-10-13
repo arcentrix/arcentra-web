@@ -14,21 +14,21 @@ const DockLayout: FC = () => {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-dvh bg-background">
         <AppDock />
         <div
           className={cn(
-            "flex min-h-screen flex-col transition-[padding] duration-200 ease-out",
+            "flex min-h-dvh flex-col transition-[padding] duration-200 ease-out max-sm:h-dvh max-sm:min-h-0",
             dockPinned ? "pl-[180px]" : "pl-14",
           )}
         >
           <TopCommandBar />
-          <main className="flex-1 overflow-y-auto">
+          <main className="min-h-0 flex-1 overflow-y-auto sm:pb-24">
             <Outlet />
           </main>
+          <CopilotPanel />
         </div>
         <CommandPalette />
-        <CopilotPanel />
       </div>
     </TooltipProvider>
   );

@@ -9,6 +9,10 @@ import {
   runBrowserTest,
   selectedRunStatus,
 } from "./browser-harness.mjs";
+import {
+  assertArtifactControlLayout,
+  assertControlReachable,
+} from "./artifact-controls.mjs";
 
 // Validate all prerequisites before starting any server or browser. This mode
 // cannot silently fall back to the simulated-transport regression suite.
@@ -305,17 +309,45 @@ await runBrowserTest(
       fullPage: true,
     });
     setStage("mobile-layout");
-    await page.setViewportSize({ width: 390, height: 844 });
-    assert.ok(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-      "Artifact workspace must fit a mobile viewport",
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 320, height: 568 },
+      { width: 1440, height: 1050 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await assertArtifactControlLayout(page, runId);
+      const refresh = page.getByRole("button", { name: "Refresh artifacts" });
+      await assertControlReachable(refresh);
+      const refreshed = responseFor(
+        "GET",
+        `/projects/${project.projectId}/artifacts`,
+      );
+      await refresh.click();
+      await envelope(await refreshed);
+      const downloadButton = page.getByRole("button", {
+        name: `Download ${config.artifactName}`,
+      });
+      await assertControlReachable(downloadButton);
+      const event = page.waitForEvent("download");
+      await downloadButton.click();
+      const file = await event;
+      assert.equal(file.suggestedFilename(), config.artifactName);
+      assert.equal(await file.failure(), null);
+      assert.deepEqual(
+        await readFile(await file.path()),
+        Buffer.from(config.artifactContent),
+      );
+      await assertControlReachable(
+        page.getByRole("button", { name: "Open Copilot" }),
+      );
+      await page.screenshot({
+        path: `${output}/05-real-artifacts-${viewport.width === 390 ? "mobile" : viewport.width}.png`,
+        fullPage: true,
+      });
+    }
+    await record(
+      "artifact-controls-reachable-at-mobile-small-mobile-and-desktop",
     );
-    await page.screenshot({
-      path: `${output}/05-real-artifacts-mobile.png`,
-      fullPage: true,
-    });
     await page.setViewportSize({ width: 1440, height: 1050 });
 
     // Sign out and sign back in using visible controls and actual API requests.
