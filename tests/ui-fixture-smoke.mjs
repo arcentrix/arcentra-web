@@ -389,15 +389,66 @@ await runBrowserTest(
     await page
       .getByRole("heading", { name: "API service", exact: true })
       .waitFor();
+    const projectURL = `${base}/projects/project-1`;
+    const pipelinesURL = `${projectURL}/pipelines`;
+    const assertProjectOverview = async () => {
+      await page.waitForURL(projectURL);
+      await page
+        .getByRole("heading", { name: "API service", exact: true, level: 1 })
+        .waitFor();
+      await page
+        .getByRole("heading", {
+          name: "Pipeline definitions",
+          exact: true,
+          level: 2,
+        })
+        .waitFor();
+      assert.equal(
+        await page
+          .getByRole("tab", { name: "Overview", exact: true })
+          .getAttribute("aria-selected"),
+        "true",
+      );
+      assert.equal(
+        await page
+          .getByRole("button", { name: "Run pipeline", exact: true })
+          .count(),
+        0,
+      );
+    };
+    const assertProjectPipelines = async () => {
+      await page.waitForURL(pipelinesURL);
+      await page
+        .getByRole("heading", { name: "API service", exact: true, level: 1 })
+        .waitFor();
+      await page
+        .getByRole("button", { name: "Run pipeline", exact: true })
+        .waitFor();
+      assert.equal(
+        await page
+          .getByRole("tab", { name: "Pipelines", exact: true })
+          .getAttribute("aria-selected"),
+        "true",
+      );
+      assert.equal(
+        await page
+          .getByRole("heading", { name: "Pipeline definitions", exact: true })
+          .count(),
+        0,
+      );
+    };
     await page.getByRole("link", { name: /API service/ }).click();
+    await assertProjectOverview();
     await page
       .getByRole("button", { name: "View pipelines", exact: true })
       .click();
-    await page
-      .getByRole("button", { name: "Run pipeline", exact: true })
-      .waitFor();
+    await assertProjectPipelines();
     await page.goBack();
-    await page.getByRole("heading", { name: "Pipeline definitions" }).waitFor();
+    await assertProjectOverview();
+    await page.goForward();
+    await assertProjectPipelines();
+    await page.goBack();
+    await assertProjectOverview();
     await page.goto(`${base}/projects/project-1/artifacts`);
     await page.getByRole("table", { name: "Project artifacts" }).waitFor();
     await page.getByRole("button", { name: "Next", exact: true }).click();
