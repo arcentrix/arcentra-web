@@ -10,6 +10,7 @@ import {
   selectedRunStatus,
 } from "./browser-harness.mjs";
 import {
+  applyArtifactRunFilter,
   assertArtifactControlLayout,
   assertControlReachable,
 } from "./artifact-controls.mjs";
@@ -273,25 +274,43 @@ await runBrowserTest(
     await selectedRunStatus(page, runId, "Success").waitFor();
     await record("run-survives-browser-reload");
 
-    setStage("artifact-download");
+    setStage("artifact-filter");
     await page.getByRole("tab", { name: "Artifacts", exact: true }).click();
     await page.getByRole("table", { name: "Project artifacts" }).waitFor();
-    await page
-      .getByRole("textbox", { name: "Run ID", exact: true })
-      .fill(runId);
-    await page
-      .getByRole("button", { name: "Apply filters", exact: true })
-      .click();
-    await page.waitForURL((url) => url.searchParams.get("runId") === runId);
-    await page.getByText(config.artifactName, { exact: true }).waitFor();
-    const downloadEvent = page.waitForEvent("download");
-    await page
-      .getByRole("button", {
-        name: `Download ${config.artifactName}`,
-        exact: true,
-      })
-      .click();
-    const download = await downloadEvent;
+    const filteredArtifacts = await applyArtifactRunFilter(
+      page,
+      project.projectId,
+      runId,
+    );
+    const artifact = filteredArtifacts.find(
+      (value) => value.name === config.artifactName,
+    );
+    assert.ok(
+      artifact,
+      "The expected Agent artifact must appear in the filtered response",
+    );
+    const downloadPath = `/projects/${encodeURIComponent(project.projectId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/download`;
+    const downloadResponseFor = () =>
+      responseFor("GET", downloadPath).then((response) => {
+        assert.equal(
+          response.status(),
+          200,
+          "Artifact download HTTP response must succeed",
+        );
+        return response;
+      });
+    const downloadButton = page.getByRole("button", {
+      name: `Download ${config.artifactName}`,
+      exact: true,
+    });
+    setStage("artifact-download");
+    await assertControlReachable(downloadButton);
+    setStage("artifact-download-click");
+    const [, download] = await Promise.all([
+      downloadResponseFor(),
+      page.waitForEvent("download"),
+      downloadButton.click().then(() => setStage("artifact-download-save")),
+    ]);
     assert.equal(download.suggestedFilename(), config.artifactName);
     assert.equal(await download.failure(), null);
     const artifactBytes = await readFile(await download.path());
@@ -324,13 +343,12 @@ await runBrowserTest(
       );
       await refresh.click();
       await envelope(await refreshed);
-      const downloadButton = page.getByRole("button", {
-        name: `Download ${config.artifactName}`,
-      });
       await assertControlReachable(downloadButton);
-      const event = page.waitForEvent("download");
-      await downloadButton.click();
-      const file = await event;
+      const [, file] = await Promise.all([
+        downloadResponseFor(),
+        page.waitForEvent("download"),
+        downloadButton.click(),
+      ]);
       assert.equal(file.suggestedFilename(), config.artifactName);
       assert.equal(await file.failure(), null);
       assert.deepEqual(

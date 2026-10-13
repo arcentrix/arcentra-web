@@ -1,5 +1,56 @@
 import assert from "node:assert/strict";
 
+/** A changed URL or old row text alone does not establish a filtered snapshot. */
+export async function applyArtifactRunFilter(page, projectId, runId) {
+  await page.getByRole("textbox", { name: "Run ID", exact: true }).fill(runId);
+  const response = page.waitForResponse((value) => {
+    const url = new URL(value.url());
+    return (
+      value.request().method() === "GET" &&
+      url.pathname ===
+        `/api/v1/projects/${encodeURIComponent(projectId)}/artifacts` &&
+      url.searchParams.get("runId") === runId
+    );
+  });
+  // If click/navigation fails first, closing the page must not produce an
+  // unhandled watcher rejection. Await the original promise below so its own
+  // failure still fails the test; this does not turn rejection into success.
+  void response.catch(() => {});
+  await page
+    .getByRole("button", { name: "Apply filters", exact: true })
+    .click();
+  await page.waitForURL((url) => url.searchParams.get("runId") === runId);
+  const filtered = await response;
+  assert.equal(
+    filtered.status(),
+    200,
+    "The exact run filter must load successfully",
+  );
+  const body = await filtered.json();
+  assert.equal(body.code, 200, "The filtered artifact envelope must succeed");
+  assert.ok(
+    Array.isArray(body.detail?.list),
+    "The filtered artifact list must be present",
+  );
+  assert.ok(
+    body.detail.list.length > 0,
+    "The selected run must have an artifact",
+  );
+  assert.ok(
+    body.detail.list.every((artifact) => artifact.pipelineRunId === runId),
+    "Every returned artifact must belong to the selected run",
+  );
+  await page
+    .getByText(`${body.detail.total} matching artifacts`, { exact: true })
+    .waitFor();
+  await page
+    .getByRole("table", { name: "Project artifacts" })
+    .getByRole("link", { name: runId, exact: true })
+    .first()
+    .waitFor();
+  return body.detail.list;
+}
+
 /** Check actual pointer targets, including partially obscured button edges. */
 export async function assertControlReachable(control) {
   await control.scrollIntoViewIfNeeded();

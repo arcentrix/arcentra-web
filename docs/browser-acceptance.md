@@ -17,6 +17,8 @@ This is a real-browser regression of UI behavior with **simulated API responses 
 
 Artifact controls are checked at 390×844, 320×568, and 1440×1050. Pointer hit tests cover button centers and edges before ordinary, unforced clicks on Refresh, pagination, download, and Copilot. The suite also checks the reserved mobile Copilot row, long single-line run IDs, Copilot close/reopen/Escape, and table-only horizontal scrolling. Desktop bottom spacing keeps the last controls clear of the floating launcher.
 
+Run filtering waits for the exact run-scoped GET response and the rendered matching list before download. Actual downloads require one ordinary click, an HTTP 200 response from the specific artifact endpoint, and browser-saved bytes; there is no retry. The safe summary records only numeric download request/response/success/HTTP-error/failed-request counts to distinguish absent download requests from HTTP/network or browser-save failures. The simulated suite includes a delayed filtered response.
+
 ## Actual backend / Agent journey
 
 The backend repository's disposable acceptance runner owns service setup and teardown. It must start real Control and Agent binaries, MySQL, Redis, Kafka, MinIO artifact storage and a local Git daemon, initialize/register the synthetic account, and bootstrap its platform-admin role. After services and the Agent are ready, it invokes this command **with the frontend repository as its working directory**:

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runBrowserTest, selectedRunStatus } from "./browser-harness.mjs";
 import {
+  applyArtifactRunFilter,
   assertArtifactControlLayout,
   assertControlReachable,
 } from "./artifact-controls.mjs";
@@ -129,6 +130,10 @@ await runBrowserTest(
         const pageSize = Number(url.searchParams.get("pageSize") || 20);
         const name = url.searchParams.get("name") || "";
         const runId = url.searchParams.get("runId");
+        // A matching snapshot arrives later than the URL; readiness must wait
+        // for this exact filtered response rather than a URL-only check.
+        if (runId === artifactRunId)
+          await new Promise((resolve) => setTimeout(resolve, 300));
         const status = url.searchParams.get("status");
         const rows =
           artifactMode === "empty"
@@ -529,6 +534,34 @@ await runBrowserTest(
       artifactBytes,
     );
     assert.equal(artifactDownloads, 1);
+    const filteredArtifacts = await applyArtifactRunFilter(
+      page,
+      project.projectId,
+      artifactRunId,
+    );
+    assert.equal(filteredArtifacts.length, 20);
+    const filteredDownload = page.getByRole("button", {
+      name: "Download report-01.json",
+    });
+    await assertControlReachable(filteredDownload);
+    const [filteredResponse, filteredFile] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname ===
+            "/api/v1/projects/project-1/artifacts/artifact-1/download",
+      ),
+      page.waitForEvent("download"),
+      filteredDownload.click(),
+    ]);
+    assert.equal(filteredResponse.status(), 200);
+    assert.equal(
+      await readFile(await filteredFile.path(), "utf8"),
+      artifactBytes,
+    );
+    assert.equal(artifactDownloads, 2);
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await page.getByText("21 total artifacts", { exact: true }).waitFor();
     await page
       .getByRole("textbox", { name: "Run ID", exact: true })
       .fill("missing-run");

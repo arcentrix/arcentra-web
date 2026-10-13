@@ -17,12 +17,42 @@ const acceptanceStages = new Set([
   "persisted-run-logs",
   "initial-checkout",
   "reload-run",
+  "artifact-filter",
   "artifact-download",
+  "artifact-download-click",
+  "artifact-download-save",
   "mobile-layout",
   "reauthenticate",
   "journey-complete",
   "fixture-regression",
 ]);
+
+function isArtifactDownload(method, path) {
+  return (
+    method === "GET" &&
+    /^\/api\/v1\/projects\/[^/]+\/artifacts\/[^/]+\/download$/.test(path)
+  );
+}
+
+/** Only counts leave the runner, never artifact IDs, paths, headers or bodies. */
+export function artifactDownloadEvidence(diagnostics) {
+  const responses = diagnostics.requests.filter((entry) =>
+    isArtifactDownload(entry.method, entry.path),
+  );
+  return {
+    artifactDownloadRequestCount: diagnostics.artifactDownloadRequestCount,
+    artifactDownloadResponseCount: responses.length,
+    artifactDownloadSuccessCount: responses.filter(
+      (entry) => entry.status === 200,
+    ).length,
+    artifactDownloadHttpErrorCount: responses.filter(
+      (entry) => entry.status >= 400,
+    ).length,
+    artifactDownloadFailedRequestCount: diagnostics.failedRequests.filter(
+      (entry) => isArtifactDownload(entry.method, entry.path),
+    ).length,
+  };
+}
 
 /** Bind status to the exact selected run, never a hidden status-filter option. */
 export function selectedRunStatus(page, runId, status) {
@@ -159,6 +189,7 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
     console: [],
     pageErrors: [],
     requests: [],
+    artifactDownloadRequestCount: 0,
     failedRequests: [],
     blockedRequests: [],
     unhandledRoutes: [],
@@ -244,6 +275,10 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
       return route.abort("blockedbyclient");
     });
     page = await context.newPage();
+    page.on("request", (request) => {
+      if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
+        diagnostics.artifactDownloadRequestCount++;
+    });
     page.on("console", (message) => {
       if (["error", "warning"].includes(message.type()))
         diagnostics.console.push({
@@ -378,6 +413,7 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
           blockedRequestCount: diagnostics.blockedRequests.length,
           unhandledRouteCount: diagnostics.unhandledRoutes.length,
           apiResponseCount: diagnostics.requests.length,
+          ...artifactDownloadEvidence(diagnostics),
         },
         null,
         2,
