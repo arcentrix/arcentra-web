@@ -4,14 +4,18 @@
  */
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
-import { actualBackendConfig, runBrowserTest } from "./browser-harness.mjs";
+import {
+  actualBackendConfig,
+  runBrowserTest,
+  selectedRunStatus,
+} from "./browser-harness.mjs";
 
 // Validate all prerequisites before starting any server or browser. This mode
 // cannot silently fall back to the simulated-transport regression suite.
 const config = actualBackendConfig();
 await runBrowserTest(
   "actual-backend",
-  async ({ page, base, output, diagnostics, expectHttpError }) => {
+  async ({ page, base, output, diagnostics, expectHttpError, setStage }) => {
     const receipt = { kind: "actual-backend", syntheticData: true, steps: [] };
     const record = async (step, details = {}) => {
       receipt.steps.push({ step, ...details });
@@ -58,8 +62,10 @@ await runBrowserTest(
       await page.waitForURL((url) => url.pathname !== "/login");
       return userinfo.fullName || userinfo.username;
     };
+    setStage("login");
     const userLabel = await login();
     await record("login-via-real-api");
+    setStage("project-create");
     await page.goto(`${base}/projects`);
     await page
       .getByRole("heading", { name: "Projects", exact: true })
@@ -110,6 +116,7 @@ await runBrowserTest(
       .waitFor();
     await record("create-project-via-ui", { projectId: project.projectId });
 
+    setStage("pipeline-create");
     await page
       .getByRole("button", { name: "New pipeline", exact: true })
       .click();
@@ -149,6 +156,7 @@ await runBrowserTest(
     );
     await record("create-pipeline-via-ui", { pipelineId });
 
+    setStage("definition-review");
     await page
       .getByRole("button", { name: "Run pipeline", exact: true })
       .click();
@@ -187,6 +195,7 @@ await runBrowserTest(
     });
     // Observe the browser's real polling response, never fabricate or advance a
     // status in the test. Failure states fail immediately instead of timing out.
+    setStage("trigger-run");
     const terminalResponse = page.waitForResponse(
       async (response) => {
         if (
@@ -221,6 +230,7 @@ await runBrowserTest(
       definitionCommitSha: definition.headCommitSha,
     });
 
+    setStage("terminal-response");
     const terminal = await terminalResponse;
     const run = await envelope(terminal);
     assert.equal(
@@ -232,11 +242,14 @@ await runBrowserTest(
       [3, "3", "success", "PIPELINE_STATUS_SUCCESS"].includes(run.status),
       `Real Agent execution ended with ${run.status}`,
     );
-    await page.getByText("Success", { exact: true }).first().waitFor();
+    setStage("visible-run-success");
+    await selectedRunStatus(page, runId, "Success").waitFor();
+    setStage("persisted-run-logs");
     await page
       .getByLabel("Execution logs", { exact: true })
       .filter({ hasText: "arcentra-real-stack-acceptance" })
       .waitFor({ timeout: 45_000 });
+    setStage("initial-checkout");
     await page
       .getByText("Agent-reported initial checkout", { exact: true })
       .waitFor();
@@ -250,11 +263,13 @@ await runBrowserTest(
     });
     await record("real-agent-success-with-persisted-logs-and-checkout");
     const runURL = page.url();
+    setStage("reload-run");
     await page.reload();
     await page.getByRole("heading", { name: "Execution details" }).waitFor();
-    await page.getByText("Success", { exact: true }).first().waitFor();
+    await selectedRunStatus(page, runId, "Success").waitFor();
     await record("run-survives-browser-reload");
 
+    setStage("artifact-download");
     await page.getByRole("tab", { name: "Artifacts", exact: true }).click();
     await page.getByRole("table", { name: "Project artifacts" }).waitFor();
     await page
@@ -289,6 +304,7 @@ await runBrowserTest(
       path: `${output}/04-real-artifact-download.png`,
       fullPage: true,
     });
+    setStage("mobile-layout");
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(
       await page.evaluate(
@@ -304,6 +320,7 @@ await runBrowserTest(
 
     // Sign out and sign back in using visible controls and actual API requests.
     // An in-flight session probe after logout may legitimately receive 401.
+    setStage("reauthenticate");
     expectHttpError("/api/v1/users/fetch", 401);
     expectHttpError("/api/v1/users/refresh", 401);
     await page.getByRole("button", { name: userLabel, exact: true }).click();
@@ -314,7 +331,7 @@ await runBrowserTest(
     await login();
     await page.goto(runURL);
     await page.getByRole("heading", { name: "Execution details" }).waitFor();
-    await page.getByText("Success", { exact: true }).first().waitFor();
+    await selectedRunStatus(page, runId, "Success").waitFor();
     await record("sign-out-sign-in-and-deep-link-persisted-run");
     assert.equal(
       diagnostics.requests.filter(
@@ -335,6 +352,7 @@ await runBrowserTest(
       1,
     );
     await record("journey-complete");
+    setStage("journey-complete");
   },
   { backend: config.backend },
 );

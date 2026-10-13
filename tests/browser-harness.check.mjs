@@ -4,7 +4,72 @@ import {
   actualBackendConfig,
   expectedResourceError,
   loopbackURL,
+  safeFailureEvidence,
+  selectedRunStatus,
 } from "./browser-harness.mjs";
+import { fileURLToPath } from "node:url";
+
+test("status locator is scoped to the exact selected run before matching text", () => {
+  const calls = [];
+  const idMatch = {};
+  const badge = {};
+  const page = {
+    getByText(text, options) {
+      calls.push(["run-id", text, options]);
+      return idMatch;
+    },
+    getByRole(role, options) {
+      calls.push(["role", role, options]);
+      return {
+        filter(options) {
+          assert.equal(options.has, idMatch);
+          return {
+            getByText(text, options) {
+              calls.push(["status", text, options]);
+              return badge;
+            },
+          };
+        },
+      };
+    },
+  };
+  assert.equal(selectedRunStatus(page, "run-actual", "Success"), badge);
+  assert.deepEqual(calls, [
+    ["role", "button", { pressed: true }],
+    ["run-id", "run-actual", { exact: true }],
+    ["status", "Success", { exact: true }],
+  ]);
+});
+
+test("failure evidence only includes allowlisted stage, source basename and numeric position", () => {
+  const file = new URL("actual-backend-acceptance.mjs", import.meta.url);
+  for (const location of [file.href, fileURLToPath(file)]) {
+    const evidence = safeFailureEvidence("visible-run-success", {
+      stack: `Error: token=private-secret https://private.example/?key=secret\n    at callback (${location}:235:72)`,
+    });
+    assert.deepEqual(evidence, {
+      stage: "visible-run-success",
+      failureSite: {
+        file: "actual-backend-acceptance.mjs",
+        line: 235,
+        column: 72,
+      },
+    });
+  }
+  for (const stack of [
+    "Error: token=secret actual-backend-acceptance.mjs:235:72",
+    "Error: secret\n    at /untrusted/actual-backend-acceptance.mjs:235:72",
+    `Error: secret\n    at ${file.href}:235:72?token=secret`,
+    `Error: secret\n    at ${file.href}:999999999999999999:72`,
+    undefined,
+  ])
+    assert.deepEqual(
+      safeFailureEvidence("https://private.example", { stack }),
+      {
+        stage: "unknown",
+      },
+    );
+});
 
 test("browser URLs fail closed outside numeric loopback", () => {
   assert.equal(loopbackURL("http://127.0.0.1:5174", "test").port, "5174");

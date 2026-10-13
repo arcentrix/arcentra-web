@@ -1,11 +1,12 @@
 /** Fixture-driven browser regression test. This does not replace real backend integration tests. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { runBrowserTest } from "./browser-harness.mjs";
+import { runBrowserTest, selectedRunStatus } from "./browser-harness.mjs";
 
 await runBrowserTest(
   "simulated-transport",
-  async ({ page, base, output, diagnostics, expectHttpError }) => {
+  async ({ page, base, output, diagnostics, expectHttpError, setStage }) => {
+    setStage("fixture-regression");
     expectHttpError("/api/v1/pipelines/", 503);
     expectHttpError("/api/v1/projects/project-1/artifacts", 403);
     expectHttpError("/api/v1/projects/project-1/artifacts", 503);
@@ -225,7 +226,11 @@ await runBrowserTest(
               jobRunId: "job-1",
               jobName: "Build and test",
               agentId: "agent-1",
-              status: run.status.includes("CANCELLED") ? 6 : 3,
+              status: run.status.includes("CANCELLED")
+                ? 6
+                : run.status.includes("SUCCESS")
+                  ? 4
+                  : 3,
               duration: 1234,
               steps: [
                 {
@@ -238,9 +243,13 @@ await runBrowserTest(
                 {
                   stepRunId: "step-2",
                   name: "Run tests",
-                  status: run.status.includes("CANCELLED") ? 6 : 3,
+                  status: run.status.includes("CANCELLED")
+                    ? 6
+                    : run.status.includes("SUCCESS")
+                      ? 4
+                      : 3,
                   duration: 234,
-                  exitCode: null,
+                  exitCode: run.status.includes("SUCCESS") ? 0 : null,
                 },
               ],
             },
@@ -339,6 +348,7 @@ await runBrowserTest(
         document.body.textContent.includes("Cancelled") &&
         !document.querySelector('[role="dialog"]'),
     );
+    await selectedRunStatus(page, "run-2", "Cancelled").waitFor();
     assert.equal(cancellations, 1);
     await page.getByRole("button", { name: "Definition", exact: true }).click();
     await page.getByRole("button", { name: "Validate", exact: true }).click();
@@ -364,6 +374,38 @@ await runBrowserTest(
       "Mobile viewport must not overflow horizontally",
     );
     await page.setViewportSize({ width: 1440, height: 1050 });
+    // A separate stored successful run exercises the actual journey's locator
+    // against the real UI, with an earlier hidden <option>Success</option>.
+    run = {
+      ...run,
+      runId: "run-completed",
+      status: "PIPELINE_STATUS_SUCCESS",
+      completedJobs: 1,
+      runningJobs: 0,
+    };
+    await page.goto(`${base}/build?pipeline=pipeline-1&run=run-completed`);
+    await selectedRunStatus(page, "run-completed", "Success").waitFor();
+    assert.equal(
+      await page
+        .getByRole("combobox", { name: "Filter runs by status" })
+        .inputValue(),
+      "",
+      "The status filter must remain unselected while the run badge is visible",
+    );
+    assert.equal(
+      await page
+        .locator(
+          'select[aria-label="Filter runs by status"] option[value="success"]',
+        )
+        .textContent(),
+      "Success",
+    );
+    const unscopedSuccess = page.getByText("Success", { exact: true }).first();
+    assert.equal(
+      await unscopedSuccess.evaluate((element) => element.tagName),
+      "OPTION",
+    );
+    assert.equal(await unscopedSuccess.isVisible(), false);
     mode = "empty";
     await page.goto(`${base}/build`);
     await page.getByText("No pipelines yet.", { exact: false }).waitFor();

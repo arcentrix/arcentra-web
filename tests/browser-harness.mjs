@@ -3,6 +3,61 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+
+const acceptanceStages = new Set([
+  "setup",
+  "login",
+  "project-create",
+  "pipeline-create",
+  "definition-review",
+  "trigger-run",
+  "terminal-response",
+  "visible-run-success",
+  "persisted-run-logs",
+  "initial-checkout",
+  "reload-run",
+  "artifact-download",
+  "mobile-layout",
+  "reauthenticate",
+  "journey-complete",
+  "fixture-regression",
+]);
+
+/** Bind status to the exact selected run, never a hidden status-filter option. */
+export function selectedRunStatus(page, runId, status) {
+  return page
+    .getByRole("button", { pressed: true })
+    .filter({ has: page.getByText(runId, { exact: true }) })
+    .getByText(status, { exact: true });
+}
+
+/** Only static stage/file names and numeric code positions may leave the runner. */
+export function safeFailureEvidence(stage, error) {
+  const result = { stage: acceptanceStages.has(stage) ? stage : "unknown" };
+  if (typeof error?.stack !== "string") return result;
+  const files = [
+    "actual-backend-acceptance.mjs",
+    "ui-fixture-smoke.mjs",
+    "browser-harness.mjs",
+  ];
+  for (const frame of error.stack.split("\n").slice(1)) {
+    if (!/^\s+at /.test(frame)) continue;
+    for (const file of files) {
+      const path = fileURLToPath(new URL(file, import.meta.url));
+      const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = frame.match(
+        new RegExp(`(?: |\\()(?:file://)?${escaped}:(\\d+):(\\d+)\\)?$`),
+      );
+      if (!match) continue;
+      const [line, column] = match.slice(1).map(Number);
+      if (![line, column].every((n) => Number.isSafeInteger(n) && n > 0))
+        continue;
+      return { ...result, failureSite: { file, line, column } };
+    }
+  }
+  return result;
+}
 
 export function loopbackURL(value, name, protocols = ["http:"]) {
   let url;
@@ -116,6 +171,7 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
   let page;
   let timeout;
   let failure;
+  let stage = "setup";
   try {
     if (!process.env.UI_TEST_BASE_URL) {
       server = spawn(
@@ -219,6 +275,13 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
       base: base.origin,
       output,
       diagnostics,
+      setStage: (value) => {
+        assert.ok(
+          acceptanceStages.has(value),
+          "Unknown browser acceptance stage",
+        );
+        stage = value;
+      },
       expectHttpError: (path, status) =>
         expectedHttpErrors.add(`${path}:${status}`),
     });
@@ -302,6 +365,7 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
           kind,
           syntheticData: true,
           status: diagnostics.status,
+          ...safeFailureEvidence(stage, failure),
           browser: diagnostics.browser,
           browserVersion: diagnostics.browserVersion,
           pageErrorCount: diagnostics.pageErrors.length,
