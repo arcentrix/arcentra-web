@@ -35,7 +35,7 @@ function WorkspaceLabel() {
       aria-label={`Workspace: ${WORKSPACE_NAME}`}
     >
       <img src={APP_LOGO_ICON} alt="" className="h-5 w-5 shrink-0 rounded-sm" />
-      <span className="font-mono text-[13px] font-medium">
+      <span className="hidden font-mono text-[13px] font-medium sm:inline">
         {WORKSPACE_NAME}
       </span>
     </div>
@@ -49,22 +49,27 @@ export function TopCommandBar() {
   const unreadCount: number = 0;
 
   return (
-    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <header className="sticky top-0 z-20 flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:gap-x-3 sm:px-4 lg:flex-nowrap lg:py-0">
       <WorkspaceLabel />
-      <div className="h-4 w-px bg-border/60" aria-hidden />
-      <Breadcrumb className="min-w-0" />
+      <div
+        className="hidden h-4 w-px shrink-0 bg-border/60 lg:block"
+        aria-hidden
+      />
+      <Breadcrumb className="order-last w-full min-w-0 lg:order-none lg:w-auto lg:flex-1" />
 
-      <div className="flex-1" />
+      <div className="flex-1 lg:hidden" />
 
       <button
         type="button"
         onClick={() => uiShellStore.openPalette()}
         aria-label="Open command palette"
-        className="inline-flex h-8 w-64 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border bg-background px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground cursor-pointer"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-md border bg-background text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground cursor-pointer sm:w-64 sm:justify-start sm:px-2.5"
       >
         <Search className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 truncate text-left">Search…</span>
-        <KbdGroup>
+        <span className="hidden flex-1 truncate text-left sm:inline">
+          Search…
+        </span>
+        <KbdGroup className="hidden sm:inline-flex">
           <Kbd>⌘</Kbd>
           <Kbd>K</Kbd>
         </KbdGroup>

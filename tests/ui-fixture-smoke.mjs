@@ -505,11 +505,74 @@ await runBrowserTest(
       path: `${output}/artifacts-mobile-fixture.png`,
       fullPage: true,
     });
+    const artifactLayout = await page
+      .getByRole("table", { name: "Project artifacts" })
+      .evaluate((table) => {
+        const scroller = table.parentElement;
+        const originalScrollLeft = scroller.scrollLeft;
+        scroller.scrollLeft = scroller.scrollWidth;
+        const scrollLeft = scroller.scrollLeft;
+        const lastCell = table.querySelector("tbody tr td:last-child");
+        const lastCellRect = lastCell.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        const headerButtons = [...document.querySelectorAll("header button")];
+        const layout = {
+          viewportWidth: innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          pageScrollX: scrollX,
+          tableViewportWidth: scroller.clientWidth,
+          tableContentWidth: scroller.scrollWidth,
+          tableScrollLeft: scrollLeft,
+          tableOverflowX: getComputedStyle(scroller).overflowX,
+          tableViewportRight: scrollerRect.right,
+          downloadColumnVisible:
+            lastCellRect.left >= scrollerRect.left &&
+            lastCellRect.right <= scrollerRect.right,
+          headerButtonCount: headerButtons.length,
+          overflowingHeaderButtons: headerButtons.filter((button) => {
+            const rect = button.getBoundingClientRect();
+            return rect.width === 0 || rect.left < 0 || rect.right > innerWidth;
+          }).length,
+        };
+        scroller.scrollLeft = originalScrollLeft;
+        return layout;
+      });
     assert.ok(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-      "Artifact table must scroll within its panel on mobile",
+      artifactLayout.documentWidth <= artifactLayout.viewportWidth,
+      `The entire artifact page must fit the mobile viewport: ${JSON.stringify(artifactLayout)}`,
+    );
+    assert.equal(
+      artifactLayout.pageScrollX,
+      0,
+      "The page itself must not scroll sideways",
+    );
+    assert.equal(
+      artifactLayout.headerButtonCount,
+      4,
+      "All command-bar actions remain available on mobile",
+    );
+    assert.equal(
+      artifactLayout.overflowingHeaderButtons,
+      0,
+      "Command-bar actions must stay inside the viewport",
+    );
+    assert.ok(
+      ["auto", "scroll"].includes(artifactLayout.tableOverflowX),
+      "The table must have its own horizontal scroll container",
+    );
+    assert.ok(
+      artifactLayout.tableViewportRight <= artifactLayout.viewportWidth,
+      "The table container must fit the viewport",
+    );
+    assert.ok(
+      artifactLayout.tableContentWidth > artifactLayout.tableViewportWidth &&
+        artifactLayout.tableScrollLeft > 0,
+      "Wide artifact columns must remain reachable by scrolling inside the panel",
+    );
+    assert.equal(
+      artifactLayout.downloadColumnVisible,
+      true,
+      "Scrolling the table must reveal its download column",
     );
     await page.setViewportSize({ width: 1440, height: 1050 });
     artifactMode = "error";

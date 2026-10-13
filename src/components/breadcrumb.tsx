@@ -259,28 +259,33 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
       className={cn("flex items-center gap-2 text-sm", className)}
       aria-label="Breadcrumb"
     >
-      <ol className="flex items-center gap-2">
+      <ol className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
         {breadcrumbs.map((item, index) => {
           const isLast = index === breadcrumbs.length - 1;
 
           return (
-            <li key={index} className="flex items-center gap-2">
+            <li
+              key={index}
+              className="flex min-w-0 max-w-full items-center gap-2"
+            >
               {index > 0 && (
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               )}
               {isLast ? (
-                <span className="font-medium text-foreground">
+                <span className="min-w-0 truncate font-medium text-foreground">
                   {item.title}
                 </span>
               ) : item.url ? (
                 <Link
                   to={item.url}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  className="min-w-0 truncate text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {item.title}
                 </Link>
               ) : (
-                <span className="text-muted-foreground">{item.title}</span>
+                <span className="min-w-0 truncate text-muted-foreground">
+                  {item.title}
+                </span>
               )}
             </li>
           );
