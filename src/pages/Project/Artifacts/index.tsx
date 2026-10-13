@@ -364,7 +364,7 @@ function ArtifactWorkspace({ projectId }: { projectId: string }) {
                       <TableCell className="max-w-64 break-words font-mono text-[12.5px] font-medium">
                         {artifact.name}
                       </TableCell>
-                      <TableCell className="max-w-48 break-all font-mono text-xs">
+                      <TableCell className="whitespace-nowrap font-mono text-xs">
                         {artifact.pipelineId && artifact.pipelineRunId ? (
                           <Link
                             className="text-primary underline underline-offset-2"

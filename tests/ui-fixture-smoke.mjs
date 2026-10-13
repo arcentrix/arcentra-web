@@ -2,6 +2,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runBrowserTest, selectedRunStatus } from "./browser-harness.mjs";
+import {
+  applyArtifactRunFilter,
+  assertArtifactControlLayout,
+  assertControlReachable,
+} from "./artifact-controls.mjs";
 
 await runBrowserTest(
   "simulated-transport",
@@ -62,11 +67,12 @@ await runBrowserTest(
     let artifactLists = 0;
     let artifactDownloads = 0;
     const artifactBytes = '{"fixture":"artifact download bytes"}\n';
+    const artifactRunId = "01J9K64C7CGS9ZND53Y0DZFT9X";
     const artifactRows = Array.from({ length: 21 }, (_, index) => ({
       artifactId: `artifact-${index + 1}`,
       projectId: project.projectId,
       pipelineId: pipeline.pipelineId,
-      pipelineRunId: "run-1",
+      pipelineRunId: artifactRunId,
       jobRunId: "job-1",
       stepRunId: "step-1",
       name: `report-${String(index + 1).padStart(2, "0")}.json`,
@@ -124,6 +130,10 @@ await runBrowserTest(
         const pageSize = Number(url.searchParams.get("pageSize") || 20);
         const name = url.searchParams.get("name") || "";
         const runId = url.searchParams.get("runId");
+        // A matching snapshot arrives later than the URL; readiness must wait
+        // for this exact filtered response rather than a URL-only check.
+        if (runId === artifactRunId)
+          await new Promise((resolve) => setTimeout(resolve, 300));
         const status = url.searchParams.get("status");
         const rows =
           artifactMode === "empty"
@@ -491,6 +501,11 @@ await runBrowserTest(
     await assertProjectPipelines();
     await page.goBack();
     await assertProjectOverview();
+    // Match the long project heading / real-length run ID that exposed the
+    // mobile overlap in the actual backend journey, rather than short labels.
+    project.displayName = "browser-acceptance-1791887942625";
+    project.description =
+      "Manage repository pipelines and inspect build executions.";
     await page.goto(`${base}/projects/project-1/artifacts`);
     await page.getByRole("table", { name: "Project artifacts" }).waitFor();
     await page.getByRole("button", { name: "Next", exact: true }).click();
@@ -519,6 +534,34 @@ await runBrowserTest(
       artifactBytes,
     );
     assert.equal(artifactDownloads, 1);
+    const filteredArtifacts = await applyArtifactRunFilter(
+      page,
+      project.projectId,
+      artifactRunId,
+    );
+    assert.equal(filteredArtifacts.length, 20);
+    const filteredDownload = page.getByRole("button", {
+      name: "Download report-01.json",
+    });
+    await assertControlReachable(filteredDownload);
+    const [filteredResponse, filteredFile] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname ===
+            "/api/v1/projects/project-1/artifacts/artifact-1/download",
+      ),
+      page.waitForEvent("download"),
+      filteredDownload.click(),
+    ]);
+    assert.equal(filteredResponse.status(), 200);
+    assert.equal(
+      await readFile(await filteredFile.path(), "utf8"),
+      artifactBytes,
+    );
+    assert.equal(artifactDownloads, 2);
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await page.getByText("21 total artifacts", { exact: true }).waitFor();
     await page
       .getByRole("textbox", { name: "Run ID", exact: true })
       .fill("missing-run");
@@ -616,6 +659,69 @@ await runBrowserTest(
       true,
       "Scrolling the table must reveal its download column",
     );
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 320, height: 568 },
+      { width: 1440, height: 1050 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await assertArtifactControlLayout(page, artifactRunId);
+      const refresh = page.getByRole("button", { name: "Refresh artifacts" });
+      await assertControlReachable(refresh);
+      const refreshed = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/v1/projects/project-1/artifacts",
+      );
+      await refresh.click();
+      assert.equal((await refreshed).status(), 200);
+
+      const next = page.getByRole("button", { name: "Next", exact: true });
+      await assertControlReachable(next);
+      await page.screenshot({
+        path: `${output}/artifact-bottom-controls-${viewport.width}.png`,
+        fullPage: true,
+      });
+      await next.click();
+      await page.getByText("Page 2 of 2").waitFor();
+      const previous = page.getByRole("button", {
+        name: "Previous",
+        exact: true,
+      });
+      await assertControlReachable(previous);
+      await previous.click();
+      await page.getByText("Page 1 of 2").waitFor();
+
+      const downloadButton = page.getByRole("button", {
+        name: "Download report-01.json",
+      });
+      await assertControlReachable(downloadButton);
+      const event = page.waitForEvent("download");
+      await downloadButton.click();
+      const file = await event;
+      assert.equal(file.suggestedFilename(), "report-01.json");
+      assert.equal(await readFile(await file.path(), "utf8"), artifactBytes);
+
+      const url = page.url();
+      const copilot = page.getByRole("button", { name: "Open Copilot" });
+      await assertControlReachable(copilot);
+      await copilot.click();
+      const dialog = page.getByRole("dialog", { name: "Copilot", exact: true });
+      await dialog.waitFor();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await dialog.waitFor({ state: "hidden" });
+      await copilot.click();
+      await dialog.waitFor();
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      assert.equal(
+        page.url(),
+        url,
+        "Closing Copilot must preserve the artifact route",
+      );
+      await assertControlReachable(refresh);
+      await assertArtifactControlLayout(page, artifactRunId);
+    }
     await page.setViewportSize({ width: 1440, height: 1050 });
     artifactMode = "error";
     await page.getByRole("button", { name: "Refresh artifacts" }).click();

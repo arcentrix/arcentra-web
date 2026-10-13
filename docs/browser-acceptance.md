@@ -15,6 +15,10 @@ The `Chromium UI (simulated API transport)` GitHub Actions job runs on `ubuntu-2
 
 This is a real-browser regression of UI behavior with **simulated API responses and a seeded synthetic session**. It is not a backend integration or end-to-end execution claim. It covers run dismissal/start/cancel, definition validation/save UI, project navigation and browser history, desktop/mobile layouts, artifact filter/paging/download bytes, empty/error/retry, and authorization recovery. Every API route must be handled explicitly; an unexpected request fails instead of receiving a permissive empty success response.
 
+Artifact controls are checked at 390×844, 320×568, and 1440×1050. Pointer hit tests cover button centers and edges before ordinary, unforced clicks on Refresh, pagination, download, and Copilot. The suite also checks the reserved mobile Copilot row, long single-line run IDs, Copilot close/reopen/Escape, and table-only horizontal scrolling. Desktop bottom spacing keeps the last controls clear of the floating launcher.
+
+Run filtering waits for the exact run-scoped GET response and the rendered matching list before download. Actual downloads require one ordinary click, an HTTP 200 response from the specific artifact endpoint, and browser-saved bytes; there is no retry. The safe summary records only numeric download request/response/success/HTTP-error/failed-request counts to distinguish absent download requests from HTTP/network or browser-save failures. The simulated suite includes a delayed filtered response.
+
 ## Actual backend / Agent journey
 
 The backend repository's disposable acceptance runner owns service setup and teardown. It must start real Control and Agent binaries, MySQL, Redis, Kafka, MinIO artifact storage and a local Git daemon, initialize/register the synthetic account, and bootstrap its platform-admin role. After services and the Agent are ready, it invokes this command **with the frontend repository as its working directory**:
@@ -50,7 +54,7 @@ The committed build-only definition must clone its source from the same local re
 4. Reviews the actual repository definition, requires a full commit SHA and explicit `deploymentPlan: null`, then triggers exactly one run.
 5. Observes real backend polling until success, checks persisted logs and Agent-reported initial source checkout.
 6. Reloads the run page, filters the artifact list by its real run ID, and verifies the downloaded filename and exact bytes.
-7. Checks the mobile artifact layout, signs out and back in, and reopens the persisted run deep link.
+7. Checks artifact control hit targets and repeats real refresh/download at both mobile sizes and desktop, then signs out and back in and reopens the persisted run deep link.
 
 There is no API response fulfillment, token injection or fallback to simulated transport in this mode. The browser's network safety guard passes allowed same-origin requests unchanged and aborts off-origin requests. The Vite proxy targets only the explicit numeric-loopback backend. Missing prerequisites, unexpected HTTP/console errors, forbidden remote requests, terminal run failure, or timeouts fail the test. The top-level `summary.json` status is the authoritative browser-test outcome; `journey.json` records which steps completed before any failure.
 

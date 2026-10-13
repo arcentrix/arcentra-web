@@ -35,26 +35,29 @@ export function CopilotPanel() {
       open={copilotOpen && !routeChanged}
       onOpenChange={uiShellStore.setCopilotOpen}
     >
-      <Tooltip delayDuration={200}>
-        <TooltipTrigger asChild>
-          <SheetTrigger asChild>
-            <button
-              type="button"
-              aria-label="Open Copilot"
-              className={cn(
-                "fixed bottom-6 right-6 z-30 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border bg-background shadow-lg transition-colors duration-150",
-                "outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
-                copilotOpen && "bg-accent/60",
-              )}
-            >
-              <Sparkles className="h-5 w-5 text-foreground" aria-hidden />
-            </button>
-          </SheetTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="left" sideOffset={8}>
-          Copilot · Read-only analysis
-        </TooltipContent>
-      </Tooltip>
+      {/* Mobile reserves a row outside the scrollport so no action is covered. */}
+      <div className="flex shrink-0 justify-end border-t bg-background py-2 pl-4 pr-[max(1rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:contents">
+        <Tooltip delayDuration={200}>
+          <TooltipTrigger asChild>
+            <SheetTrigger asChild>
+              <button
+                type="button"
+                aria-label="Open Copilot"
+                className={cn(
+                  "z-30 flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full border bg-background shadow-lg transition-colors duration-150 sm:fixed sm:bottom-6 sm:right-6",
+                  "outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                  copilotOpen && "bg-accent/60",
+                )}
+              >
+                <Sparkles className="h-5 w-5 text-foreground" aria-hidden />
+              </button>
+            </SheetTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="left" sideOffset={8}>
+            Copilot · Read-only analysis
+          </TooltipContent>
+        </Tooltip>
+      </div>
       <SheetContent
         side="right"
         className="flex w-full flex-col gap-0 p-0 sm:max-w-[480px]"
