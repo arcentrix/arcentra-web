@@ -17,14 +17,29 @@ function isOfflineContainer(spec: unknown): boolean {
   );
 }
 
+/** This marker requests a server-owned gate; it never supplies approvers or authority. */
+export function isDurableRetryApproval(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  return (
+    value.required === true &&
+    value.type === "manual" &&
+    value.plugin === "builtin:retry-approval" &&
+    Object.keys(value).every((key) =>
+      ["required", "type", "plugin", "params"].includes(key),
+    ) &&
+    (value.params === undefined ||
+      (isObject(value.params) && Object.keys(value.params).length === 0))
+  );
+}
+
 function retryScopeError(
   offlineContainer: boolean,
   job: Job | null | undefined,
   mode: RetryPolicy["mode"],
 ): string {
   if (!offlineContainer) return "";
-  if (job?.approval != null)
-    return "Container retry with approval is unsupported until durable approval binds the complete retry plan. Choose Off to remove the policy.";
+  if (job?.approval != null && !isDurableRetryApproval(job.approval))
+    return "Container retry with approval requires the exact manual builtin:retry-approval gate, with no approver parameters. Unknown gates cannot authorize the complete retry plan. Choose Off to remove the policy.";
   if (mode !== "whole_job")
     return "Failed-step retry is unsupported for containerd-offline-v1. Choose Whole job steps or Off.";
   return "";
@@ -77,7 +92,10 @@ export function RetryPolicyEditor({
   const [codes, setCodes] = useState("");
   const [idempotent, setIdempotent] = useState(false);
   const [error, setError] = useState("");
-  const approvalBlocked = offlineContainer && jobs[index]?.approval != null;
+  const approvalBlocked =
+    offlineContainer &&
+    jobs[index]?.approval != null &&
+    !isDurableRetryApproval(jobs[index]?.approval);
   const scopeError =
     mode === "off" ? "" : retryScopeError(offlineContainer, jobs[index], mode);
   const current = JSON.stringify(jobs[index]?.retry ?? null);
@@ -158,8 +176,10 @@ export function RetryPolicyEditor({
             containerd-offline-v1 supports whole-job retry only. The operator
             must enable allowWholeJobRetry, which defaults off; editing this
             draft does not enable it. Failed-step retry is unsupported.
+            {isDurableRetryApproval(jobs[index]?.approval) &&
+              " This gate also requires operator allowWholeJobRetryApproval, a trusted approval policy, and verified Agent TLS. Approvers review the pinned source commit, immutable inputs and complete retry limit before any container starts. Approval never resumes a restarted or cancelled run."}
             {approvalBlocked &&
-              " Container retry with approval is unsupported until durable approval binds the complete retry plan. Choose Off to remove the policy."}
+              " Container retry with approval requires the exact manual builtin:retry-approval gate, with no approver parameters. Unknown gates cannot authorize the complete retry plan. Choose Off to remove the policy."}
           </p>
         )}
         <div className="grid grid-cols-2 gap-3">

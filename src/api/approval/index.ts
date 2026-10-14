@@ -1,3 +1,4 @@
+import type { RetryApprovalReview } from "./retry-types";
 import { get, post } from "../client";
 
 export interface ApprovalRequest {
@@ -17,6 +18,9 @@ export interface ApprovalRequest {
   candidateApprovers: string;
   expiresAt: string | null;
   deploymentReleaseId?: string;
+  retryJobRunId?: string;
+  bindingKind?: string;
+  retryReview?: RetryApprovalReview;
   evidenceHash?: string;
   version?: number;
   canApprove?: boolean;

@@ -1,3 +1,4 @@
+import { RetryApprovalDialog } from "./retry-approval-dialog";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -39,6 +40,7 @@ export function RunApprovals(props: ApprovalScope) {
 function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
   const [settled, setSettled] = useState(false);
   const [selected, setSelected] = useState("");
+  const [selectedRetry, setSelectedRetry] = useState(false);
   const resource = useApiResource(
     `approvals:${scope.projectId}:${scope.pipelineId}:${scope.runId}`,
     async (signal) => {
@@ -59,14 +61,14 @@ function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
   return (
     <Panel>
       <PanelHeader
-        title="Deployment approvals"
+        title="Run approvals"
         sub="Persisted approval records scoped to this pipeline run"
       />
       <div className="space-y-3 border-t p-4 text-sm">
         <p className="text-xs text-muted-foreground">
           Only operator-defined approvers can decide. Requesters cannot approve
-          their own release. Current permissions are checked by the server for
-          every decision and before deployment.
+          their own execution. Current permissions are checked by the server for
+          every decision and execution admission.
         </p>
         {resource.error && (
           <p role="alert">Approvals unavailable: {resource.error.message}</p>
@@ -102,11 +104,18 @@ function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
             {approval.decisionBlockReason && (
               <p className="text-xs">{approval.decisionBlockReason}</p>
             )}
-            {approval.plugin !== "builtin:deployment" ||
-            !approval.deploymentReleaseId ? (
+            {!(
+              (approval.plugin === "builtin:deployment" &&
+                approval.deploymentReleaseId &&
+                !approval.retryJobRunId) ||
+              (approval.plugin === "builtin:retry-approval" &&
+                approval.bindingKind === "retry_whole_job_v1" &&
+                approval.retryJobRunId &&
+                !approval.deploymentReleaseId)
+            ) ? (
               <p role="alert" className="text-xs">
                 Unsupported gate: {approval.plugin || "unspecified"}. This
-                record cannot authorize the final Kubernetes deployment here.
+                record cannot authorize execution here.
               </p>
             ) : (
               <Button
@@ -114,7 +123,12 @@ function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
                 size="sm"
                 variant="outline"
                 disabled={resource.loading}
-                onClick={() => setSelected(approval.approvalId)}
+                onClick={() => {
+                  setSelectedRetry(
+                    approval.plugin === "builtin:retry-approval",
+                  );
+                  setSelected(approval.approvalId);
+                }}
               >
                 Review approval {approval.approvalId}
               </Button>
@@ -131,14 +145,24 @@ function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
           Refresh approvals
         </Button>
       </div>
-      {selected && (
-        <ApprovalDetail
+      {selected && selectedRetry ? (
+        <RetryApprovalDialog
           key={`${scope.projectId}:${scope.pipelineId}:${scope.runId}:${selected}`}
           scope={scope}
           approvalId={selected}
           onClose={() => setSelected("")}
           onChanged={resource.refresh}
         />
+      ) : (
+        selected && (
+          <ApprovalDetail
+            key={`${scope.projectId}:${scope.pipelineId}:${scope.runId}:${selected}`}
+            scope={scope}
+            approvalId={selected}
+            onClose={() => setSelected("")}
+            onChanged={resource.refresh}
+          />
+        )
       )}
     </Panel>
   );

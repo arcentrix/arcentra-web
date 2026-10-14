@@ -223,7 +223,7 @@ describe("offline container retry scope", () => {
       screen.getByRole("option", { name: "Whole job steps" }),
     ).toBeDisabled();
     expect(screen.getByText(/Container retry with approval/)).toHaveTextContent(
-      "until durable approval binds the complete retry plan",
+      "requires the exact manual builtin:retry-approval gate",
     );
     expect(applyButton()).toBeDisabled();
     expect(update).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ describe("offline container retry scope", () => {
     for (const approval of [{}, { approved: true }, false]) {
       const value = containerSpec({ approval, retry: wholeJob });
       expect(() => setJobRetry(value, 0, wholeJob)).toThrow(
-        "Container retry with approval is unsupported",
+        "Container retry with approval requires",
       );
       expect(JSON.parse(setJobRetry(value, 0)).jobs[0]).toEqual({
         ...JSON.parse(spec).jobs[0],
@@ -406,4 +406,42 @@ describe("offline container retry scope", () => {
     fireEvent.click(applyButton());
     expect(update).not.toHaveBeenCalled();
   });
+});
+
+it("allows only the exact operator-controlled durable retry approval marker", () => {
+  const retry = {
+    mode: "whole_job" as const,
+    maxAttempts: 2,
+    idempotent: true,
+    allowedExitCodes: [23],
+    delay: "1s",
+  };
+  const gate = {
+    required: true,
+    type: "manual",
+    plugin: "builtin:retry-approval",
+    params: {},
+  };
+  const definition = (approval: unknown) =>
+    JSON.stringify({
+      runtime: { type: "containerd-offline-v1" },
+      jobs: [{ name: "build", approval }],
+    });
+  expect(
+    JSON.parse(setJobRetry(definition(gate), 0, retry)).jobs[0].retry,
+  ).toEqual(retry);
+  for (const approval of [
+    { ...gate, required: false },
+    { ...gate, type: undefined },
+    { ...gate, params: { approvers: ["self"] } },
+    { ...gate, approved: true },
+    { ...gate, plugin: "builtin:deployment" },
+  ]) {
+    expect(() => setJobRetry(definition(approval), 0, retry)).toThrow(
+      "requires the exact manual",
+    );
+  }
+  expect(() =>
+    setJobRetry(definition(gate), 0, { ...retry, mode: "failed_step" }),
+  ).toThrow("Failed-step retry is unsupported");
 });
