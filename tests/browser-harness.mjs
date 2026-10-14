@@ -62,6 +62,15 @@ export function selectedRunStatus(page, runId, status) {
     .getByText(status, { exact: true });
 }
 
+/** Inspect the option itself; Playwright isDisabled() can follow its label to the select. */
+export function isNativeOptionDisabled(element) {
+  return (
+    element.tagName === "OPTION" &&
+    element.disabled === true &&
+    element.matches(":disabled")
+  );
+}
+
 /** Only static stage/file names and numeric code positions may leave the runner. */
 export function safeFailureEvidence(stage, error) {
   const result = { stage: acceptanceStages.has(stage) ? stage : "unknown" };
