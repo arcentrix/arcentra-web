@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { JSDOM } from "jsdom";
 import {
   actualBackendConfig,
   artifactDownloadEvidence,
   expectedResourceError,
+  isNativeOptionDisabled,
   loopbackURL,
   safeFailureEvidence,
   selectedRunStatus,
@@ -13,6 +15,29 @@ import {
   applyArtifactRunFilter,
   assertControlReachable,
 } from "./artifact-controls.mjs";
+
+test("native option disabled checks inspect a labeled option, not its enabled select", () => {
+  const dom = new JSDOM(`<label>Scope<select>
+    <option value="failed_step" disabled selected>Failed step only</option>
+    <option value="whole_job">Whole job steps</option>
+  </select></label>`);
+  try {
+    const select = dom.window.document.querySelector("select");
+    const [blocked, allowed] = select.options;
+    assert.equal(select.disabled, false);
+    assert.equal(select.value, "failed_step");
+    assert.equal(isNativeOptionDisabled(blocked), true);
+    assert.equal(isNativeOptionDisabled(allowed), false);
+    assert.equal(isNativeOptionDisabled(select), false);
+    blocked.removeAttribute("disabled");
+    assert.equal(isNativeOptionDisabled(blocked), false);
+    select.disabled = true;
+    assert.equal(isNativeOptionDisabled(allowed), false);
+    assert.equal(isNativeOptionDisabled(select), false);
+  } finally {
+    dom.window.close();
+  }
+});
 
 test("artifact filtering waits for the exact GET response and new matching snapshot", async () => {
   const calls = [];

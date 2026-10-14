@@ -1,7 +1,11 @@
 /** Fixture-driven browser regression test. This does not replace real backend integration tests. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { runBrowserTest, selectedRunStatus } from "./browser-harness.mjs";
+import {
+  isNativeOptionDisabled,
+  runBrowserTest,
+  selectedRunStatus,
+} from "./browser-harness.mjs";
 import {
   applyArtifactRunFilter,
   assertArtifactControlLayout,
@@ -389,8 +393,12 @@ await runBrowserTest(
       exact: true,
     });
     assert.equal(await retryScope.inputValue(), "failed_step");
+    // Playwright isDisabled() follows an enclosing label to its select.
+    // Assert the actual option's native state without that retargeting.
     assert.equal(
-      await retryScope.locator('option[value="failed_step"]').isDisabled(),
+      await retryScope
+        .locator('option[value="failed_step"]')
+        .evaluate(isNativeOptionDisabled),
       true,
     );
     assert.equal(await applyRetry.isDisabled(), true);
@@ -413,7 +421,9 @@ await runBrowserTest(
     await definition.fill(approvalDefinition);
     assert.equal(await retryScope.inputValue(), "whole_job");
     assert.equal(
-      await retryScope.locator('option[value="whole_job"]').isDisabled(),
+      await retryScope
+        .locator('option[value="whole_job"]')
+        .evaluate(isNativeOptionDisabled),
       true,
     );
     assert.equal(await applyRetry.isDisabled(), true);
