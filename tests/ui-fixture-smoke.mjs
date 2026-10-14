@@ -361,6 +361,78 @@ await runBrowserTest(
     await selectedRunStatus(page, "run-2", "Cancelled").waitFor();
     assert.equal(cancellations, 1);
     await page.getByRole("button", { name: "Definition", exact: true }).click();
+    // Draft-only scope checks use this explicitly simulated Definition dialog.
+    // Restore its original JSON before the existing validate/save assertions.
+    const definition = page.getByRole("textbox", {
+      name: "Pipeline definition JSON",
+    });
+    await definition.waitFor();
+    const originalDefinition = await definition.inputValue();
+    const containerDefinition = JSON.parse(originalDefinition);
+    containerDefinition.runtime = { type: "containerd-offline-v1" };
+    containerDefinition.jobs[0].retry = {
+      mode: "failed_step",
+      maxAttempts: 2,
+      allowedExitCodes: [9],
+      idempotent: true,
+    };
+    const authoredContainerDefinition = JSON.stringify(containerDefinition);
+    await definition.fill(authoredContainerDefinition);
+    await page
+      .getByText("Retry policy · off unless explicitly configured", {
+        exact: true,
+      })
+      .click();
+    const retryScope = page.getByRole("combobox", { name: "Retry scope" });
+    const applyRetry = page.getByRole("button", {
+      name: "Apply retry policy to draft",
+      exact: true,
+    });
+    assert.equal(await retryScope.inputValue(), "failed_step");
+    assert.equal(
+      await retryScope.locator('option[value="failed_step"]').isDisabled(),
+      true,
+    );
+    assert.equal(await applyRetry.isDisabled(), true);
+    await page.getByText(/must enable allowWholeJobRetry/).waitFor();
+    assert.match(
+      await page.getByRole("note").innerText(),
+      /Failed-step retry is unsupported/,
+    );
+    assert.equal(await definition.inputValue(), authoredContainerDefinition);
+    await retryScope.selectOption("whole_job");
+    assert.equal(await applyRetry.isEnabled(), true);
+    assert.match(
+      await page.getByRole("note").innerText(),
+      /fresh session, rootfs, and workspace, with the pinned source SHA and input artifacts/,
+    );
+    assert.equal(await definition.inputValue(), authoredContainerDefinition);
+    containerDefinition.jobs[0].retry.mode = "whole_job";
+    containerDefinition.jobs[0].approval = {};
+    const approvalDefinition = JSON.stringify(containerDefinition);
+    await definition.fill(approvalDefinition);
+    assert.equal(await retryScope.inputValue(), "whole_job");
+    assert.equal(
+      await retryScope.locator('option[value="whole_job"]').isDisabled(),
+      true,
+    );
+    assert.equal(await applyRetry.isDisabled(), true);
+    await page
+      .getByText(/Container retry with approval is unsupported/)
+      .waitFor();
+    assert.equal(await definition.inputValue(), approvalDefinition);
+    await retryScope.selectOption("off");
+    await applyRetry.click();
+    const removedRetry = JSON.parse(await definition.inputValue());
+    delete containerDefinition.jobs[0].retry;
+    assert.deepEqual(removedRetry, containerDefinition);
+    assert.equal(saves, 0, "Retry draft edits must not save to the repository");
+    await definition.fill(originalDefinition);
+    await page
+      .getByText("Retry policy · off unless explicitly configured", {
+        exact: true,
+      })
+      .click();
     await page.getByRole("button", { name: "Validate", exact: true }).click();
     await page.getByText("Valid definition · 1 jobs").waitFor();
     await page
