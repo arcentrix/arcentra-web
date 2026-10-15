@@ -13,6 +13,10 @@ import {
 } from "./browser-harness.mjs";
 import { fileURLToPath } from "node:url";
 import {
+  assertRetryEditorViewports,
+  containerRetryFixtures,
+} from "./retry-policy-fixture.mjs";
+import {
   applyArtifactRunFilter,
   assertControlReachable,
 } from "./artifact-controls.mjs";
@@ -367,3 +371,140 @@ test("all static browser journey stages are explicitly allowlisted", async () =>
   }
   assert.equal(safeFailureEvidence("untrusted-stage", null).stage, "unknown");
 });
+
+test("container retry fixtures preserve independent authored policies and blocked combinations", () => {
+  const original = JSON.stringify({
+    name: "Synthetic retry draft",
+    jobs: [
+      { name: "build", steps: [{ name: "compile", run: "exit 9" }] },
+      { name: "untouched", steps: [{ name: "report", run: "echo done" }] },
+    ],
+  });
+  const fixtures = containerRetryFixtures(original);
+  const base = JSON.parse(fixtures.off);
+  assert.deepEqual(base.runtime, { type: "containerd-offline-v1" });
+  assert.equal(base.jobs[0].retry, undefined);
+  assert.equal(base.jobs[0].approval, undefined);
+  const expected = {
+    mode: "failed_step",
+    maxAttempts: 2,
+    delay: "1s",
+    allowedExitCodes: [9],
+    idempotent: true,
+  };
+  assert.deepEqual(JSON.parse(fixtures.supported).jobs[0].retry, expected);
+  assert.deepEqual(
+    fixtures.blocked.map((fixture) => fixture.name),
+    [
+      "unknown approval",
+      "exact durable retry approval",
+      "continueOnError",
+      "continue_on_error",
+    ],
+  );
+  for (const fixture of fixtures.blocked) {
+    const spec = JSON.parse(fixture.text);
+    assert.deepEqual(spec.jobs[0].retry, expected);
+    assert.deepEqual(spec.jobs[1], JSON.parse(original).jobs[1]);
+    assert.equal(
+      fixture.text.includes("\n"),
+      false,
+      "Raw authored formatting is deliberate",
+    );
+    if (fixture.name.startsWith("continue")) {
+      assert.equal(spec.jobs[0].steps[0][fixture.name], true);
+      assert.equal(spec.jobs[0].approval, undefined);
+    } else {
+      assert.notEqual(spec.jobs[0].approval, null);
+      assert.deepEqual(spec.jobs[0].steps, base.jobs[0].steps);
+    }
+  }
+  const exactFailedStep = JSON.parse(fixtures.blocked[1].text).jobs[0];
+  const exactWholeJob = JSON.parse(fixtures.wholeJobApproved).jobs[0];
+  assert.deepEqual(exactFailedStep.approval, exactWholeJob.approval);
+  assert.equal(exactWholeJob.retry.mode, "whole_job");
+  assert.deepEqual(
+    JSON.parse(fixtures.wholeJobUnknownApproval).jobs[0].approval,
+    {},
+  );
+  assert.deepEqual(JSON.parse(fixtures.unsupported).jobs[0].retry, {
+    mode: "future_scope",
+    futureOption: "preserve-me",
+  });
+  assert.deepEqual(
+    JSON.parse(fixtures.supported).jobs[0].steps,
+    base.jobs[0].steps,
+  );
+  assert.equal(JSON.parse(original).runtime, undefined);
+});
+
+test("container draft failure evidence uses an allowlisted stage and helper basename only", () => {
+  const helper = new URL("retry-policy-fixture.mjs", import.meta.url);
+  assert.deepEqual(
+    safeFailureEvidence("container-failed-step-draft", {
+      stack: `Error: private authored JSON\n    at assertContainerRetryDraft (${helper.href}:99:12)`,
+    }),
+    {
+      stage: "container-failed-step-draft",
+      failureSite: { file: "retry-policy-fixture.mjs", line: 99, column: 12 },
+    },
+  );
+});
+
+for (const obstructed of [false, true]) {
+  test(`retry viewport checks use trial clicks and restore the viewport${obstructed ? " after failure" : ""}`, async () => {
+    const original = { width: 1280, height: 800 };
+    const events = [];
+    const options = {
+      page: {
+        viewportSize: () => original,
+        setViewportSize: async (viewport) =>
+          events.push(["viewport", viewport]),
+        evaluate: async () => {
+          events.push(["overflow-check"]);
+          return true;
+        },
+      },
+      warning: {
+        scrollIntoViewIfNeeded: async () => events.push(["scroll-warning"]),
+        innerText: async () => "Preserved warning",
+      },
+      apply: {
+        scrollIntoViewIfNeeded: async () => events.push(["scroll-apply"]),
+        click: async (clickOptions) => {
+          assert.deepEqual(clickOptions, { trial: true });
+          events.push(["trial-click"]);
+          if (obstructed) throw new Error("Apply is obscured");
+        },
+      },
+      expectedWarning: "Preserved warning",
+      assertUnchanged: async () => events.push(["unchanged"]),
+    };
+    if (obstructed) {
+      await assert.rejects(
+        assertRetryEditorViewports(options),
+        /Apply is obscured/,
+      );
+    } else {
+      await assertRetryEditorViewports(options);
+    }
+    const expectedEvents = (viewport) => [
+      ["viewport", viewport],
+      ["scroll-warning"],
+      ["overflow-check"],
+      ["scroll-apply"],
+      ["trial-click"],
+    ];
+    assert.deepEqual(events, [
+      ...expectedEvents({ width: 320, height: 568 }),
+      ...(obstructed
+        ? []
+        : [
+            ["unchanged"],
+            ...expectedEvents({ width: 1440, height: 1050 }),
+            ["unchanged"],
+          ]),
+      ["viewport", original],
+    ]);
+  });
+}

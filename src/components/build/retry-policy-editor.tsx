@@ -32,16 +32,40 @@ export function isDurableRetryApproval(value: unknown): boolean {
   );
 }
 
+function hasContinuedStep(job: Job | null | undefined): boolean {
+  return (
+    Array.isArray(job?.steps) &&
+    job.steps.some(
+      (step) =>
+        isObject(step) &&
+        // Reject malformed non-false values too; validation must not silently
+        // turn an authored continuation into a retryable command boundary.
+        [step.continueOnError, step.continue_on_error].some(
+          (value) => value != null && value !== false,
+        ),
+    )
+  );
+}
+
+const policyRequirements =
+  "Confirm idempotency, choose 2–5 attempts, and enter distinct exit codes from 1 to 125.";
+
 function retryScopeError(
   offlineContainer: boolean,
   job: Job | null | undefined,
-  mode: RetryPolicy["mode"],
+  mode: string,
 ): string {
+  if (mode !== "whole_job" && mode !== "failed_step")
+    return "Unsupported authored retry policy. Choose a supported scope or Off explicitly; the draft is unchanged until you apply an edit.";
   if (!offlineContainer) return "";
+  if (mode === "failed_step") {
+    if (job?.approval != null)
+      return "Failed-step retry cannot be combined with any approval gate, including builtin:retry-approval. That gate supports whole-job retry only. Choose a supported scope or Off; the authored draft is unchanged.";
+    if (hasContinuedStep(job))
+      return "Failed-step retry does not support continueOnError on any step. A failed boundary must end or retry the same step. Edit the step explicitly or choose another scope; the authored draft is unchanged.";
+  }
   if (job?.approval != null && !isDurableRetryApproval(job.approval))
     return "Container retry with approval requires the exact manual builtin:retry-approval gate, with no approver parameters. Unknown gates cannot authorize the complete retry plan. Choose Off to remove the policy.";
-  if (mode !== "whole_job")
-    return "Failed-step retry is unsupported for containerd-offline-v1. Choose Whole job steps or Off.";
   return "";
 }
 
@@ -61,6 +85,19 @@ export function setJobRetry(
   if (retry) {
     const error = retryScopeError(isOfflineContainer(spec), job, retry.mode);
     if (error) throw new Error(error);
+    if (
+      retry.idempotent !== true ||
+      !Number.isInteger(retry.maxAttempts) ||
+      retry.maxAttempts < 2 ||
+      retry.maxAttempts > 5 ||
+      !Array.isArray(retry.allowedExitCodes) ||
+      !retry.allowedExitCodes.length ||
+      retry.allowedExitCodes.some(
+        (code) => !Number.isInteger(code) || code < 1 || code > 125,
+      ) ||
+      new Set(retry.allowedExitCodes).size !== retry.allowedExitCodes.length
+    )
+      throw new Error(policyRequirements);
     job.retry = retry;
   } else delete job.retry;
   return JSON.stringify(spec, null, 2);
@@ -86,7 +123,9 @@ export function RetryPolicyEditor({
     /* JSON editor reports validation errors. */
   }
   const [index, setIndex] = useState(0);
-  const [mode, setMode] = useState<RetryPolicy["mode"] | "off">("off");
+  const [mode, setMode] = useState<RetryPolicy["mode"] | "off" | "unsupported">(
+    "off",
+  );
   const [max, setMax] = useState(2);
   const [delay, setDelay] = useState("1s");
   const [codes, setCodes] = useState("");
@@ -96,15 +135,21 @@ export function RetryPolicyEditor({
     offlineContainer &&
     jobs[index]?.approval != null &&
     !isDurableRetryApproval(jobs[index]?.approval);
+  const failedStepBlocked =
+    offlineContainer &&
+    (jobs[index]?.approval != null || hasContinuedStep(jobs[index]));
   const scopeError =
     mode === "off" ? "" : retryScopeError(offlineContainer, jobs[index], mode);
   const current = JSON.stringify(jobs[index]?.retry ?? null);
   useEffect(() => {
-    const policy = JSON.parse(current) as RetryPolicy | null;
+    const authored: unknown = JSON.parse(current);
+    const policy = isObject(authored) ? authored : null;
     setMode(
-      policy?.mode === "failed_step" || policy?.mode === "whole_job"
-        ? policy.mode
-        : "off",
+      authored === null
+        ? "off"
+        : policy?.mode === "failed_step" || policy?.mode === "whole_job"
+          ? policy.mode
+          : "unsupported",
     );
     setMax(typeof policy?.maxAttempts === "number" ? policy.maxAttempts : 2);
     setDelay(typeof policy?.delay === "string" ? policy.delay : "1s");
@@ -118,28 +163,12 @@ export function RetryPolicyEditor({
   }, [current, index]);
   const apply = () => {
     setError("");
-    if (scopeError) {
+    if (disabled) return;
+    if (scopeError || mode === "unsupported") {
       setError(scopeError);
       return;
     }
     const exitCodes = codes.split(",").map((code) => Number(code.trim()));
-    if (
-      mode !== "off" &&
-      (!idempotent ||
-        !codes.trim() ||
-        !Number.isInteger(max) ||
-        max < 2 ||
-        max > 5 ||
-        exitCodes.some(
-          (code) => !Number.isInteger(code) || code < 1 || code > 125,
-        ) ||
-        new Set(exitCodes).size !== exitCodes.length)
-    ) {
-      setError(
-        "Confirm idempotency, choose 2–5 attempts, and enter distinct exit codes from 1 to 125.",
-      );
-      return;
-    }
     try {
       onChange(
         setJobRetry(
@@ -173,16 +202,17 @@ export function RetryPolicyEditor({
         </p>
         {offlineContainer && (
           <p className="text-amber-700 dark:text-amber-300">
-            containerd-offline-v1 supports whole-job retry only. The operator
-            must enable allowWholeJobRetry, which defaults off; editing this
-            draft does not enable it. Failed-step retry is unsupported.
+            Container retries require a separately accepted backend and matching
+            Agent capability. For whole-job retry the operator must enable
+            allowWholeJobRetry. Failed-step retry requires allowFailedStepRetry
+            on both Control and Agent. Each defaults off; editing this draft
+            does not enable it. Failed-step retry cannot combine with approval
+            or continueOnError.
             {isDurableRetryApproval(jobs[index]?.approval) &&
-              " This gate also requires operator allowWholeJobRetryApproval, a trusted approval policy, and verified Agent TLS. Approvers review the pinned source commit, immutable inputs and complete retry limit before any container starts. Approval never resumes a restarted or cancelled run."}
-            {approvalBlocked &&
-              " Container retry with approval requires the exact manual builtin:retry-approval gate, with no approver parameters. Unknown gates cannot authorize the complete retry plan. Choose Off to remove the policy."}
+              " Whole-job retry with this gate also requires operator allowWholeJobRetryApproval, a trusted approval policy, and verified Agent TLS. Approvers review the pinned source commit, immutable inputs and complete retry limit before any container starts. Approval never resumes a restarted or cancelled run."}
           </p>
         )}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label>
             Job
             <select
@@ -205,11 +235,19 @@ export function RetryPolicyEditor({
               aria-label="Retry scope"
               disabled={disabled}
               value={mode}
-              onChange={(event) => setMode(event.target.value as typeof mode)}
+              onChange={(event) => {
+                setMode(event.target.value as typeof mode);
+                setError("");
+              }}
               className="mt-1 h-9 w-full rounded-md border bg-background px-2"
             >
+              {mode === "unsupported" && (
+                <option value="unsupported" disabled>
+                  Unsupported authored policy
+                </option>
+              )}
               <option value="off">Off</option>
-              <option value="failed_step" disabled={offlineContainer}>
+              <option value="failed_step" disabled={failedStepBlocked}>
                 Failed step only
               </option>
               <option value="whole_job" disabled={approvalBlocked}>
@@ -218,20 +256,22 @@ export function RetryPolicyEditor({
             </select>
           </label>
         </div>
-        {mode !== "off" && (
+        {(mode === "whole_job" || mode === "failed_step") && (
           <>
             <p role="note" className="text-amber-700 dark:text-amber-300">
               {offlineContainer
                 ? mode === "whole_job"
                   ? "Repeats earlier successful steps and their side effects. Each round uses a fresh session, rootfs, and workspace, with the pinned source SHA and input artifacts. External side effects are not rolled back."
-                  : "Failed-step retry is unsupported for containerd-offline-v1. Choose Whole job steps or Off; the authored policy is unchanged until you apply an edit."
+                  : "Repeats only the failed step within one continuously live session, container, rootfs, and workspace. Earlier successful steps are preserved and are not run again. The failed command's partial writes also remain. No rollback or clean checkout. Shell-local variables and process state are not preserved between attempts. Background processes are not guaranteed to survive: any live or zombie descendants, including those from earlier steps, refuse retry and trigger terminal cleanup."
                 : mode === "whole_job"
                   ? "Repeats earlier successful steps and their side effects. Reuses the current workspace and source snapshot; no clean checkout or rollback. Checkout, approval, and target deployment are outside the retry loop."
                   : "Repeats only the failed step in its existing workspace. Earlier successful commands are preserved. Missing workspace state stops execution."}
             </p>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label>
-                Attempts including first
+                {mode === "failed_step"
+                  ? "Per-step attempts including first"
+                  : "Attempts including first"}
                 <Input
                   aria-label="Maximum attempts"
                   type="number"
@@ -269,15 +309,17 @@ export function RetryPolicyEditor({
                 disabled={disabled}
                 onChange={(event) => setIdempotent(event.target.checked)}
               />
-              {offlineContainer
+              {offlineContainer && mode === "whole_job"
                 ? "I confirm repeated commands are idempotent and external side effects are safe to repeat."
-                : "I confirm repeated commands are idempotent and safe with existing files and external side effects."}
+                : offlineContainer
+                  ? "I confirm repeated commands are idempotent and safe with preserved successful-step files, partial failed-command writes, and external side effects."
+                  : "I confirm repeated commands are idempotent and safe with existing files and external side effects."}
             </label>
           </>
         )}
-        {error && (
+        {(scopeError || error) && (
           <p role="alert" className="text-destructive">
-            {error}
+            {scopeError || error}
           </p>
         )}
         <Button
@@ -290,9 +332,10 @@ export function RetryPolicyEditor({
           Apply retry policy to draft
         </Button>
         <p className="text-muted-foreground">
-          Live attempts only. No automatic resume after restart. Completed jobs
-          and interrupted workspaces cannot be resumed safely; start a new run
-          when needed. No model chooses or changes this policy.
+          Applying changes only the local draft; it does not save or start a
+          run. Live attempts only. No automatic resume after restart. Completed
+          jobs and interrupted workspaces cannot be resumed safely; start a new
+          run when needed. No model chooses or changes this policy.
         </p>
       </div>
     </details>

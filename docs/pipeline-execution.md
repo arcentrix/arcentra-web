@@ -78,3 +78,47 @@ An approved record is historical evidence, not a guarantee of deployment. Expiry
 Trigger review displays the server's `approvalRequired` and operator `pipelineApproval` policy. Missing/inconsistent policy fails closed. The deployment opt-in checkbox still starts unchecked; run opt-in never casts an approval vote.
 
 Tests use fake HTTP fixtures with the production API adapters, including partial quorum, reason-only approve/reject, immutable evidence, mismatched identities, stale versions, revocation, expiry, historical terminal status, duplicate clicks, uncertain responses, denied refresh, dismissal/navigation, and no automatic recovery. These are component/API tests, not live cluster or browser acceptance tests.
+
+## Container failed-step retry editor candidate
+
+This local editor branch prepares a later paired, gate-reviewed backend release.
+It is not evidence that container failed-step execution is accepted. The backend
+candidate's independent production acceptance gate remains false, and the actual
+MySQL/containerd and exact-commit browser CI results must be reviewed before
+release. Selecting a scope or applying the editor changes never enables a backend
+capability or operator policy.
+
+For `containerd-offline-v1`, the draft editor exposes `failed_step` separately
+from `whole_job`. The failed-step contract is one continuously live generation,
+container, root filesystem and workspace. Earlier successful steps are not run
+again; the failed command's partial writes remain too. There is no rollback or
+clean checkout. Shell-local variables and process state are not preserved across
+shell invocations. Any live or zombie descendants at the retry boundary, including
+background processes started by earlier successful steps, refuse continuation
+and trigger terminal cleanup. Restart recovery never resumes interrupted work.
+
+- Retry remains off without an authored policy. Both modes require explicit
+  idempotency, 2–5 attempts including the first, and a distinct shell exit-code
+  allowlist from 1 to 125. Failed-step limits apply per logical step.
+- Failed-step retry requires its separately accepted backend capability plus
+  operator `allowFailedStepRetry` on both Control and Agent. Whole-job retry
+  keeps its independent `allowWholeJobRetry` opt-in. Both default off.
+- Every non-null approval-bearing failed-step job is blocked, including the exact
+  manual `builtin:retry-approval` gate. That existing gate remains available only
+  for whole-job retry under its separate trusted operator policy.
+- A failed-step job with `continueOnError` on any step is blocked. The editor also
+  recognizes the proto JSON `continue_on_error` spelling and rejects malformed
+  non-false continuation values rather than treating them as permission.
+- Unsupported authored policies remain visible and unchanged. Selecting a new
+  scope alone never rewrites the JSON. Applying Off explicitly removes only the
+  retry policy; approval and step settings remain intact.
+- Apply updates only the local draft. Validation and repository save remain
+  separate explicit operations. Backend rejection remains a visible error and
+  retains the authored draft; there is no fallback to another retry mode and no
+  invented save success.
+
+The focused helper, editor and definition-dialog tests cover safe bounds,
+unsupported/approval/continued-step drafts, job switching, read-only and busy
+states, draft dismissal, backend validation rejection and repository save errors.
+The simulated browser fixture has separate safe diagnostic stages. Unit and
+harness checks are not evidence that Chromium or actual-backend acceptance ran.

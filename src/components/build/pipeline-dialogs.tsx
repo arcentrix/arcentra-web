@@ -631,7 +631,7 @@ export function PipelineSpecDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Pipeline definition</DialogTitle>
           <DialogDescription>

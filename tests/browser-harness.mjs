@@ -26,6 +26,7 @@ const acceptanceStages = new Set([
   "journey-complete",
   "fixture-regression",
   "exact-retry-approval-fixture",
+  "container-failed-step-draft",
 ]);
 
 function isArtifactDownload(method, path) {
@@ -81,6 +82,7 @@ export function safeFailureEvidence(stage, error) {
     "ui-fixture-smoke.mjs",
     "browser-harness.mjs",
     "artifact-controls.mjs",
+    "retry-policy-fixture.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
     if (!/^\s+at /.test(frame)) continue;
