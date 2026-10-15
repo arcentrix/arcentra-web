@@ -44,7 +44,7 @@ export function RunDeployment({
           {release.approvalId && (
             <p className="break-all">
               Durable approval: {release.approvalId}. Review its immutable
-              evidence in Deployment approvals for this run.
+              evidence in Run approvals for this run.
             </p>
           )}
           {release.status === "queued" && release.approvalId && (

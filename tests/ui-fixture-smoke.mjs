@@ -1,3 +1,4 @@
+import { retryFixture } from "./retry-approval-fixture.mjs";
 /** Fixture-driven browser regression test. This does not replace real backend integration tests. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -67,6 +68,8 @@ await runBrowserTest(
       startTime: Math.floor(Date.now() / 1000),
       duration: 1234,
     };
+    let retryApproval = null;
+    let approvalVotes = 0;
     let artifactMode = "normal";
     let artifactLists = 0;
     let artifactDownloads = 0;
@@ -166,7 +169,31 @@ await runBrowserTest(
           },
         });
       }
-      if (path === "/approvals/") return ok([]);
+      if (path === "/approvals/")
+        return ok(retryApproval ? [retryApproval] : []);
+      if (path === "/approvals/approval" && request.method() === "GET")
+        return ok(retryApproval);
+      if (
+        path === "/approvals/approval/approve" &&
+        request.method() === "POST"
+      ) {
+        assert.deepEqual(Object.keys(request.postDataJSON()), ["reason"]);
+        assert.equal(
+          request.postDataJSON().reason,
+          "Reviewed pinned source and two attempts",
+        );
+        approvalVotes++;
+        retryApproval = {
+          ...retryApproval,
+          status: 1,
+          approvedCount: 1,
+          canApprove: false,
+          canReject: false,
+          viewerDecision: "approved",
+          retryReview: { ...retryApproval.retryReview, status: 1 },
+        };
+        return ok(retryApproval);
+      }
       if (path === "/users/fetch")
         return ok({
           userId: "ui-test",
@@ -427,9 +454,7 @@ await runBrowserTest(
       true,
     );
     assert.equal(await applyRetry.isDisabled(), true);
-    await page
-      .getByText(/Container retry with approval is unsupported/)
-      .waitFor();
+    await page.getByText(/Container retry with approval requires/).waitFor();
     assert.equal(await definition.inputValue(), approvalDefinition);
     await retryScope.selectOption("off");
     await applyRetry.click();
@@ -821,8 +846,68 @@ await runBrowserTest(
     artifactMode = "normal";
     await page.getByRole("button", { name: "Check access again" }).click();
     await page.getByText("report-01.json", { exact: true }).waitFor();
+    setStage("exact-retry-approval-fixture");
+    const retryData = retryFixture();
+    retryApproval = retryData.approval;
+    retryApproval.pipelineRunId = run.runId;
+    const evidence = retryApproval.retryReview.evidence;
+    evidence.context.projectId = project.projectId;
+    evidence.context.pipelineId = pipeline.pipelineId;
+    evidence.context.pipelineRunId = run.runId;
+    evidence.identity.pipelineId = pipeline.pipelineId;
+    evidence.identity.pipelineRunId = run.runId;
+    evidence.source.PipelineID = pipeline.pipelineId;
+    evidence.source.PipelineRunID = run.runId;
+    run = {
+      ...run,
+      status: "PIPELINE_STATUS_RUNNING",
+      definitionCommitSha: evidence.context.definitionCommitSha,
+    };
+    await page.goto(
+      `${base}/build?pipeline=${pipeline.pipelineId}&run=${run.runId}`,
+    );
+    await page
+      .getByRole("button", { name: "Review approval approval", exact: true })
+      .click();
+    const approvalDialog = page.getByRole("dialog");
+    await approvalDialog
+      .getByText(evidence.inputs.sourceCommit, { exact: true })
+      .waitFor();
+    await approvalDialog
+      .getByText("2 total attempts, including the first", { exact: true })
+      .waitFor();
+    const approve = approvalDialog.getByRole("button", {
+      name: "Approve retry plan",
+      exact: true,
+    });
+    assert.equal(
+      await approve.isDisabled(),
+      true,
+      "Unreviewed plan must not be approved",
+    );
+    await approvalDialog.getByRole("checkbox").check();
+    await approvalDialog
+      .getByLabel("Decision reason (optional)")
+      .fill("Reviewed pinned source and two attempts");
+    await assertControlReachable(approve);
+    await approve.click();
+    await approvalDialog.getByText(/Decision recorded/).waitFor();
+    assert.equal(approvalVotes, 1, "One explicit vote only");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await approvalDialog
+      .getByText(/recorded decision, not current execution authorization/)
+      .waitFor();
+    await page.screenshot({
+      path: `${output}/retry-approval-mobile-fixture.png`,
+      fullPage: true,
+    });
+    await approvalDialog
+      .getByRole("button", { name: "Close review", exact: true })
+      .click();
+    await approvalDialog.waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 1440, height: 1050 });
     console.log(
-      `UI fixture smoke passed: run/dismiss/cancel, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile. Screenshots: ${output}`,
+      `UI fixture smoke passed: run/dismiss/cancel, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile. Screenshots: ${output}`,
     );
   },
 );

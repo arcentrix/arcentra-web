@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import {
   actualBackendConfig,
@@ -344,4 +345,25 @@ test("only expected native HTTP error messages are tolerated", () => {
     ),
     false,
   );
+});
+
+test("all static browser journey stages are explicitly allowlisted", async () => {
+  for (const file of [
+    "ui-fixture-smoke.mjs",
+    "actual-backend-acceptance.mjs",
+  ]) {
+    const source = await readFile(new URL(file, import.meta.url), "utf8");
+    const stages = [...source.matchAll(/setStage\("([^"\n]+)"\)/g)].map(
+      (match) => match[1],
+    );
+    assert.ok(stages.length > 0);
+    for (const stage of stages) {
+      assert.equal(
+        safeFailureEvidence(stage, null).stage,
+        stage,
+        `${file}: ${stage}`,
+      );
+    }
+  }
+  assert.equal(safeFailureEvidence("untrusted-stage", null).stage, "unknown");
 });
