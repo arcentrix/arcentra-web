@@ -791,65 +791,103 @@ await runBrowserTest(
     await page.getByRole("button", { name: "Check access again" }).click();
     await page.getByText("report-01.json", { exact: true }).waitFor();
     setStage("exact-retry-approval-fixture");
-    const retryData = retryFixture();
-    retryApproval = retryData.approval;
-    retryApproval.pipelineRunId = run.runId;
-    const evidence = retryApproval.retryReview.evidence;
-    evidence.context.projectId = project.projectId;
-    evidence.context.pipelineId = pipeline.pipelineId;
-    evidence.context.pipelineRunId = run.runId;
-    evidence.identity.pipelineId = pipeline.pipelineId;
-    evidence.identity.pipelineRunId = run.runId;
-    evidence.source.PipelineID = pipeline.pipelineId;
-    evidence.source.PipelineRunID = run.runId;
-    run = {
-      ...run,
-      status: "PIPELINE_STATUS_RUNNING",
-      definitionCommitSha: evidence.context.definitionCommitSha,
-    };
-    await page.goto(
-      `${base}/build?pipeline=${pipeline.pipelineId}&run=${run.runId}`,
-    );
-    await page
-      .getByRole("button", { name: "Review approval approval", exact: true })
-      .click();
-    const approvalDialog = page.getByRole("dialog");
-    await approvalDialog
-      .getByText(evidence.inputs.sourceCommit, { exact: true })
-      .waitFor();
-    await approvalDialog
-      .getByText("2 total attempts, including the first", { exact: true })
-      .waitFor();
-    const approve = approvalDialog.getByRole("button", {
-      name: "Approve retry plan",
-      exact: true,
-    });
-    assert.equal(
-      await approve.isDisabled(),
-      true,
-      "Unreviewed plan must not be approved",
-    );
-    await approvalDialog.getByRole("checkbox").check();
-    await approvalDialog
-      .getByLabel("Decision reason (optional)")
-      .fill("Reviewed pinned source and two attempts");
-    await assertControlReachable(approve);
-    await approve.click();
-    await approvalDialog.getByText(/Decision recorded/).waitFor();
-    assert.equal(approvalVotes, 1, "One explicit vote only");
-    await page.setViewportSize({ width: 390, height: 844 });
-    await approvalDialog
-      .getByText(/recorded decision, not current execution authorization/)
-      .waitFor();
-    await page.screenshot({
-      path: `${output}/retry-approval-mobile-fixture.png`,
-      fullPage: true,
-    });
-    await approvalDialog
-      .getByRole("button", { name: "Close review", exact: true })
-      .click();
-    await approvalDialog.waitFor({ state: "hidden" });
-    await page.setViewportSize({ width: 1440, height: 1050 });
+    for (const failedStep of [false, true]) {
+      const retryData = retryFixture();
+      retryApproval = retryData.approval;
+      retryApproval.pipelineRunId = run.runId;
+      const evidence = retryApproval.retryReview.evidence;
+      if (failedStep) {
+        retryApproval.bindingKind = evidence.kind = "retry_failed_step_v1";
+        evidence.retryPlan.version = 2;
+        evidence.retryPlan.policy.mode = "failed_step";
+      }
+      const votesBefore = approvalVotes;
+      evidence.context.projectId = project.projectId;
+      evidence.context.pipelineId = pipeline.pipelineId;
+      evidence.context.pipelineRunId = run.runId;
+      evidence.identity.pipelineId = pipeline.pipelineId;
+      evidence.identity.pipelineRunId = run.runId;
+      evidence.source.PipelineID = pipeline.pipelineId;
+      evidence.source.PipelineRunID = run.runId;
+      run = {
+        ...run,
+        status: "PIPELINE_STATUS_RUNNING",
+        definitionCommitSha: evidence.context.definitionCommitSha,
+      };
+      await page.goto(
+        `${base}/build?pipeline=${pipeline.pipelineId}&run=${run.runId}`,
+      );
+      await page
+        .getByRole("button", { name: "Review approval approval", exact: true })
+        .click();
+      const approvalDialog = page.getByRole("dialog");
+      await approvalDialog
+        .getByText(evidence.inputs.sourceCommit, { exact: true })
+        .waitFor();
+      await approvalDialog
+        .getByText(
+          failedStep
+            ? "2 total attempts, including the first for each logical step"
+            : "2 total attempts, including the first",
+          { exact: true },
+        )
+        .waitFor();
+      const approve = approvalDialog.getByRole("button", {
+        name: "Approve retry plan",
+        exact: true,
+      });
+      assert.equal(
+        await approve.isDisabled(),
+        true,
+        "Unreviewed plan must not be approved",
+      );
+      if (failedStep) {
+        await approvalDialog
+          .getByText(/Earlier successful steps run once/)
+          .waitFor();
+        await approvalDialog.getByText(/producer \/ producer-step/).waitFor();
+        await approvalDialog.getByRole("checkbox").check();
+        evidence.inputs.sourceCommit = "f".repeat(40);
+        await approve.click();
+        await approvalDialog
+          .getByText(/plan or your eligibility changed/)
+          .waitFor();
+        assert.equal(
+          approvalVotes,
+          votesBefore,
+          "Substituted pinned source must refuse voting",
+        );
+        assert.equal(await approve.isDisabled(), true);
+        await approvalDialog
+          .getByText("f".repeat(40), { exact: true })
+          .waitFor();
+        await approvalDialog
+          .getByRole("button", { name: "Refresh approval evidence" })
+          .click();
+        await approvalDialog.getByRole("checkbox").waitFor();
+      }
+      await approvalDialog.getByRole("checkbox").check();
+      await approvalDialog
+        .getByLabel("Decision reason (optional)")
+        .fill("Reviewed pinned source and two attempts");
+      await assertControlReachable(approve);
+      await approve.click();
+      await approvalDialog.getByText(/Decision recorded/).waitFor();
+      assert.equal(approvalVotes, votesBefore + 1, "One explicit vote only");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await approvalDialog
+        .getByText(/recorded decision, not current execution authorization/)
+        .waitFor();
+      await page.screenshot({
+        path: `${output}/retry-approval-${failedStep ? "failed-step" : "whole-job"}-mobile-fixture.png`,
+        fullPage: true,
+      });
+      await approvalDialog
+        .getByRole("button", { name: "Close review", exact: true })
+        .click();
+      await approvalDialog.waitFor({ state: "hidden" });
+      await page.setViewportSize({ width: 1440, height: 1050 });
+    }
     console.log(
       `UI fixture smoke passed: run/dismiss/cancel, container failed-step draft guards/no autosave, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile. Screenshots: ${output}`,
     );

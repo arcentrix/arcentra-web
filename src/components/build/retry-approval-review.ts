@@ -75,7 +75,7 @@ export function validateRetryApproval(
     !plan ||
     !policy ||
     approval.plugin !== "builtin:retry-approval" ||
-    approval.bindingKind !== "retry_whole_job_v1" ||
+    approval.bindingKind !== e.kind ||
     approval.deploymentReleaseId ||
     !text(approval.retryJobRunId, 64) ||
     view.retryJobRunId !== approval.retryJobRunId ||
@@ -86,7 +86,14 @@ export function validateRetryApproval(
     !digest.test(view.evidenceHash) ||
     view.status !== approval.status ||
     e.version !== 1 ||
-    e.kind !== "retry_whole_job_v1" ||
+    !(
+      (e.kind === "retry_whole_job_v1" &&
+        plan.version === 1 &&
+        policy.mode === "whole_job") ||
+      (e.kind === "retry_failed_step_v1" &&
+        plan.version === 2 &&
+        policy.mode === "failed_step")
+    ) ||
     c.version !== 1 ||
     c.projectId !== scope.projectId ||
     c.pipelineId !== scope.pipelineId ||
@@ -139,11 +146,9 @@ export function validateRetryApproval(
   )
     return bad();
   if (
-    plan.version !== 1 ||
     plan.retryApprovalRequired !== true ||
     plan.retryApprovalTimeoutSeconds !== c.policy.timeoutSeconds ||
     !digest.test(plan.definitionDigest) ||
-    policy.mode !== "whole_job" ||
     policy.idempotent !== true ||
     !integer(policy.max_attempts, 2, 5) ||
     !Array.isArray(policy.allowed_exit_codes) ||
@@ -159,19 +164,26 @@ export function validateRetryApproval(
   )
     return bad();
   const ids = new Set<string>();
+  const names = new Set<string>();
+  let previousIndex = -1;
   for (const step of plan.steps) {
     if (
       !step ||
       !text(step.name, 128) ||
+      names.has(step.name) ||
       !text(step.uses, 128) ||
       typeof step.action !== "string" ||
       !integer(step.stepIndex) ||
+      step.stepIndex <= previousIndex ||
+      (policy.mode === "failed_step" && step.continueOnError !== false) ||
       typeof step.continueOnError !== "boolean" ||
       !digest.test(step.definitionDigest) ||
       !Array.isArray(step.attemptRunIds) ||
       step.attemptRunIds.length !== policy.max_attempts
     )
       return bad();
+    names.add(step.name);
+    previousIndex = step.stepIndex;
     for (const id of step.attemptRunIds) {
       if (!text(id, 64) || ids.has(id)) return bad();
       ids.add(id);

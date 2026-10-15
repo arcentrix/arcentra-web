@@ -59,8 +59,6 @@ function retryScopeError(
     return "Unsupported authored retry policy. Choose a supported scope or Off explicitly; the draft is unchanged until you apply an edit.";
   if (!offlineContainer) return "";
   if (mode === "failed_step") {
-    if (job?.approval != null)
-      return "Failed-step retry cannot be combined with any approval gate, including builtin:retry-approval. That gate supports whole-job retry only. Choose a supported scope or Off; the authored draft is unchanged.";
     if (hasContinuedStep(job))
       return "Failed-step retry does not support continueOnError on any step. A failed boundary must end or retry the same step. Edit the step explicitly or choose another scope; the authored draft is unchanged.";
   }
@@ -136,8 +134,7 @@ export function RetryPolicyEditor({
     jobs[index]?.approval != null &&
     !isDurableRetryApproval(jobs[index]?.approval);
   const failedStepBlocked =
-    offlineContainer &&
-    (jobs[index]?.approval != null || hasContinuedStep(jobs[index]));
+    offlineContainer && (approvalBlocked || hasContinuedStep(jobs[index]));
   const scopeError =
     mode === "off" ? "" : retryScopeError(offlineContainer, jobs[index], mode);
   const current = JSON.stringify(jobs[index]?.retry ?? null);
@@ -206,10 +203,10 @@ export function RetryPolicyEditor({
             Agent capability. For whole-job retry the operator must enable
             allowWholeJobRetry. Failed-step retry requires allowFailedStepRetry
             on both Control and Agent. Each defaults off; editing this draft
-            does not enable it. Failed-step retry cannot combine with approval
-            or continueOnError.
+            does not enable it. Failed-step retry cannot combine with
+            continueOnError.
             {isDurableRetryApproval(jobs[index]?.approval) &&
-              " Whole-job retry with this gate also requires operator allowWholeJobRetryApproval, a trusted approval policy, and verified Agent TLS. Approvers review the pinned source commit, immutable inputs and complete retry limit before any container starts. Approval never resumes a restarted or cancelled run."}
+              " This exact manual gate requires the separate operator allowWholeJobRetryApproval or allowFailedStepRetryApproval for the chosen mode, a trusted approval policy, and verified Agent TLS. The failed-step approval capability and acceptance gate are separate and default off. Approvers review the pinned source commit, immutable inputs and complete retry limit before any container starts. Approval never resumes a restarted or cancelled run."}
           </p>
         )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

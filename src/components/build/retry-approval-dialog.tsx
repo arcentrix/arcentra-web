@@ -110,8 +110,10 @@ export function RetryApprovalDialog({
         reason,
       );
       if (
+        result.approvalId !== fresh.approval.approvalId ||
+        result.pipelineRunId !== scope.runId ||
         result.plugin !== "builtin:retry-approval" ||
-        result.bindingKind !== "retry_whole_job_v1" ||
+        result.bindingKind !== fresh.evidence.kind ||
         result.retryJobRunId !== fresh.approval.retryJobRunId ||
         result.deploymentReleaseId ||
         result.evidenceHash !== fresh.approval.evidenceHash
@@ -151,8 +153,8 @@ export function RetryApprovalDialog({
         <DialogHeader>
           <DialogTitle>Review exact container retry plan</DialogTitle>
           <DialogDescription>
-            Approve only this pinned source, immutable inputs and finite
-            whole-job plan. Identities and quorum are operator-controlled.
+            Approve only this pinned source, immutable inputs and finite retry
+            plan. Identities and quorum are operator-controlled.
           </DialogDescription>
         </DialogHeader>
         {resource.loading && (
@@ -179,6 +181,13 @@ export function RetryApprovalDialog({
               approvals · {approval.rejectedCount} rejections
             </p>
             <dl className="space-y-2 rounded border p-3 text-xs [&_dd]:break-all [&_dd]:font-mono [&_dt]:text-muted-foreground">
+              <div>
+                <dt>Approval kind / plan version / mode</dt>
+                <dd>
+                  {evidence.kind} / {evidence.retryPlan.version} /{" "}
+                  {evidence.retryPlan.policy.mode}
+                </dd>
+              </div>
               <div>
                 <dt>Approval / evidence digest</dt>
                 <dd>
@@ -228,10 +237,17 @@ export function RetryApprovalDialog({
                 </div>
               )}
               <div>
-                <dt>Whole-job total attempt limit</dt>
+                <dt>
+                  {evidence.kind === "retry_failed_step_v1"
+                    ? "Per-logical-step attempt limit"
+                    : "Whole-job total attempt limit"}
+                </dt>
                 <dd>
                   {evidence.retryPlan.policy.max_attempts} total attempts,
                   including the first
+                  {evidence.kind === "retry_failed_step_v1"
+                    ? " for each logical step"
+                    : ""}
                 </dd>
               </div>
               <div>
@@ -322,6 +338,18 @@ export function RetryApprovalDialog({
                 </p>
               </div>
             ))}
+            {evidence.kind === "retry_failed_step_v1" && (
+              <p className="text-xs" role="note">
+                Only the failed step repeats in one continuously live session,
+                container and workspace. Earlier successful steps run once.
+                Partial files from failed commands remain; no rollback or clean
+                checkout. Shell-local process state is not preserved. Live or
+                zombie background descendants refuse retry and cause cleanup.
+                Approval grants no restart continuation. Each logical step and
+                retry needs current authorization; historical receipts grant
+                none.
+              </p>
+            )}
             <p className="text-xs">
               The source commit records the initial checkout, not a supply-chain
               attestation. Step digests bind the frozen executable definitions;

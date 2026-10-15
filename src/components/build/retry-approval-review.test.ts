@@ -105,3 +105,45 @@ it.each([
   change(f);
   expect(() => validateRetryApproval(retryScope, f.approval, f.run)).toThrow();
 });
+
+it("accepts only the new kind with the complete failed-step v2 plan", () => {
+  const f = retryFixture(true);
+  expect(
+    validateRetryApproval(retryScope, f.approval, f.run).evidence.kind,
+  ).toBe("retry_failed_step_v1");
+});
+it.each([
+  "kind",
+  "version",
+  "mode",
+  "continued",
+  "duplicate-name",
+  "duplicate-index",
+  "reordered",
+  "cross-step-attempt",
+])(
+  "rejects failed-step tuple or ordered identity substitution: %s",
+  (field) => {
+    const f = retryFixture(true),
+      p = f.evidence.retryPlan;
+    p.steps.push({
+      ...p.steps[0],
+      name: "upload",
+      stepIndex: 1,
+      attemptRunIds: ["upload-1", "upload-2"],
+    });
+    if (field === "kind")
+      Object.assign(f.evidence, { kind: "retry_whole_job_v1" });
+    if (field === "version") Object.assign(p, { version: 1 });
+    if (field === "mode") Object.assign(p.policy, { mode: "whole_job" });
+    if (field === "continued") p.steps[0].continueOnError = true;
+    if (field === "duplicate-name") p.steps[1].name = p.steps[0].name;
+    if (field === "duplicate-index") p.steps[1].stepIndex = 0;
+    if (field === "reordered") p.steps.reverse();
+    if (field === "cross-step-attempt")
+      p.steps[1].attemptRunIds[0] = p.steps[0].attemptRunIds[0];
+    expect(() =>
+      validateRetryApproval(retryScope, f.approval, f.run),
+    ).toThrow();
+  },
+);

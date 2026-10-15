@@ -31,18 +31,14 @@ export function containerRetryFixtures(originalText) {
   return {
     off: JSON.stringify(definition),
     supported: authored(),
+    failedStepApproved: authored((job) => {
+      job.approval = structuredClone(exactApproval);
+    }),
     blocked: [
       {
         name: "unknown approval",
         text: authored((job) => {
           job.approval = {};
-        }),
-        reason: /approval/i,
-      },
-      {
-        name: "exact durable retry approval",
-        text: authored((job) => {
-          job.approval = structuredClone(exactApproval);
         }),
         reason: /approval/i,
       },
@@ -291,9 +287,23 @@ export async function assertContainerRetryDraft({
   await unchanged(fixtures.wholeJobUnknownApproval);
   await remove(fixtures.wholeJobUnknownApproval);
 
+  await load(fixtures.failedStepApproved, "failed_step");
+  assert.equal(await optionDisabled("failed_step"), false);
+  await editor.getByText(/allowFailedStepRetryApproval/).waitFor();
+  await maximum.fill("3");
+  await unchanged(fixtures.failedStepApproved);
+  await apply.click();
+  const approvedStepDraft = JSON.parse(fixtures.failedStepApproved);
+  approvedStepDraft.jobs[0].retry.maxAttempts = 3;
+  assert.deepEqual(
+    JSON.parse(await definition.inputValue()),
+    approvedStepDraft,
+  );
+  assertNoSave();
+
   await load(fixtures.wholeJobApproved, "whole_job");
   assert.equal(await optionDisabled("whole_job"), false);
-  assert.equal(await optionDisabled("failed_step"), true);
+  assert.equal(await optionDisabled("failed_step"), false);
   assert.equal(await apply.isEnabled(), true);
   await editor.getByText(/allowWholeJobRetryApproval/).waitFor();
   await apply.click();

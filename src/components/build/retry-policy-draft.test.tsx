@@ -158,6 +158,7 @@ describe("failed-step retry draft integration", () => {
             required: true,
             type: "manual",
             plugin: "builtin:retry-approval",
+            params: { approvers: ["untrusted"] },
           },
         },
       ],
@@ -165,7 +166,7 @@ describe("failed-step retry draft integration", () => {
     fireEvent.change(editor(), { target: { value: authored } });
     expect(applyRetry()).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "cannot be combined with any approval gate",
+      "requires the exact manual",
     );
     expect(editor()).toHaveValue(authored);
     expect(validatePipelineSpec).not.toHaveBeenCalled();

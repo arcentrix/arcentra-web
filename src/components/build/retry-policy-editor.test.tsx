@@ -462,9 +462,11 @@ it("allows only the exact operator-controlled durable retry approval marker", ()
       "requires the exact manual",
     );
   }
-  expect(() =>
-    setJobRetry(definition(gate), 0, { ...retry, mode: "failed_step" }),
-  ).toThrow("cannot be combined with any approval gate");
+  expect(
+    JSON.parse(
+      setJobRetry(definition(gate), 0, { ...retry, mode: "failed_step" }),
+    ).jobs[0].retry.mode,
+  ).toBe("failed_step");
 });
 
 describe("bounded live container failed-step drafts", () => {
@@ -525,10 +527,9 @@ describe("bounded live container failed-step drafts", () => {
     false,
     "manual",
     { approvers: ["reviewer"] },
-    gate,
     { ...gate, params: { candidates: ["self"] } },
   ])(
-    "rejects every non-null approval shape for failed_step while preserving the author: %j",
+    "rejects unsupported non-null approval shapes for failed_step while preserving the author: %j",
     (approval) => {
       const update = vi.fn();
       const value = containerSpec({ retry, approval });
@@ -541,11 +542,13 @@ describe("bounded live container failed-step drafts", () => {
       ).toBeDisabled();
       expect(applyButton()).toBeDisabled();
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "cannot be combined with any approval gate",
+        "requires the exact manual",
       );
       fireEvent.click(applyButton());
       expect(update).not.toHaveBeenCalled();
-      expect(() => setJobRetry(value, 0, retry)).toThrow("any approval gate");
+      expect(() => setJobRetry(value, 0, retry)).toThrow(
+        "requires the exact manual",
+      );
       fireEvent.change(screen.getByLabelText("Retry scope"), {
         target: { value: "off" },
       });
@@ -556,7 +559,7 @@ describe("bounded live container failed-step drafts", () => {
     },
   );
 
-  it("keeps the exact whole-job approval gate available without authorizing failed-step retry", () => {
+  it("allows an exact failed-step gate only through explicit draft apply", () => {
     const update = vi.fn();
     const value = containerSpec({ retry, approval: gate });
     render(
@@ -565,15 +568,18 @@ describe("bounded live container failed-step drafts", () => {
     expect(
       screen.getByRole("option", { name: "Whole job steps" }),
     ).toBeEnabled();
-    fireEvent.change(screen.getByLabelText("Retry scope"), {
-      target: { value: "whole_job" },
-    });
+    expect(
+      screen.getByRole("option", { name: "Failed step only" }),
+    ).toBeEnabled();
+    expect(screen.getByText(/allowFailedStepRetryApproval/)).toHaveTextContent(
+      "default off",
+    );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(update).not.toHaveBeenCalled();
     fireEvent.click(applyButton());
     const changed = JSON.parse(update.mock.calls[0][0]);
     expect(changed.jobs[0].approval).toEqual(gate);
-    expect(changed.jobs[0].retry.mode).toBe("whole_job");
+    expect(changed.jobs[0].retry.mode).toBe("failed_step");
   });
 
   it.each(["continueOnError", "continue_on_error"])(
@@ -626,7 +632,10 @@ describe("bounded live container failed-step drafts", () => {
     expect(applyButton()).toBeEnabled();
     view.rerender(
       <RetryPolicyEditor
-        value={containerSpec({ retry, approval: gate })}
+        value={containerSpec({
+          retry,
+          approval: { ...gate, params: { unexpected: true } },
+        })}
         onChange={update}
         disabled={false}
       />,
@@ -739,7 +748,8 @@ describe("bounded live container failed-step drafts", () => {
         target: { value: index },
       });
       expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
-      expect(applyButton()).toBeDisabled();
+      if (index === "1") expect(applyButton()).toBeEnabled();
+      else expect(applyButton()).toBeDisabled();
     }
     fireEvent.change(screen.getByLabelText("Retry job"), {
       target: { value: "0" },
