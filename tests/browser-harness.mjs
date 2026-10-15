@@ -25,6 +25,7 @@ const acceptanceStages = new Set([
   "reauthenticate",
   "journey-complete",
   "fixture-regression",
+  "exact-retry-approval-fixture",
 ]);
 
 function isArtifactDownload(method, path) {
