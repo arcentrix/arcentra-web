@@ -101,7 +101,9 @@ describe("explicit retry configuration", () => {
     const view = render(
       <RetryPolicyEditor value={legacy} onChange={update} disabled={false} />,
     );
-    expect(screen.getByLabelText("Retry scope")).toHaveValue("off");
+    expect(screen.getByLabelText("Retry scope")).toHaveValue("unsupported");
+    expect(screen.getByRole("alert")).toHaveTextContent("Unsupported authored");
+    expect(update).not.toHaveBeenCalled();
     view.rerender(
       <RetryPolicyEditor
         value={JSON.stringify({ jobs: [null, 7] })}
@@ -122,7 +124,7 @@ describe("explicit retry configuration", () => {
 });
 
 describe("offline container retry scope", () => {
-  it("defaults off, disables failed-step mode, and explains the operator opt-in", () => {
+  it("defaults off, allows both scopes, and explains the independent operator opt-ins", () => {
     const update = vi.fn();
     render(
       <RetryPolicyEditor
@@ -138,13 +140,21 @@ describe("offline container retry scope", () => {
     expect(screen.getByRole("option", { name: "Off" })).toBeEnabled();
     expect(
       screen.getByRole("option", { name: "Failed step only" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       screen.getByRole("option", { name: "Whole job steps" }),
     ).toBeEnabled();
     expect(
       screen.getByText(/must enable allowWholeJobRetry/),
-    ).toHaveTextContent("defaults off; editing this draft does not enable it");
+    ).toHaveTextContent(
+      "Each defaults off; editing this draft does not enable it",
+    );
+    expect(
+      screen.getByText(/must enable allowWholeJobRetry/),
+    ).toHaveTextContent("allowFailedStepRetry on both Control and Agent");
+    expect(
+      screen.getByText(/must enable allowWholeJobRetry/),
+    ).toHaveTextContent("separately accepted backend");
     expect(screen.getByText(/No automatic resume after restart/)).toBeVisible();
     expect(update).not.toHaveBeenCalled();
   });
@@ -193,13 +203,22 @@ describe("offline container retry scope", () => {
     );
     expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
     expect(screen.getByRole("note")).toHaveTextContent(
-      "Failed-step retry is unsupported",
+      "one continuously live session",
     );
-    expect(screen.getByRole("note")).not.toHaveTextContent(
-      "existing workspace",
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Earlier successful steps are preserved and are not run again",
     );
-    expect(applyButton()).toBeDisabled();
-    fireEvent.click(applyButton());
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "partial writes also remain",
+    );
+    expect(screen.getByRole("note")).toHaveTextContent("No rollback");
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Shell-local variables and process state are not preserved",
+    );
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "any live or zombie descendants, including those from earlier steps, refuse retry",
+    );
+    expect(applyButton()).toBeEnabled();
     expect(update).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("Retry scope"), {
       target: { value: "off" },
@@ -251,7 +270,7 @@ describe("offline container retry scope", () => {
       />,
     );
     expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
-    expect(applyButton()).toBeDisabled();
+    expect(applyButton()).toBeEnabled();
     view.rerender(
       <RetryPolicyEditor
         value={containerSpec({ retry: wholeJob, approval: {} })}
@@ -273,15 +292,17 @@ describe("offline container retry scope", () => {
   });
 
   it("enforces the scope in setJobRetry and still removes invalid legacy policies", () => {
-    expect(() =>
-      setJobRetry(containerSpec(), 0, { ...wholeJob, mode: "failed_step" }),
-    ).toThrow("Failed-step retry is unsupported");
+    expect(
+      JSON.parse(
+        setJobRetry(containerSpec(), 0, { ...wholeJob, mode: "failed_step" }),
+      ).jobs[0].retry.mode,
+    ).toBe("failed_step");
     expect(() =>
       setJobRetry(containerSpec(), 0, {
         ...wholeJob,
         mode: "off",
       } as unknown as RetryPolicy),
-    ).toThrow("Failed-step retry is unsupported");
+    ).toThrow("Unsupported authored retry policy");
     for (const approval of [{}, { approved: true }, false]) {
       const value = containerSpec({ approval, retry: wholeJob });
       expect(() => setJobRetry(value, 0, wholeJob)).toThrow(
@@ -443,5 +464,305 @@ it("allows only the exact operator-controlled durable retry approval marker", ()
   }
   expect(() =>
     setJobRetry(definition(gate), 0, { ...retry, mode: "failed_step" }),
-  ).toThrow("Failed-step retry is unsupported");
+  ).toThrow("cannot be combined with any approval gate");
+});
+
+describe("bounded live container failed-step drafts", () => {
+  const retry: RetryPolicy = { ...wholeJob, mode: "failed_step" };
+  const gate = {
+    required: true,
+    type: "manual",
+    plugin: "builtin:retry-approval",
+    params: {},
+  };
+
+  it("requires explicit idempotency, limits and exit allowlist before applying; never auto-applies", () => {
+    const update = vi.fn();
+    render(
+      <RetryPolicyEditor
+        value={containerSpec()}
+        onChange={update}
+        disabled={false}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Retry scope"), {
+      target: { value: "failed_step" },
+    });
+    expect(
+      screen.getByRole("checkbox", { name: /partial failed-command writes/ }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText("Per-step attempts including first"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Retry exit codes")).toHaveValue("");
+    fireEvent.click(applyButton());
+    expect(screen.getByRole("alert")).toHaveTextContent("Confirm idempotency");
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(screen.getByLabelText("Maximum attempts"), {
+      target: { value: "5" },
+    });
+    fireEvent.change(screen.getByLabelText("Retry exit codes"), {
+      target: { value: "9, 75" },
+    });
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(applyButton());
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(update.mock.calls[0][0]).jobs[0].retry).toEqual({
+      mode: "failed_step",
+      maxAttempts: 5,
+      delay: "1s",
+      allowedExitCodes: [9, 75],
+      idempotent: true,
+    });
+    expect(
+      screen.getByText(/Applying changes only the local draft/),
+    ).toHaveTextContent("does not save or start a run");
+  });
+
+  it.each([
+    {},
+    false,
+    "manual",
+    { approvers: ["reviewer"] },
+    gate,
+    { ...gate, params: { candidates: ["self"] } },
+  ])(
+    "rejects every non-null approval shape for failed_step while preserving the author: %j",
+    (approval) => {
+      const update = vi.fn();
+      const value = containerSpec({ retry, approval });
+      render(
+        <RetryPolicyEditor value={value} onChange={update} disabled={false} />,
+      );
+      expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
+      expect(
+        screen.getByRole("option", { name: "Failed step only" }),
+      ).toBeDisabled();
+      expect(applyButton()).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "cannot be combined with any approval gate",
+      );
+      fireEvent.click(applyButton());
+      expect(update).not.toHaveBeenCalled();
+      expect(() => setJobRetry(value, 0, retry)).toThrow("any approval gate");
+      fireEvent.change(screen.getByLabelText("Retry scope"), {
+        target: { value: "off" },
+      });
+      fireEvent.click(applyButton());
+      expect(JSON.parse(update.mock.calls[0][0])).toEqual(
+        JSON.parse(containerSpec({ approval })),
+      );
+    },
+  );
+
+  it("keeps the exact whole-job approval gate available without authorizing failed-step retry", () => {
+    const update = vi.fn();
+    const value = containerSpec({ retry, approval: gate });
+    render(
+      <RetryPolicyEditor value={value} onChange={update} disabled={false} />,
+    );
+    expect(
+      screen.getByRole("option", { name: "Whole job steps" }),
+    ).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Retry scope"), {
+      target: { value: "whole_job" },
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(applyButton());
+    const changed = JSON.parse(update.mock.calls[0][0]);
+    expect(changed.jobs[0].approval).toEqual(gate);
+    expect(changed.jobs[0].retry.mode).toBe("whole_job");
+  });
+
+  it.each(["continueOnError", "continue_on_error"])(
+    "blocks %s on any step, including an earlier one, without silently removing it",
+    (field) => {
+      const update = vi.fn();
+      const steps = [
+        { name: "prepare", uses: "shell", [field]: true },
+        { name: "build", uses: "shell" },
+      ];
+      const value = containerSpec({ retry, steps });
+      const view = render(
+        <RetryPolicyEditor value={value} onChange={update} disabled={false} />,
+      );
+      expect(applyButton()).toBeDisabled();
+      expect(
+        screen.getByRole("option", { name: "Failed step only" }),
+      ).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "does not support continueOnError on any step",
+      );
+      expect(() => setJobRetry(value, 0, retry)).toThrow("continueOnError");
+      expect(JSON.parse(setJobRetry(value, 0)).jobs[0].steps).toEqual(steps);
+      view.rerender(
+        <RetryPolicyEditor
+          value={containerSpec({
+            retry,
+            steps: [{ ...steps[0], [field]: false }, steps[1]],
+          })}
+          onChange={update}
+          disabled={false}
+        />,
+      );
+      expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
+      expect(applyButton()).toBeEnabled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rechecks newly added approval even if the authored retry is unchanged", () => {
+    const update = vi.fn();
+    const view = render(
+      <RetryPolicyEditor
+        value={containerSpec({ retry })}
+        onChange={update}
+        disabled={false}
+      />,
+    );
+    expect(applyButton()).toBeEnabled();
+    view.rerender(
+      <RetryPolicyEditor
+        value={containerSpec({ retry, approval: gate })}
+        onChange={update}
+        disabled={false}
+      />,
+    );
+    expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
+    expect(applyButton()).toBeDisabled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { idempotent: false },
+    { idempotent: "true" },
+    { maxAttempts: 1 },
+    { maxAttempts: 6 },
+    { maxAttempts: 2.5 },
+    { maxAttempts: "2" },
+    { allowedExitCodes: [] },
+    { allowedExitCodes: [0] },
+    { allowedExitCodes: [126] },
+    { allowedExitCodes: [9, 9] },
+    { allowedExitCodes: [9.5] },
+    { allowedExitCodes: ["9"] },
+  ])("rejects invalid bounds in the shared setter: %j", (invalid) => {
+    expect(() =>
+      setJobRetry(containerSpec(), 0, { ...retry, ...invalid } as RetryPolicy),
+    ).toThrow("Confirm idempotency");
+  });
+
+  it.each([
+    ["Maximum attempts", "1"],
+    ["Maximum attempts", "6"],
+    ["Maximum attempts", "2.5"],
+    ["Retry exit codes", ""],
+    ["Retry exit codes", "9, 9"],
+    ["Retry exit codes", "0"],
+    ["Retry exit codes", "126"],
+    ["Retry exit codes", "9,"],
+    ["Retry exit codes", "9.5"],
+    ["Retry exit codes", "oops"],
+  ])(
+    "shows %s=%s validation errors without fallback or draft changes",
+    (label, invalid) => {
+      const update = vi.fn();
+      render(
+        <RetryPolicyEditor
+          value={containerSpec({ retry })}
+          onChange={update}
+          disabled={false}
+        />,
+      );
+      fireEvent.change(screen.getByLabelText(label), {
+        target: { value: invalid },
+      });
+      fireEvent.click(applyButton());
+      expect(screen.getByRole("alert")).toHaveTextContent("2–5 attempts");
+      expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { mode: "future_mode", marker: "keep" },
+    { maxAttempts: 3 },
+    "failed_step",
+    [],
+    false,
+  ])(
+    "preserves unsupported authored policies visibly until an explicit edit: %j",
+    (authored) => {
+      const update = vi.fn();
+      const value = containerSpec({ retry: authored });
+      render(
+        <RetryPolicyEditor value={value} onChange={update} disabled={false} />,
+      );
+      expect(screen.getByLabelText("Retry scope")).toHaveValue("unsupported");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Unsupported authored retry policy",
+      );
+      expect(applyButton()).toBeDisabled();
+      expect(update).not.toHaveBeenCalled();
+      fireEvent.change(screen.getByLabelText("Retry scope"), {
+        target: { value: "off" },
+      });
+      fireEvent.click(applyButton());
+      expect(JSON.parse(update.mock.calls[0][0])).toEqual(
+        JSON.parse(containerSpec()),
+      );
+    },
+  );
+
+  it("does not carry a different job's authority or unsaved scope when switching jobs", () => {
+    const update = vi.fn();
+    const value = JSON.stringify({
+      ...JSON.parse(containerSpec()),
+      jobs: [
+        { name: "plain", retry },
+        { name: "approved", retry, approval: gate },
+        { name: "continued", retry, steps: [{ continueOnError: true }] },
+      ],
+    });
+    render(
+      <RetryPolicyEditor value={value} onChange={update} disabled={false} />,
+    );
+    expect(applyButton()).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Retry scope"), {
+      target: { value: "whole_job" },
+    });
+    for (const index of ["1", "2"]) {
+      fireEvent.change(screen.getByLabelText("Retry job"), {
+        target: { value: index },
+      });
+      expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
+      expect(applyButton()).toBeDisabled();
+    }
+    fireEvent.change(screen.getByLabelText("Retry job"), {
+      target: { value: "0" },
+    });
+    expect(screen.getByLabelText("Retry scope")).toHaveValue("failed_step");
+    expect(applyButton()).toBeEnabled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("disables supported failed-step edits under read-only permission", () => {
+    const update = vi.fn();
+    render(
+      <RetryPolicyEditor
+        value={containerSpec({ retry })}
+        onChange={update}
+        disabled
+      />,
+    );
+    expect(screen.getByLabelText("Retry scope")).toBeDisabled();
+    expect(screen.getByLabelText("Maximum attempts")).toBeDisabled();
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(applyButton()).toBeDisabled();
+    fireEvent.click(applyButton());
+    expect(update).not.toHaveBeenCalled();
+  });
 });

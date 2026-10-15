@@ -1,12 +1,9 @@
 import { retryFixture } from "./retry-approval-fixture.mjs";
+import { assertContainerRetryDraft } from "./retry-policy-fixture.mjs";
 /** Fixture-driven browser regression test. This does not replace real backend integration tests. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import {
-  isNativeOptionDisabled,
-  runBrowserTest,
-  selectedRunStatus,
-} from "./browser-harness.mjs";
+import { runBrowserTest, selectedRunStatus } from "./browser-harness.mjs";
 import {
   applyArtifactRunFilter,
   assertArtifactControlLayout,
@@ -92,6 +89,15 @@ await runBrowserTest(
       downloadAvailable: index !== 20,
       ...(index === 20 ? { unavailableReason: "Retention period ended" } : {}),
     }));
+    const repositorySpec = {
+      name: "Build API",
+      jobs: [
+        {
+          name: "build",
+          steps: [{ name: "Compile", run: "go build ./..." }],
+        },
+      ],
+    };
     let mode = "normal";
     let starts = 0;
     let cancellations = 0;
@@ -316,15 +322,7 @@ await runBrowserTest(
       if (/\/runs\/[^/]+$/.test(path)) return ok(run);
       if (path === "/pipelines/pipeline-1/spec")
         return ok({
-          spec: {
-            name: "Build API",
-            jobs: [
-              {
-                name: "build",
-                steps: [{ name: "Compile", run: "go build ./..." }],
-              },
-            ],
-          },
+          spec: repositorySpec,
           format: "SPEC_FORMAT_JSON",
           headCommitSha: "a".repeat(40),
           deploymentPlan: null,
@@ -335,6 +333,11 @@ await runBrowserTest(
         return ok({ jobsCount: 1, warnings: [] });
       if (path.endsWith("/spec/save")) {
         saves++;
+        assert.deepEqual(
+          request.postDataJSON().spec,
+          repositorySpec,
+          "Explicit save must use the restored definition, never a transient retry fixture",
+        );
         assert.equal(
           request.postDataJSON().expectedHeadCommitSha,
           "a".repeat(40),
@@ -392,82 +395,23 @@ await runBrowserTest(
     await selectedRunStatus(page, "run-2", "Cancelled").waitFor();
     assert.equal(cancellations, 1);
     await page.getByRole("button", { name: "Definition", exact: true }).click();
-    // Draft-only scope checks use this explicitly simulated Definition dialog.
-    // Restore its original JSON before the existing validate/save assertions.
+    setStage("container-failed-step-draft");
     const definition = page.getByRole("textbox", {
       name: "Pipeline definition JSON",
     });
     await definition.waitFor();
-    const originalDefinition = await definition.inputValue();
-    const containerDefinition = JSON.parse(originalDefinition);
-    containerDefinition.runtime = { type: "containerd-offline-v1" };
-    containerDefinition.jobs[0].retry = {
-      mode: "failed_step",
-      maxAttempts: 2,
-      allowedExitCodes: [9],
-      idempotent: true,
-    };
-    const authoredContainerDefinition = JSON.stringify(containerDefinition);
-    await definition.fill(authoredContainerDefinition);
-    await page
-      .getByText("Retry policy · off unless explicitly configured", {
-        exact: true,
-      })
-      .click();
-    const retryScope = page.getByRole("combobox", { name: "Retry scope" });
-    const applyRetry = page.getByRole("button", {
-      name: "Apply retry policy to draft",
-      exact: true,
+    const beforeRetryEdits = { saves, starts, cancellations, approvalVotes };
+    await assertContainerRetryDraft({
+      page,
+      definition,
+      assertNoSave: () =>
+        assert.deepEqual(
+          { saves, starts, cancellations, approvalVotes },
+          beforeRetryEdits,
+          "Retry draft controls must not save, run, cancel or approve anything",
+        ),
     });
-    assert.equal(await retryScope.inputValue(), "failed_step");
-    // Playwright isDisabled() follows an enclosing label to its select.
-    // Assert the actual option's native state without that retargeting.
-    assert.equal(
-      await retryScope
-        .locator('option[value="failed_step"]')
-        .evaluate(isNativeOptionDisabled),
-      true,
-    );
-    assert.equal(await applyRetry.isDisabled(), true);
-    await page.getByText(/must enable allowWholeJobRetry/).waitFor();
-    assert.match(
-      await page.getByRole("note").innerText(),
-      /Failed-step retry is unsupported/,
-    );
-    assert.equal(await definition.inputValue(), authoredContainerDefinition);
-    await retryScope.selectOption("whole_job");
-    assert.equal(await applyRetry.isEnabled(), true);
-    assert.match(
-      await page.getByRole("note").innerText(),
-      /fresh session, rootfs, and workspace, with the pinned source SHA and input artifacts/,
-    );
-    assert.equal(await definition.inputValue(), authoredContainerDefinition);
-    containerDefinition.jobs[0].retry.mode = "whole_job";
-    containerDefinition.jobs[0].approval = {};
-    const approvalDefinition = JSON.stringify(containerDefinition);
-    await definition.fill(approvalDefinition);
-    assert.equal(await retryScope.inputValue(), "whole_job");
-    assert.equal(
-      await retryScope
-        .locator('option[value="whole_job"]')
-        .evaluate(isNativeOptionDisabled),
-      true,
-    );
-    assert.equal(await applyRetry.isDisabled(), true);
-    await page.getByText(/Container retry with approval requires/).waitFor();
-    assert.equal(await definition.inputValue(), approvalDefinition);
-    await retryScope.selectOption("off");
-    await applyRetry.click();
-    const removedRetry = JSON.parse(await definition.inputValue());
-    delete containerDefinition.jobs[0].retry;
-    assert.deepEqual(removedRetry, containerDefinition);
-    assert.equal(saves, 0, "Retry draft edits must not save to the repository");
-    await definition.fill(originalDefinition);
-    await page
-      .getByText("Retry policy · off unless explicitly configured", {
-        exact: true,
-      })
-      .click();
+    setStage("fixture-regression");
     await page.getByRole("button", { name: "Validate", exact: true }).click();
     await page.getByText("Valid definition · 1 jobs").waitFor();
     await page
@@ -907,7 +851,7 @@ await runBrowserTest(
     await approvalDialog.waitFor({ state: "hidden" });
     await page.setViewportSize({ width: 1440, height: 1050 });
     console.log(
-      `UI fixture smoke passed: run/dismiss/cancel, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile. Screenshots: ${output}`,
+      `UI fixture smoke passed: run/dismiss/cancel, container failed-step draft guards/no autosave, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile. Screenshots: ${output}`,
     );
   },
 );
