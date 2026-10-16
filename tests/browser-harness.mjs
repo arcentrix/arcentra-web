@@ -259,11 +259,27 @@ export function actualBackendConfig(env = process.env) {
     "ARCENTRA_ACCEPTANCE_BACKEND_URL",
   );
   assert.equal(backend.pathname, "/", "Backend URL must be an origin");
-  const repository = loopbackURL(
-    required("ARCENTRA_ACCEPTANCE_REPO_URL"),
-    "ARCENTRA_ACCEPTANCE_REPO_URL",
-    ["http:", "git:"],
+  const profile = env.ARCENTRA_ACCEPTANCE_PROFILE;
+  assert.ok(
+    profile === undefined || profile === "image-build-v1",
+    "Unsupported acceptance profile",
   );
+  const repositoryValue = required("ARCENTRA_ACCEPTANCE_REPO_URL");
+  // The image fixture's Agent reaches this single Git service on its private
+  // Docker bridge. Compare raw input so URL normalization cannot widen access.
+  if (profile === "image-build-v1")
+    assert.equal(
+      repositoryValue,
+      "git://git:9418/acceptance.git",
+      "Image acceptance repository must be the exact private fixture URL",
+    );
+  const repository =
+    profile === "image-build-v1"
+      ? new URL(repositoryValue)
+      : loopbackURL(repositoryValue, "ARCENTRA_ACCEPTANCE_REPO_URL", [
+          "http:",
+          "git:",
+        ]);
   const artifactName = required("ARCENTRA_ACCEPTANCE_ARTIFACT_NAME");
   assert.ok(
     !/[\\/\u0000-\u001f]/.test(artifactName),
