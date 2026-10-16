@@ -26,12 +26,19 @@ import {
 import { JSDOM } from "jsdom";
 import {
   actualBackendConfig,
+  assertFirstBuildSnapshot,
+  firstBuildConfiguredSteps,
+  firstBuildJourney,
+  firstBuildPreflightSteps,
+  firstBuildReadinessEvidence,
+  preflightStepsFromSummary,
   artifactDownloadEvidence,
   expectedResourceError,
   isNativeOptionDisabled,
   loopbackURL,
   safeFailureEvidence,
   selectedRunStatus,
+  writeCompletedBuildReceipt,
 } from "./browser-harness.mjs";
 import { fileURLToPath } from "node:url";
 import {
@@ -538,6 +545,220 @@ const buildEnv = () => ({
   ARCENTRA_ACCEPTANCE_EXPECTED_OUTPUT:
     '{"message":"HELLO, ARCENTRA!","length":8}\n',
   ARCENTRA_ACCEPTANCE_COORDINATION_DIR: "/tmp/private-fixture/coordination",
+});
+
+test("actual acceptance phase defaults to the full build and rejects any unknown skip mode", () => {
+  assert.equal(actualBackendConfig(buildEnv()).phase, "build");
+  for (const phase of ["preflight", "build"])
+    assert.equal(
+      actualBackendConfig({ ...buildEnv(), ARCENTRA_ACCEPTANCE_PHASE: phase })
+        .phase,
+      phase,
+    );
+  for (const phase of ["", "skip", "preflight-only", "false", "BUILD"])
+    assert.throws(
+      () =>
+        actualBackendConfig({
+          ...buildEnv(),
+          ARCENTRA_ACCEPTANCE_PHASE: phase,
+        }),
+      /acceptance phase/,
+    );
+  const text = {
+    ARCENTRA_ACCEPTANCE_BACKEND_URL: "http://127.0.0.1:18080",
+    ARCENTRA_ACCEPTANCE_REPO_URL: "git://127.0.0.1:19418/acceptance.git",
+    ARCENTRA_ACCEPTANCE_ORG_ID: "ci-org",
+    ARCENTRA_ACCEPTANCE_ARTIFACT_NAME: "report.json",
+    ARCENTRA_ACCEPTANCE_ARTIFACT_CONTENT: "synthetic output",
+    ARCENTRA_ACCEPTANCE_PHASE: "preflight",
+  };
+  assert.throws(() => actualBackendConfig(text), /full build contract/);
+});
+
+test("preflight never writes a success receipt and a full build requires completed journey evidence", async () => {
+  const calls = [];
+  const write = async (...args) => calls.push(args);
+  const preflight = actualBackendConfig({
+    ...buildEnv(),
+    ARCENTRA_ACCEPTANCE_PHASE: "preflight",
+  });
+  const build = actualBackendConfig(buildEnv());
+  const result = {
+    projectId: "project",
+    pipelineId: "pipeline",
+    runId: "fixed-run",
+    sourceCommit: "b".repeat(40),
+  };
+  await writeCompletedBuildReceipt(preflight, undefined, write);
+  assert.deepEqual(calls, []);
+  await assert.rejects(
+    writeCompletedBuildReceipt(preflight, result, write),
+    /cannot produce a successful build/,
+  );
+  await assert.rejects(
+    writeCompletedBuildReceipt(build, undefined, write),
+    /Full browser journey must finish/,
+  );
+  assert.deepEqual(calls, []);
+  await writeCompletedBuildReceipt(build, result, write);
+  assert.deepEqual(calls, [[build, "successful-run.json", result]]);
+  await assert.rejects(
+    writeCompletedBuildReceipt({ ...build, phase: "skip" }, result, write),
+    /Known acceptance phase/,
+  );
+  await assert.rejects(
+    writeCompletedBuildReceipt(build, result, async () => {
+      throw new Error("receipt unavailable");
+    }),
+    /receipt unavailable/,
+  );
+});
+
+const firstBuildState = (configured) => ({
+  scopeOptions: [],
+  scopeOptionsTruncated: false,
+  canEnterScope: true,
+  configuration: {
+    access: "visible",
+    defaultStorageConfigured: configured,
+    agentSigningConfigured: configured,
+  },
+  agent: { access: "visible", enabledRecentlySeen: configured },
+});
+
+test("real first-use response assertions require exact missing/configured state and no fabricated scope", () => {
+  for (const configured of [false, true]) {
+    assertFirstBuildSnapshot(firstBuildState(configured), configured);
+    assert.throws(() =>
+      assertFirstBuildSnapshot(firstBuildState(!configured), configured),
+    );
+    for (const patch of [
+      { scopeOptions: [{ scopeId: "fabricated-org", source: "role_grant" }] },
+      { scopeOptionsTruncated: true },
+      { canEnterScope: false },
+      { canEnterScope: 1 },
+      { configuration: { access: "restricted" } },
+      {
+        configuration: {
+          ...firstBuildState(configured).configuration,
+          endpoint: "private-host",
+        },
+      },
+      {
+        configuration: {
+          access: "visible",
+          defaultStorageConfigured: configured,
+        },
+      },
+      { agent: { access: "restricted" } },
+      { agent: { access: "visible", enabledRecentlySeen: Number(configured) } },
+      {
+        agent: {
+          ...firstBuildState(configured).agent,
+          agentId: "private-agent",
+        },
+      },
+      { token: "private-secret" },
+    ])
+      assert.throws(() =>
+        assertFirstBuildSnapshot(
+          { ...firstBuildState(configured), ...patch },
+          configured,
+        ),
+      );
+    for (const absent of [null, [], undefined, {}])
+      assert.throws(() => assertFirstBuildSnapshot(absent, configured));
+  }
+});
+
+test("final first-use summary retains a complete same-source preflight with separate-context labeling", () => {
+  const sourceCommit = "a".repeat(40);
+  const preflight = {
+    kind: "actual-backend",
+    status: "passed",
+    stage: "preflight-complete",
+    ...firstBuildReadinessEvidence({
+      phase: "preflight",
+      sourceCommit,
+      steps: [...firstBuildPreflightSteps],
+    }),
+  };
+  const retained = preflightStepsFromSummary(preflight, sourceCommit);
+  assert.deepEqual(retained, firstBuildPreflightSteps);
+  const final = firstBuildReadinessEvidence({
+    phase: "build",
+    sourceCommit,
+    steps: [...retained, ...firstBuildConfiguredSteps],
+  });
+  assert.deepEqual(final.firstBuildReadiness, {
+    journey: firstBuildJourney,
+    phase: "build",
+    sourceCommit,
+    steps: [...firstBuildPreflightSteps, ...firstBuildConfiguredSteps],
+  });
+  for (const patch of [
+    { status: "failed" },
+    { stage: "journey-complete" },
+    { kind: "simulated-transport" },
+  ])
+    assert.throws(
+      () => preflightStepsFromSummary({ ...preflight, ...patch }, sourceCommit),
+      /successful same-source/,
+    );
+  for (const patch of [
+    { phase: "build" },
+    { journey: "continuous-session" },
+    { sourceCommit: "b".repeat(40) },
+    { steps: firstBuildPreflightSteps.slice(0, -1) },
+    { steps: [...firstBuildPreflightSteps, "journey-complete"] },
+    { token: "private-secret" },
+  ])
+    assert.throws(
+      () =>
+        preflightStepsFromSummary(
+          {
+            ...preflight,
+            firstBuildReadiness: { ...preflight.firstBuildReadiness, ...patch },
+          },
+          sourceCommit,
+        ),
+      /successful same-source/,
+    );
+  for (const empty of [null, undefined, {}])
+    assert.throws(() => preflightStepsFromSummary(empty, sourceCommit));
+});
+
+test("first-use public summary allows only static steps, phase and a full commit", () => {
+  assert.deepEqual(firstBuildReadinessEvidence(undefined), {});
+  const evidence = firstBuildReadinessEvidence({
+    phase: "preflight",
+    sourceCommit: "a".repeat(40),
+    steps: [
+      firstBuildPreflightSteps[0],
+      "private-token-secret",
+      { secret: "private-secret" },
+    ],
+    token: "private-secret",
+    endpoint: "https://private.example",
+  });
+  assert.deepEqual(evidence.firstBuildReadiness.steps, [
+    firstBuildPreflightSteps[0],
+  ]);
+  assert.equal(JSON.stringify(evidence).includes("private"), false);
+  assert.throws(() =>
+    firstBuildReadinessEvidence({
+      phase: "skip",
+      sourceCommit: "a".repeat(40),
+      steps: [],
+    }),
+  );
+  assert.throws(() =>
+    firstBuildReadinessEvidence({
+      phase: "build",
+      sourceCommit: "token-secret",
+      steps: [],
+    }),
+  );
 });
 
 function sampleBuild() {

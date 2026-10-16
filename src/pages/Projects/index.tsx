@@ -10,6 +10,11 @@ import {
 import { listProjects, createProject } from "@/api/project";
 import { useMountedRef } from "@/hooks/use-mounted-ref";
 import { useApiResource } from "@/hooks/use-api-resource";
+import {
+  useFirstBuild,
+  type FirstBuildResource,
+} from "@/hooks/use-first-build";
+import { FirstBuildGuidance } from "@/components/build/first-build-guidance";
 import { useScopedPermission } from "@/hooks/use-scoped-permission";
 import { PageHeader } from "@/components/page-header";
 import { Panel } from "@/components/blueprint";
@@ -32,6 +37,7 @@ export default function Projects() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
+  const firstBuild = useFirstBuild();
   const projects = useApiResource(`projects:${page}:${search}`, (signal) =>
     listProjects({ name: search, pageNum: page }, signal),
   );
@@ -42,12 +48,19 @@ export default function Projects() {
         title="Projects"
         sub="Your repositories and their build pipelines."
         action={
-          <Button size="sm" onClick={() => setOpen(true)}>
+          <Button
+            size="sm"
+            onClick={() => {
+              firstBuild.refresh();
+              setOpen(true);
+            }}
+          >
             <Plus className="size-3.5" />
             New project
           </Button>
         }
       />
+      <FirstBuildGuidance readiness={firstBuild} />
       <div className="flex items-center gap-2">
         <Input
           aria-label="Search projects"
@@ -151,6 +164,7 @@ export default function Projects() {
       )}
       {open && (
         <CreateProjectDialog
+          readiness={firstBuild}
           onClose={() => setOpen(false)}
           onCreated={(id) => {
             setOpen(false);
@@ -162,9 +176,11 @@ export default function Projects() {
   );
 }
 function CreateProjectDialog({
+  readiness,
   onClose,
   onCreated,
 }: {
+  readiness: FirstBuildResource;
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
@@ -177,6 +193,9 @@ function CreateProjectDialog({
   const [error, setError] = useState("");
   const pending = useRef(false);
   const mounted = useMountedRef();
+  const currentReadiness =
+    !readiness.loading && !readiness.error ? readiness.data : undefined;
+  const options = currentReadiness?.scopeOptions ?? [];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (pending.current || !permission.has("org:create_project")) return;
@@ -193,10 +212,14 @@ function CreateProjectDialog({
       });
       if (mounted.current) onCreated(project.projectId);
     } catch (err) {
-      setError(errorMessage(err));
+      if (mounted.current) {
+        setError(errorMessage(err));
+        permission.refresh();
+        readiness.refresh();
+      }
     } finally {
       pending.current = false;
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
   return (
@@ -206,7 +229,7 @@ function CreateProjectDialog({
         if (!value && !saving) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New project</DialogTitle>
           <DialogDescription>
@@ -215,6 +238,71 @@ function CreateProjectDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2">
+            <label className="block space-y-1 text-sm">
+              <span>Authorized organization scopes</span>
+              <select
+                className="h-9 min-w-0 w-full max-w-full rounded-md border border-input bg-background px-3 text-sm"
+                aria-describedby="project-authorized-scopes-help"
+                disabled={saving || !options.length}
+                value={
+                  options.some((option) => option.scopeId === orgId)
+                    ? orgId
+                    : ""
+                }
+                onChange={(event) => setOrgId(event.target.value)}
+              >
+                <option value="">
+                  Choose a scope or enter an approved ID below
+                </option>
+                {options.map((option) => (
+                  <option key={option.scopeId} value={option.scopeId}>
+                    {option.scopeId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p
+              id="project-authorized-scopes-help"
+              className="text-xs text-muted-foreground"
+            >
+              Current role-grant scope IDs only, not an organization directory
+              or proof of membership. Permission is checked for the entered
+              scope and by the server when you create the project.
+            </p>
+            {readiness.loading && (
+              <p role="status" className="text-xs text-muted-foreground">
+                Loading authorized scopes…
+              </p>
+            )}
+            {readiness.error && (
+              <p role="alert" className="text-xs text-destructive">
+                Authorized scopes unavailable. Refresh to try again; you may
+                still enter an administrator-approved ID.
+              </p>
+            )}
+            {currentReadiness && !options.length && (
+              <p className="text-xs text-muted-foreground">
+                No authorized organization scopes were returned. Ask your
+                administrator for an approved ID and access.
+              </p>
+            )}
+            {currentReadiness?.scopeOptionsTruncated && (
+              <p className="text-xs text-muted-foreground">
+                Scope lookup reached its limit. Other authorized scopes may not
+                be shown; enter an approved ID below.
+              </p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={saving}
+              onClick={readiness.refresh}
+            >
+              Refresh authorized scopes
+            </Button>
+          </div>
           <label className="block space-y-1 text-sm">
             <span>Organization ID</span>
             <Input

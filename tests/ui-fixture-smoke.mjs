@@ -98,6 +98,18 @@ await runBrowserTest(
         },
       ],
     };
+    let firstBuild = {
+      scopeOptions: [{ scopeId: "org-1", source: "role_grant" }],
+      scopeOptionsTruncated: false,
+      canEnterScope: true,
+      configuration: {
+        access: "visible",
+        defaultStorageConfigured: false,
+        agentSigningConfigured: false,
+      },
+      agent: { access: "visible", enabledRecentlySeen: false },
+    };
+    let firstBuildError = false;
     let mode = "normal";
     let starts = 0;
     let cancellations = 0;
@@ -124,6 +136,14 @@ await runBrowserTest(
             isEnabled: true,
           },
         ]);
+      if (path === "/me/first-build" && request.method() === "GET") {
+        if (firstBuildError)
+          return route.fulfill({
+            status: 503,
+            json: { code: 500, errMsg: "Readiness temporarily unavailable" },
+          });
+        return ok(firstBuild);
+      }
       if (path === "/me/routes") return ok(["/build", "/projects"]);
       if (path === "/me/effective-actions")
         return ok(artifactMode === "restricted" ? [] : ["*:*"]);
@@ -492,6 +512,140 @@ await runBrowserTest(
     await page
       .getByRole("heading", { name: "API service", exact: true })
       .waitFor();
+    await page
+      .getByRole("list", { name: "Setup snapshot", exact: true })
+      .waitFor();
+    assert.match(
+      await page
+        .getByRole("list", { name: "Setup snapshot", exact: true })
+        .innerText(),
+      /Not configured/,
+    );
+    const readinessRefresh = page.getByRole("button", {
+      name: "Refresh first-build status",
+    });
+    firstBuild = {
+      ...firstBuild,
+      configuration: {
+        access: "visible",
+        defaultStorageConfigured: true,
+        agentSigningConfigured: true,
+      },
+      agent: { access: "visible", enabledRecentlySeen: true },
+    };
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/me/first-build" &&
+          response.status() === 200,
+      ),
+      readinessRefresh.click(),
+    ]);
+    await page
+      .getByRole("listitem")
+      .filter({
+        hasText: "Default artifact storage: Configured (persisted record).",
+      })
+      .waitFor();
+    assert.match(
+      await page
+        .getByRole("list", { name: "Setup snapshot", exact: true })
+        .innerText(),
+      /does not guarantee job capacity/,
+    );
+    expectHttpError("/api/v1/me/first-build", 503);
+    firstBuildError = true;
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/me/first-build" &&
+          response.status() === 503,
+      ),
+      readinessRefresh.click(),
+    ]);
+    await page
+      .getByRole("list", { name: "Previous setup snapshot", exact: true })
+      .waitFor();
+    await page.getByText(/First-build status unavailable/).waitFor();
+    firstBuildError = false;
+    await readinessRefresh.click();
+    await page
+      .getByRole("list", { name: "Setup snapshot", exact: true })
+      .waitFor();
+    const setupToggle = page.getByRole("button", {
+      name: "First build setup",
+      exact: true,
+    });
+    await setupToggle.click();
+    assert.equal(await setupToggle.getAttribute("aria-expanded"), "false");
+    await setupToggle.click();
+    for (const viewport of [
+      { width: 320, height: 568 },
+      { width: 1440, height: 1050 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page
+        .getByRole("button", { name: "New project", exact: true })
+        .click();
+      const scopeChoices = page.getByRole("combobox", {
+        name: "Authorized organization scopes",
+      });
+      await scopeChoices
+        .locator('option[value="org-1"]')
+        .waitFor({ state: "attached" });
+      assert.equal(
+        await page
+          .getByRole("textbox", { name: "Organization ID" })
+          .inputValue(),
+        "",
+      );
+      await scopeChoices.selectOption("org-1");
+      assert.equal(
+        await page
+          .getByRole("textbox", { name: "Organization ID" })
+          .inputValue(),
+        "org-1",
+      );
+      const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+      await cancel.scrollIntoViewIfNeeded();
+      // Modal controls may overlap the launcher behind their overlay. Verify
+      // actual hit targets rather than applying the artifact layout's no-overlap rule.
+      const cancelReachable = await cancel.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.left >= 0 &&
+          rect.right <= innerWidth &&
+          rect.top >= 0 &&
+          rect.bottom <= innerHeight &&
+          [0.25, 0.5, 0.75].every((x) =>
+            [0.25, 0.5, 0.75].every((y) =>
+              element.contains(
+                document.elementFromPoint(
+                  rect.left + rect.width * x,
+                  rect.top + rect.height * y,
+                ),
+              ),
+            ),
+          )
+        );
+      });
+      assert.equal(
+        cancelReachable,
+        true,
+        "New project Cancel must fit and receive pointer input",
+      );
+      await cancel.click({ trial: true });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > window.innerWidth,
+        ),
+        false,
+      );
+      await cancel.click();
+      await page.getByRole("dialog").waitFor({ state: "hidden" });
+    }
     const projectURL = `${base}/projects/project-1`;
     const pipelinesURL = `${projectURL}/pipelines`;
     const assertProjectOverview = async () => {

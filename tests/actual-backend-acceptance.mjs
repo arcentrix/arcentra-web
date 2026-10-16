@@ -6,8 +6,13 @@ import assert from "node:assert/strict";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import {
   actualBackendConfig,
+  assertFirstBuildSnapshot,
+  firstBuildConfiguredSteps,
+  firstBuildPreflightSteps,
+  preflightStepsFromSummary,
   runBrowserTest,
   selectedRunStatus,
+  writeCompletedBuildReceipt,
 } from "./browser-harness.mjs";
 import {
   applyArtifactRunFilter,
@@ -26,15 +31,48 @@ import {
 // cannot silently fall back to the simulated-transport regression suite.
 const config = actualBackendConfig();
 const projectBuild = config.artifactMode === buildContract.version;
+const preflight = config.phase === "preflight";
+const firstBuildEvidence = projectBuild
+  ? { phase: config.phase, sourceCommit: config.expectedCommit, steps: [] }
+  : undefined;
 let successfulBuild;
 await runBrowserTest(
   "actual-backend",
   async ({ page, base, output, diagnostics, expectHttpError, setStage }) => {
-    const receipt = { kind: "actual-backend", syntheticData: true, steps: [] };
+    const receipt = {
+      kind: "actual-backend",
+      phase: config.phase,
+      syntheticData: true,
+      steps: [],
+    };
+    const productMutations = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (
+        path.startsWith("/api/") &&
+        !["GET", "HEAD", "OPTIONS"].includes(request.method()) &&
+        path !== "/api/v1/users/login"
+      )
+        productMutations.push({ method: request.method(), path });
+    });
+    if (projectBuild && !preflight) {
+      setStage("first-build-preflight-evidence");
+      // The first invocation wrote this allowlisted summary only after its
+      // browser/network safeguards passed. The final summary retains those
+      // fixed same-source facts; these are explicitly separate contexts.
+      const prior = await readFile(`${output}/summary.json`, "utf8");
+      assert.ok(
+        Buffer.byteLength(prior) <= 4096,
+        "Preflight summary must be bounded",
+      );
+      firstBuildEvidence.steps.push(
+        ...preflightStepsFromSummary(JSON.parse(prior), config.expectedCommit),
+      );
+    }
     const record = async (step, details = {}) => {
       receipt.steps.push({ step, ...details });
       await writeFile(
-        `${output}/journey.json`,
+        `${output}/${preflight ? "preflight-" : ""}journey.json`,
         `${JSON.stringify(receipt, null, 2)}\n`,
       );
     };
@@ -79,15 +117,97 @@ await runBrowserTest(
     setStage("login");
     const userLabel = await login();
     await record("login-via-real-api");
-    setStage("project-create");
+    if (preflight) firstBuildEvidence.steps.push(firstBuildPreflightSteps[0]);
+    setStage("first-build-status");
+    const setupResponse = responseFor("GET", "/me/first-build");
+    const initialProjects = responseFor("GET", "/project/");
+    setupResponse.catch(() => {});
+    initialProjects.catch(() => {});
     await page.goto(`${base}/projects`);
     await page
       .getByRole("heading", { name: "Projects", exact: true })
       .waitFor();
+    const initialProjectList = await envelope(await initialProjects);
+    assert.equal(
+      initialProjectList.total,
+      0,
+      "Both first-use phases start before project creation",
+    );
+    assert.equal((initialProjectList.list || []).length, 0);
+    assertFirstBuildSnapshot(await envelope(await setupResponse), !preflight);
+    const assertVisibleSetup = async () => {
+      await page
+        .getByRole("button", {
+          name: "First build setup",
+          exact: true,
+          expanded: true,
+        })
+        .waitFor();
+      const snapshot = page.getByRole("list", {
+        name: "Setup snapshot",
+        exact: true,
+      });
+      await snapshot.waitFor();
+      for (const text of [
+        "No authorized organization scopes were returned.",
+        "Your platform permission allows you to enter an existing administrator-approved scope ID.",
+        preflight
+          ? "Not configured. An administrator must configure enabled default storage through the setup API/CLI."
+          : "Configured (persisted record).",
+        preflight
+          ? "Not configured. An administrator must configure Agent signing through the setup API/CLI."
+          : "Configured (persisted values).",
+        preflight
+          ? "No enabled Agent was seen recently."
+          : "An enabled Agent was seen recently.",
+      ])
+        await snapshot.getByText(text, { exact: false }).waitFor();
+      await page
+        .getByText("Configured means saved, not connectivity tested.", {
+          exact: false,
+        })
+        .waitFor();
+    };
+    await assertVisibleSetup();
+    firstBuildEvidence?.steps.push(
+      preflight ? firstBuildPreflightSteps[1] : firstBuildConfiguredSteps[0],
+    );
+    await record(
+      preflight ? firstBuildPreflightSteps[1] : firstBuildConfiguredSteps[0],
+    );
     await page.screenshot({
-      path: `${output}/01-projects-before-create.png`,
+      path: `${output}/${preflight ? "preflight-01-first-build-missing" : "00-first-build-configured"}.png`,
       fullPage: true,
     });
+    setStage("first-build-refresh");
+    const refreshedSetup = responseFor("GET", "/me/first-build");
+    await page
+      .getByRole("button", { name: "Refresh first-build status", exact: true })
+      .click();
+    assertFirstBuildSnapshot(await envelope(await refreshedSetup), !preflight);
+    await assertVisibleSetup();
+    firstBuildEvidence?.steps.push(
+      preflight ? firstBuildPreflightSteps[2] : firstBuildConfiguredSteps[1],
+    );
+    await record(
+      preflight ? firstBuildPreflightSteps[2] : firstBuildConfiguredSteps[1],
+    );
+    await page.screenshot({
+      path: `${output}/${preflight ? "preflight-02-first-build-refreshed" : "01-projects-before-create"}.png`,
+      fullPage: true,
+    });
+    if (preflight) {
+      assert.equal(
+        productMutations.length,
+        0,
+        "First-use preflight must not mutate product state",
+      );
+      firstBuildEvidence.steps.push(firstBuildPreflightSteps[3]);
+      await record(firstBuildPreflightSteps[3]);
+      setStage("preflight-complete");
+      return;
+    }
+    setStage("project-create");
 
     // Dismissal must not create a project. The real backend starts empty.
     await page
@@ -656,9 +776,12 @@ await runBrowserTest(
     }
     setStage("journey-complete");
   },
-  { backend: config.backend, totalTimeoutMs: projectBuild ? 600_000 : 300_000 },
+  {
+    backend: config.backend,
+    totalTimeoutMs: preflight ? 90_000 : projectBuild ? 600_000 : 300_000,
+    firstBuildEvidence,
+  },
 );
 // The backend may verify/execute its trusted fixture only after the browser
 // journey AND the harness console/network/error safeguards have all passed.
-if (projectBuild)
-  await writeBuildReceipt(config, "successful-run.json", successfulBuild);
+await writeCompletedBuildReceipt(config, successfulBuild, writeBuildReceipt);
