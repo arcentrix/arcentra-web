@@ -1,3 +1,4 @@
+import { pollingFixture, assertPollingSetup } from "./polling-fixture.mjs";
 import { retryFixture } from "./retry-approval-fixture.mjs";
 import { assertContainerRetryDraft } from "./retry-policy-fixture.mjs";
 /** Fixture-driven browser regression test. This does not replace real backend integration tests. */
@@ -109,12 +110,14 @@ await runBrowserTest(
       },
       agent: { access: "visible", enabledRecentlySeen: false },
     };
+    const polling = pollingFixture();
     let firstBuildError = false;
     let mode = "normal";
     let starts = 0;
     let cancellations = 0;
     let saves = 0;
     await page.route("**/api/v1/**", async (route) => {
+      if (await polling.route(route)) return;
       const request = route.request();
       const url = new URL(request.url());
       const path = url.pathname.replace("/api/v1", "");
@@ -700,6 +703,12 @@ await runBrowserTest(
       .getByRole("button", { name: "View pipelines", exact: true })
       .click();
     await assertProjectPipelines();
+    await assertPollingSetup({
+      page,
+      fixture: polling,
+      output,
+      expectHttpError,
+    });
     await page.goBack();
     await assertProjectOverview();
     await page.goForward();
