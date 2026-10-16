@@ -1,6 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  unlink,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  buildContract,
+  fixedSourceCommit,
+  saveBuildDownloads,
+  verifyBuildDownloads,
+  waitForFixedSource,
+  writeBuildReceipt,
+} from "./stdlib-build-contract.mjs";
 import { JSDOM } from "jsdom";
 import {
   actualBackendConfig,
@@ -503,3 +525,395 @@ for (const obstructed of [false, true]) {
     ]);
   });
 }
+
+const buildEnv = () => ({
+  ARCENTRA_ACCEPTANCE_BACKEND_URL: "http://127.0.0.1:18080",
+  ARCENTRA_ACCEPTANCE_REPO_URL: "git://127.0.0.1:19418/acceptance.git",
+  ARCENTRA_ACCEPTANCE_ORG_ID: "ci-org",
+  ARCENTRA_ACCEPTANCE_ARTIFACT_NAME: "stdlib-demo",
+  ARCENTRA_ACCEPTANCE_CONTRACT: "stdlib-build-v1",
+  ARCENTRA_ACCEPTANCE_COMMIT: "a".repeat(40),
+  ARCENTRA_ACCEPTANCE_MANIFEST_NAME: "manifest.json",
+  ARCENTRA_ACCEPTANCE_GO_VERSION: "go1.25.6",
+  ARCENTRA_ACCEPTANCE_EXPECTED_OUTPUT:
+    '{"message":"HELLO, ARCENTRA!","length":8}\n',
+  ARCENTRA_ACCEPTANCE_COORDINATION_DIR: "/tmp/private-fixture/coordination",
+});
+
+function sampleBuild() {
+  // Parser unit bytes only; never claimed as compilation/runtime acceptance.
+  const binary = Buffer.concat([
+    Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
+    Buffer.alloc(80, 5),
+  ]);
+  const manifest = {
+    schemaVersion: 1,
+    sourceCommit: "b".repeat(40),
+    goVersion: "go1.25.6",
+    binary: {
+      name: "stdlib-demo",
+      sizeBytes: binary.length,
+      sha256: createHash("sha256").update(binary).digest("hex"),
+    },
+    behavior: {
+      args: ["arcentra"],
+      stdout: buildContract.stdout,
+      stdoutSha256: createHash("sha256")
+        .update(buildContract.stdout)
+        .digest("hex"),
+    },
+  };
+  return { binary, manifest, bytes: Buffer.from(JSON.stringify(manifest)) };
+}
+
+test("explicit stdlib build configuration is pinned and cannot fall back to text mode", () => {
+  const config = actualBackendConfig(buildEnv());
+  assert.equal(config.artifactMode, "stdlib-build-v1");
+  assert.equal(config.artifactContent, undefined);
+  assert.equal(config.manifestName, "manifest.json");
+  assert.throws(
+    () =>
+      actualBackendConfig({
+        ...buildEnv(),
+        UI_TEST_OUTPUT_DIR: "/tmp/private-fixture",
+      }),
+    /outside browser evidence/,
+  );
+  for (const key of [
+    "ARCENTRA_ACCEPTANCE_CONTRACT",
+    "ARCENTRA_ACCEPTANCE_COMMIT",
+    "ARCENTRA_ACCEPTANCE_MANIFEST_NAME",
+    "ARCENTRA_ACCEPTANCE_GO_VERSION",
+    "ARCENTRA_ACCEPTANCE_EXPECTED_OUTPUT",
+    "ARCENTRA_ACCEPTANCE_COORDINATION_DIR",
+  ]) {
+    const env = buildEnv();
+    delete env[key];
+    assert.throws(() => actualBackendConfig(env), key);
+  }
+  for (const [key, value] of [
+    ["ARCENTRA_ACCEPTANCE_CONTRACT", "stdlib-build-v2"],
+    ["ARCENTRA_ACCEPTANCE_CONTRACT", ""],
+    ["ARCENTRA_ACCEPTANCE_COMMIT", "a".repeat(7)],
+    ["ARCENTRA_ACCEPTANCE_COMMIT", "A".repeat(40)],
+    ["ARCENTRA_ACCEPTANCE_ARTIFACT_CONTENT", "pretend-binary"],
+    ["ARCENTRA_ACCEPTANCE_ARTIFACT_NAME", "other"],
+    ["ARCENTRA_ACCEPTANCE_MANIFEST_NAME", "../manifest.json"],
+    ["ARCENTRA_ACCEPTANCE_GO_VERSION", "go1.26.0"],
+    ["ARCENTRA_ACCEPTANCE_EXPECTED_OUTPUT", "invented behavior"],
+    ["ARCENTRA_ACCEPTANCE_BRANCH", "production"],
+    ["ARCENTRA_ACCEPTANCE_COORDINATION_DIR", "relative"],
+    ["ARCENTRA_ACCEPTANCE_COORDINATION_DIR", "/"],
+    ["ARCENTRA_ACCEPTANCE_COORDINATION_DIR", "/tmp/.."],
+    ["ARCENTRA_ACCEPTANCE_COORDINATION_DIR", "/tmp/unsafe\npath"],
+  ])
+    assert.throws(
+      () => actualBackendConfig({ ...buildEnv(), [key]: value }),
+      `${key}: ${value}`,
+    );
+});
+
+test("binary manifest independently binds full source, pinned toolchain, bytes and behavior", () => {
+  const { binary, bytes, manifest } = sampleBuild();
+  assert.deepEqual(
+    verifyBuildDownloads(bytes, binary, manifest.sourceCommit),
+    manifest,
+  );
+  assert.throws(
+    () => verifyBuildDownloads(bytes, binary, "c".repeat(40)),
+    /checkout commit/,
+  );
+  assert.throws(
+    () => verifyBuildDownloads(bytes, binary, "b".repeat(7)),
+    /full SHA/,
+  );
+  assert.throws(() =>
+    verifyBuildDownloads(
+      bytes,
+      Buffer.from("text-only fake binary"),
+      manifest.sourceCommit,
+    ),
+  );
+  const corrupt = Buffer.from(binary);
+  corrupt[20]++;
+  assert.throws(
+    () => verifyBuildDownloads(bytes, corrupt, manifest.sourceCommit),
+    /SHA-256/,
+  );
+  assert.throws(
+    () =>
+      verifyBuildDownloads(
+        bytes,
+        binary.subarray(0, -1),
+        manifest.sourceCommit,
+      ),
+    /byte length/,
+  );
+  for (const mutate of [
+    (m) => {
+      m.schemaVersion = 2;
+    },
+    (m) => {
+      m.sourceCommit = "b".repeat(7);
+    },
+    (m) => {
+      m.sourceCommit = "a".repeat(40);
+    },
+    (m) => {
+      m.goVersion = "go1.26.0";
+    },
+    (m) => {
+      m.binary.name = "../stdlib-demo";
+    },
+    (m) => {
+      m.binary.sizeBytes = String(binary.length);
+    },
+    (m) => {
+      m.binary.sizeBytes = 0;
+    },
+    (m) => {
+      m.binary.sha256 = m.binary.sha256.toUpperCase();
+    },
+    (m) => {
+      m.binary.sha256 = "0".repeat(64);
+    },
+    (m) => {
+      m.behavior.args = ["other"];
+    },
+    (m) => {
+      m.behavior.stdout = "different";
+      m.behavior.stdoutSha256 = createHash("sha256")
+        .update("different")
+        .digest("hex");
+    },
+    (m) => {
+      m.behavior.stdoutSha256 = "0".repeat(64);
+    },
+    (m) => {
+      delete m.sourceCommit;
+    },
+    (m) => {
+      m.unrecognized = true;
+    },
+    (m) => {
+      m.binary.unrecognized = true;
+    },
+    (m) => {
+      m.behavior.unrecognized = true;
+    },
+    (m) => {
+      m.binary = [];
+    },
+  ]) {
+    const changed = structuredClone(manifest);
+    mutate(changed);
+    assert.throws(() =>
+      verifyBuildDownloads(
+        Buffer.from(JSON.stringify(changed)),
+        binary,
+        manifest.sourceCommit,
+      ),
+    );
+  }
+  for (const bad of [
+    Buffer.from("{"),
+    Buffer.from("null"),
+    Buffer.from("[]"),
+    Buffer.alloc(16385),
+    Buffer.from([0xff]),
+    Buffer.from(
+      bytes
+        .toString()
+        .replace('"schemaVersion":1', '"schemaVersion":2,"schemaVersion":1'),
+    ),
+  ])
+    assert.throws(() =>
+      verifyBuildDownloads(bad, binary, manifest.sourceCommit),
+    );
+});
+
+test("fixed source receipt requires a new complete commit and exact versioned fields", () => {
+  const initial = "a".repeat(40);
+  assert.throws(
+    () =>
+      fixedSourceCommit(
+        { schemaVersion: 1, sourceCommit: "b".repeat(40) },
+        "short",
+      ),
+    /Initial source/,
+  );
+  assert.equal(
+    fixedSourceCommit(
+      { schemaVersion: 1, sourceCommit: "b".repeat(40) },
+      initial,
+    ),
+    "b".repeat(40),
+  );
+  for (const bad of [
+    null,
+    [],
+    {},
+    { schemaVersion: 2, sourceCommit: "b".repeat(40) },
+    { schemaVersion: 1, sourceCommit: initial },
+    { schemaVersion: 1, sourceCommit: "b".repeat(7) },
+    { schemaVersion: 1, sourceCommit: "b".repeat(40), extra: true },
+  ])
+    assert.throws(() => fixedSourceCommit(bad, initial));
+});
+
+test("private build coordination bounds receipts and preserves downloaded bytes without execution", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "arcentra-contract-"));
+  const config = { coordinationDir: directory, expectedCommit: "a".repeat(40) };
+  try {
+    await chmod(directory, 0o700);
+    const details = {
+      projectId: "project-1",
+      pipelineId: "pipeline-1",
+      runId: "run-failed",
+      sourceCommit: config.expectedCommit,
+    };
+    await writeBuildReceipt(config, "failed-run.json", details);
+    for (const runId of ["../unsafe", "unsafe\n", "a".repeat(65)])
+      await assert.rejects(
+        writeBuildReceipt(config, "successful-run.json", { ...details, runId }),
+        /safe fixture identifiers/,
+      );
+    assert.deepEqual(
+      JSON.parse(await readFile(join(directory, "failed-run.json"), "utf8")),
+      { schemaVersion: 1, ...details },
+    );
+    assert.equal(
+      (await stat(join(directory, "failed-run.json"))).mode & 0o777,
+      0o600,
+    );
+    await assert.rejects(stat(join(directory, "failed-run.json.browser-tmp")), {
+      code: "ENOENT",
+    });
+    await assert.rejects(
+      waitForFixedSource(config, { timeoutMs: 1 }),
+      /Timed out/,
+    );
+    await writeFile(
+      join(directory, "fixed-source.json"),
+      JSON.stringify({ schemaVersion: 1, sourceCommit: "b".repeat(40) }),
+      { mode: 0o600 },
+    );
+    assert.equal(await waitForFixedSource(config), "b".repeat(40));
+    await writeFile(join(directory, "fixed-source.json"), " ".repeat(4097));
+    await assert.rejects(
+      waitForFixedSource(config),
+      /bounded single-link regular file/,
+    );
+    await writeFile(
+      join(directory, "fixed-source.json"),
+      '{"schemaVersion":2,"schemaVersion":1,"sourceCommit":"' +
+        "b".repeat(40) +
+        '"}',
+    );
+    await assert.rejects(waitForFixedSource(config), /duplicate keys/);
+    const { bytes, binary, manifest } = sampleBuild();
+    await saveBuildDownloads(config, bytes, binary, manifest.sourceCommit);
+    assert.deepEqual(
+      await readFile(join(directory, "downloads", "stdlib-demo")),
+      binary,
+    );
+    assert.deepEqual(
+      await readFile(join(directory, "downloads", "manifest.json")),
+      bytes,
+    );
+    assert.equal(
+      (await stat(join(directory, "downloads", "stdlib-demo"))).mode & 0o777,
+      0o600,
+    );
+    await assert.rejects(
+      saveBuildDownloads(config, bytes, binary, manifest.sourceCommit),
+      { code: "EEXIST" },
+    );
+    await chmod(directory, 0o755);
+    await assert.rejects(
+      writeBuildReceipt(config, "successful-run.json", {
+        ...details,
+        runId: "run-success",
+      }),
+      /must be private/,
+    );
+    await chmod(directory, 0o700);
+    await symlink(directory, join(directory, "link"));
+    await assert.rejects(
+      waitForFixedSource({
+        ...config,
+        coordinationDir: join(directory, "link"),
+      }),
+      /real directory/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("fixed source receipt refuses symlink, hardlink, public/executable file and FIFO", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "arcentra-receipt-"));
+  const config = { coordinationDir: directory, expectedCommit: "a".repeat(40) };
+  const target = join(directory, "fixed-source.json");
+  const original = join(directory, "source.json");
+  try {
+    await writeFile(
+      original,
+      JSON.stringify({ schemaVersion: 1, sourceCommit: "b".repeat(40) }),
+      { mode: 0o600 },
+    );
+    await symlink(original, target);
+    await assert.rejects(waitForFixedSource(config), { code: "ELOOP" });
+    await unlink(target);
+    await link(original, target);
+    await assert.rejects(waitForFixedSource(config), /single-link/);
+    await unlink(target);
+    await writeFile(target, await readFile(original), { mode: 0o644 });
+    await assert.rejects(
+      waitForFixedSource(config),
+      /private and non-executable/,
+    );
+    await chmod(target, 0o700);
+    await assert.rejects(
+      waitForFixedSource(config),
+      /private and non-executable/,
+    );
+    await unlink(target);
+    execFileSync("mkfifo", [target]);
+    await assert.rejects(waitForFixedSource(config), /regular file/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const artifactCase of [
+  { list: [], total: 0, valid: true },
+  { list: [{ pipelineRunId: "run-failed" }], total: 1, valid: false },
+  { list: [], total: 1, valid: false },
+])
+  test(`failed-run empty artifact check rejects hidden or returned artifacts: ${JSON.stringify(artifactCase)}`, async () => {
+    const observations = [];
+    const page = {
+      getByRole: (role) =>
+        role === "textbox"
+          ? { fill: async () => {} }
+          : { click: async () => {} },
+      waitForResponse: () =>
+        Promise.resolve({
+          status: () => 200,
+          json: async () => ({ code: 200, detail: artifactCase }),
+        }),
+      waitForURL: async () => {},
+      getByText: (text) => ({ waitFor: async () => observations.push(text) }),
+    };
+    const result = applyArtifactRunFilter(page, "project-1", "run-failed", {
+      expectEmpty: true,
+    });
+    if (artifactCase.valid) {
+      assert.deepEqual(await result, []);
+      assert.deepEqual(observations, [
+        "0 matching artifacts",
+        "No artifacts match your filters.",
+      ]);
+    } else await assert.rejects(result);
+  });

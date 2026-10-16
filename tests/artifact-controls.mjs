@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 
 /** A changed URL or old row text alone does not establish a filtered snapshot. */
-export async function applyArtifactRunFilter(page, projectId, runId) {
+export async function applyArtifactRunFilter(
+  page,
+  projectId,
+  runId,
+  { expectEmpty = false } = {},
+) {
   await page.getByRole("textbox", { name: "Run ID", exact: true }).fill(runId);
   const response = page.waitForResponse((value) => {
     const url = new URL(value.url());
@@ -32,10 +37,23 @@ export async function applyArtifactRunFilter(page, projectId, runId) {
     Array.isArray(body.detail?.list),
     "The filtered artifact list must be present",
   );
-  assert.ok(
-    body.detail.list.length > 0,
-    "The selected run must have an artifact",
-  );
+  if (expectEmpty) {
+    assert.deepEqual(
+      body.detail.list,
+      [],
+      "The failed run must publish no artifacts",
+    );
+    assert.equal(
+      body.detail.total,
+      0,
+      "No artifacts may be hidden by pagination",
+    );
+  } else {
+    assert.ok(
+      body.detail.list.length > 0,
+      "The selected run must have an artifact",
+    );
+  }
   assert.ok(
     body.detail.list.every((artifact) => artifact.pipelineRunId === runId),
     "Every returned artifact must belong to the selected run",
@@ -43,11 +61,17 @@ export async function applyArtifactRunFilter(page, projectId, runId) {
   await page
     .getByText(`${body.detail.total} matching artifacts`, { exact: true })
     .waitFor();
-  await page
-    .getByRole("table", { name: "Project artifacts" })
-    .getByRole("link", { name: runId, exact: true })
-    .first()
-    .waitFor();
+  if (expectEmpty) {
+    await page
+      .getByText("No artifacts match your filters.", { exact: true })
+      .waitFor();
+  } else {
+    await page
+      .getByRole("table", { name: "Project artifacts" })
+      .getByRole("link", { name: runId, exact: true })
+      .first()
+      .waitFor();
+  }
   return body.detail.list;
 }
 
