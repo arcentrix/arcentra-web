@@ -395,12 +395,7 @@ test("container retry fixtures preserve independent authored policies and blocke
   assert.deepEqual(JSON.parse(fixtures.supported).jobs[0].retry, expected);
   assert.deepEqual(
     fixtures.blocked.map((fixture) => fixture.name),
-    [
-      "unknown approval",
-      "exact durable retry approval",
-      "continueOnError",
-      "continue_on_error",
-    ],
+    ["unknown approval", "continueOnError", "continue_on_error"],
   );
   for (const fixture of fixtures.blocked) {
     const spec = JSON.parse(fixture.text);
@@ -419,7 +414,7 @@ test("container retry fixtures preserve independent authored policies and blocke
       assert.deepEqual(spec.jobs[0].steps, base.jobs[0].steps);
     }
   }
-  const exactFailedStep = JSON.parse(fixtures.blocked[1].text).jobs[0];
+  const exactFailedStep = JSON.parse(fixtures.failedStepApproved).jobs[0];
   const exactWholeJob = JSON.parse(fixtures.wholeJobApproved).jobs[0];
   assert.deepEqual(exactFailedStep.approval, exactWholeJob.approval);
   assert.equal(exactWholeJob.retry.mode, "whole_job");

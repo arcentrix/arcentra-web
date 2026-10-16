@@ -7,7 +7,7 @@ export const retryScope = {
   runId: "run",
 };
 export const hash = (letter = "a") => `v1:${letter.repeat(64)}`;
-export function retryFixture() {
+export function retryFixture(failedStep = false) {
   const reference = {
     storageId: "storage",
     fingerprint: "b".repeat(64),
@@ -141,5 +141,19 @@ export function retryFixture() {
     status: "running",
     definitionCommitSha: "d".repeat(40),
   } as PipelineRun;
-  return { approval, evidence, run };
+  if (failedStep) {
+    const failed: RetryApprovalEvidence = {
+      ...evidence,
+      kind: "retry_failed_step_v1",
+      retryPlan: {
+        ...evidence.retryPlan,
+        version: 2,
+        policy: { ...evidence.retryPlan.policy, mode: "failed_step" },
+      },
+    };
+    approval.bindingKind = failed.kind;
+    approval.retryReview!.evidence = failed;
+    return { approval, evidence: failed as RetryApprovalEvidence, run };
+  }
+  return { approval, evidence: evidence as RetryApprovalEvidence, run };
 }

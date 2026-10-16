@@ -6,9 +6,8 @@ export interface RetryArtifactReference {
   sha256: string;
   size: number;
 }
-export interface RetryApprovalEvidence {
+interface RetryApprovalEvidenceCommon {
   version: 1;
-  kind: "retry_whole_job_v1";
   approvalId: string;
   context: {
     version: 1;
@@ -39,28 +38,6 @@ export interface RetryApprovalEvidence {
     sourceBindingDigest: string;
   };
   jobName: string;
-  retryPlan: {
-    version: 1;
-    retryApprovalRequired: true;
-    retryApprovalTimeoutSeconds: number;
-    policy: {
-      mode: "whole_job";
-      max_attempts: number;
-      idempotent: true;
-      allowed_exit_codes: number[];
-      delay?: string;
-    };
-    definitionDigest: string;
-    steps: {
-      name: string;
-      stepIndex: number;
-      uses: string;
-      action: string;
-      continueOnError: boolean;
-      attemptRunIds: string[];
-      definitionDigest: string;
-    }[];
-  };
   retryPlanDigest: string;
   runtime: {
     type: "containerd-offline-v1";
@@ -104,3 +81,42 @@ export interface RetryApprovalReview {
   status: number;
   evidence: RetryApprovalEvidence;
 }
+
+interface RetryPlanCommon {
+  retryApprovalRequired: true;
+  retryApprovalTimeoutSeconds: number;
+  policy: {
+    max_attempts: number;
+    idempotent: true;
+    allowed_exit_codes: number[];
+    delay?: string;
+  };
+  definitionDigest: string;
+  steps: {
+    name: string;
+    stepIndex: number;
+    uses: string;
+    action: string;
+    continueOnError: boolean;
+    attemptRunIds: string[];
+    definitionDigest: string;
+  }[];
+}
+
+export type RetryApprovalEvidence = RetryApprovalEvidenceCommon &
+  (
+    | {
+        kind: "retry_whole_job_v1";
+        retryPlan: RetryPlanCommon & {
+          version: 1;
+          policy: RetryPlanCommon["policy"] & { mode: "whole_job" };
+        };
+      }
+    | {
+        kind: "retry_failed_step_v1";
+        retryPlan: RetryPlanCommon & {
+          version: 2;
+          policy: RetryPlanCommon["policy"] & { mode: "failed_step" };
+        };
+      }
+  );

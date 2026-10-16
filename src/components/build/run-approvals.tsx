@@ -109,7 +109,8 @@ function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
                 approval.deploymentReleaseId &&
                 !approval.retryJobRunId) ||
               (approval.plugin === "builtin:retry-approval" &&
-                approval.bindingKind === "retry_whole_job_v1" &&
+                (approval.bindingKind === "retry_whole_job_v1" ||
+                  approval.bindingKind === "retry_failed_step_v1") &&
                 approval.retryJobRunId &&
                 !approval.deploymentReleaseId)
             ) ? (
