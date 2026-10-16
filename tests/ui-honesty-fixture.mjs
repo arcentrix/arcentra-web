@@ -9,6 +9,25 @@ import {
   runHonestyJourney,
 } from "./ui-honesty-journey.mjs";
 
+// These signatures come from AgentHealth and Build's existing AgentReadiness.
+// Classify the immutable request, never the page's URL after navigation.
+export function agentFixtureConsumer(request) {
+  assert.equal(request.method(), "GET");
+  const url = new URL(request.url());
+  assert.equal(url.pathname, "/api/v1/agent");
+  const pageSize = url.searchParams.get("pageSize");
+  assert.ok(["20", "100"].includes(pageSize), "Unknown Agent fixture consumer");
+  assert.deepEqual(
+    [...url.searchParams].sort(),
+    [
+      ["pageNum", "1"],
+      ["pageSize", pageSize],
+    ],
+    "Agent fixture pagination must match an exact known request",
+  );
+  return pageSize === "20" ? "dashboard-health" : "build-readiness";
+}
+
 export function honestyFixture(project) {
   const secondProject = {
     ...project,
@@ -97,15 +116,16 @@ export function honestyFixture(project) {
         const scopeType = url.searchParams.get("scopeType");
         const scopeId = url.searchParams.get("scopeId");
         if (scopeType === "project") {
+          // Global Build uses useScopedPermission("project", undefined).
+          // Its in-flight check must keep the original transport response too.
+          if (!scopeId) return false;
           assert.ok(
             [project.projectId, secondProject.projectId].includes(scopeId),
           );
           state.permissionScopes.push({ scopeType, scopeId });
-          return ok(
-            state.memberPermission
-              ? ["project:manage_member"]
-              : ["project:read"],
-          );
+          // Preserve the existing admin fixture for PipelineWorkspace and
+          // Members alike; only the explicit denial case changes permission.
+          return state.memberPermission ? false : ok(["project:read"]);
         }
         if (scopeType === "platform") {
           assert.ok(
@@ -113,14 +133,12 @@ export function honestyFixture(project) {
             "Platform fleet permission must not use a project scope",
           );
           state.permissionScopes.push({ scopeType });
-          return ok(state.agentPermission ? ["agent:read"] : ["pipeline:read"]);
+          return state.agentPermission ? false : ok(["pipeline:read"]);
         }
         return false;
       }
       if (path === "/agent") {
-        assert.equal(request.method(), "GET");
-        assert.equal(url.searchParams.get("pageNum"), "1");
-        assert.equal(url.searchParams.get("pageSize"), "20");
+        if (agentFixtureConsumer(request) === "build-readiness") return false;
         state.agentReads++;
         return state.agentDenied ? denied() : ok(agents);
       }
@@ -334,6 +352,7 @@ export async function assertHonestyFixtureUI({
     "/agent",
     () => page.goto(`${base}/`),
     envelope,
+    { pageNum: "1", pageSize: "20" },
   );
   await assertAgentSnapshot(page, agents);
   expectHttpError("/api/v1/agent", 403);
@@ -343,6 +362,7 @@ export async function assertHonestyFixtureUI({
     "/agent",
     () => page.getByRole("button", { name: "Refresh snapshot" }).click(),
     denied,
+    { pageNum: "1", pageSize: "20" },
   );
   await page
     .getByRole("heading", { name: "Agent health access restricted" })
@@ -358,6 +378,7 @@ export async function assertHonestyFixtureUI({
     "/agent",
     () => page.getByRole("button", { name: "Refresh snapshot" }).click(),
     envelope,
+    { pageNum: "1", pageSize: "20" },
   );
   await assertAgentSnapshot(page, restoredAgents);
   state.agentPermission = false;

@@ -1,6 +1,7 @@
 import {
   honestyFixture,
   assertHonestyFixtureUI,
+  agentFixtureConsumer,
 } from "./ui-honesty-fixture.mjs";
 import { storageFixture, assertStorageFixtureUI } from "./storage-fixture.mjs";
 import { storageSensitiveValues } from "./storage-journey.mjs";
@@ -286,7 +287,8 @@ await runBrowserTest(
       if (path === "/project/")
         return ok({ list: [project], total: 1, pageNum: 1, pageSize: 20 });
       if (path === "/project/project-1") return ok(project);
-      if (path === "/agent")
+      if (path === "/agent") {
+        assert.equal(agentFixtureConsumer(request), "build-readiness");
         return ok({
           agents: [
             {
@@ -299,7 +301,10 @@ await runBrowserTest(
             },
           ],
           count: 1,
+          pageNum: 1,
+          pageSize: 100,
         });
+      }
       if (path === "/pipelines/pipeline-1") return ok(pipeline);
       if (path === "/pipelines/pipeline-1/runs") {
         const filter = url.searchParams.get("status");
