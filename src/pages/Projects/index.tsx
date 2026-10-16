@@ -219,11 +219,20 @@ function CreateProjectDialog({
             <span>Organization ID</span>
             <Input
               required
+              aria-describedby="project-organization-help"
               value={orgId}
               onChange={(e) => setOrgId(e.target.value)}
               placeholder="Your organization ID"
             />
           </label>
+          <p
+            id="project-organization-help"
+            className="text-xs text-muted-foreground"
+          >
+            Enter a stable organization scope ID approved by your administrator.
+            Creating a project does not create an organization. Organization and
+            member management are not available yet.
+          </p>
           <label className="block space-y-1 text-sm">
             <span>Project name</span>
             <Input

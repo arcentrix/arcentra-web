@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 
 const acceptanceStages = new Set([
   "setup",
@@ -13,6 +14,13 @@ const acceptanceStages = new Set([
   "definition-review",
   "trigger-run",
   "terminal-response",
+  "compiler-failure",
+  "failed-run-artifacts",
+  "await-source-fix",
+  "build-step-evidence",
+  "manifest-download",
+  "verify-build-downloads",
+  "save-build-downloads",
   "visible-run-success",
   "persisted-run-logs",
   "initial-checkout",
@@ -82,6 +90,7 @@ export function safeFailureEvidence(stage, error) {
     "ui-fixture-smoke.mjs",
     "browser-harness.mjs",
     "artifact-controls.mjs",
+    "stdlib-build-contract.mjs",
     "retry-policy-fixture.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
@@ -153,7 +162,7 @@ export function actualBackendConfig(env = process.env) {
     repository: repository.href,
     orgId: required("ARCENTRA_ACCEPTANCE_ORG_ID"),
     artifactName,
-    artifactContent: required("ARCENTRA_ACCEPTANCE_ARTIFACT_CONTENT"),
+    ...artifactContractConfig(env, required),
     branch: env.ARCENTRA_ACCEPTANCE_BRANCH || "main",
     definitionPath:
       env.ARCENTRA_ACCEPTANCE_DEFINITION_PATH || ".arcentra/pipeline.yaml",
@@ -179,8 +188,17 @@ export function expectedResourceError(message, expected) {
   }
 }
 
-export async function runBrowserTest(kind, callback, { backend } = {}) {
+export async function runBrowserTest(
+  kind,
+  callback,
+  { backend, totalTimeoutMs } = {},
+) {
   assert.ok(["simulated-transport", "actual-backend"].includes(kind));
+  const timeoutMs =
+    totalTimeoutMs ?? (kind === "actual-backend" ? 300_000 : 180_000);
+  assert.ok(
+    Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 600_000,
+  );
   const base = loopbackURL(
     process.env.UI_TEST_BASE_URL || "http://127.0.0.1:5174",
     "UI_TEST_BASE_URL",
@@ -341,7 +359,7 @@ export async function runBrowserTest(kind, callback, { backend } = {}) {
             reject(
               new Error(`${kind} browser test exceeded its total timeout`),
             ),
-          kind === "actual-backend" ? 300_000 : 180_000,
+          timeoutMs,
         );
       }),
     ]);
