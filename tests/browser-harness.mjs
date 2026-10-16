@@ -9,6 +9,10 @@ import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 const acceptanceStages = new Set([
   "setup",
   "login",
+  "first-build-preflight-evidence",
+  "first-build-status",
+  "first-build-refresh",
+  "preflight-complete",
   "project-create",
   "pipeline-create",
   "definition-review",
@@ -36,6 +40,121 @@ const acceptanceStages = new Set([
   "exact-retry-approval-fixture",
   "container-failed-step-draft",
 ]);
+
+export const firstBuildJourney = "two-phase-separate-browser-contexts";
+export const firstBuildPreflightSteps = Object.freeze([
+  "preflight-login-via-real-api",
+  "preflight-missing-configuration-no-agent-no-scope-manual-scope-allowed",
+  "preflight-explicit-status-refresh",
+  "preflight-no-product-mutations",
+]);
+export const firstBuildConfiguredSteps = Object.freeze([
+  "configured-persisted-storage-and-signing-recent-agent",
+  "configured-explicit-status-refresh",
+]);
+
+/** Exact synthetic administrator state, without accepting leaked configuration values. */
+export function assertFirstBuildSnapshot(value, configured) {
+  assert.equal(typeof configured, "boolean");
+  const expected = {
+    scopeOptions: [],
+    scopeOptionsTruncated: false,
+    canEnterScope: true,
+    configuration: {
+      access: "visible",
+      defaultStorageConfigured: configured,
+      agentSigningConfigured: configured,
+    },
+    agent: { access: "visible", enabledRecentlySeen: configured },
+  };
+  const exact = (actual, wanted) => {
+    if (wanted === null || typeof wanted !== "object") return actual === wanted;
+    if (
+      !actual ||
+      typeof actual !== "object" ||
+      Array.isArray(actual) !== Array.isArray(wanted)
+    )
+      return false;
+    const keys = Object.keys(wanted);
+    return (
+      Object.keys(actual).length === keys.length &&
+      keys.every(
+        (key) => Object.hasOwn(actual, key) && exact(actual[key], wanted[key]),
+      )
+    );
+  };
+  assert.ok(
+    exact(value, expected),
+    "First-build response must match the exact synthetic administrator state",
+  );
+}
+
+/** A public allowlist: never copy arbitrary response values or diagnostic text. */
+export function firstBuildReadinessEvidence(evidence) {
+  if (!evidence) return {};
+  assert.ok(
+    ["preflight", "build"].includes(evidence.phase),
+    "Known first-build phase required",
+  );
+  assert.match(evidence.sourceCommit, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
+  const allowed = [...firstBuildPreflightSteps, ...firstBuildConfiguredSteps];
+  return {
+    firstBuildReadiness: {
+      journey: firstBuildJourney,
+      phase: evidence.phase,
+      sourceCommit: evidence.sourceCommit,
+      steps: allowed.filter((step) => evidence.steps.includes(step)),
+    },
+  };
+}
+
+/** Retain only verified, same-source preflight facts in the final public summary. */
+export function preflightStepsFromSummary(summary, sourceCommit) {
+  assert.match(sourceCommit, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
+  const evidence = summary?.firstBuildReadiness;
+  assert.ok(
+    summary?.kind === "actual-backend" &&
+      summary.status === "passed" &&
+      summary.stage === "preflight-complete" &&
+      evidence &&
+      Object.keys(evidence).sort().join(",") ===
+        "journey,phase,sourceCommit,steps" &&
+      evidence.journey === firstBuildJourney &&
+      evidence.phase === "preflight" &&
+      evidence.sourceCommit === sourceCommit &&
+      JSON.stringify(evidence.steps) ===
+        JSON.stringify(firstBuildPreflightSteps),
+    "Full build requires the successful same-source read-only first-use preflight",
+  );
+  return [...firstBuildPreflightSteps];
+}
+
+/** A preflight can never publish the final build receipt or bypass a missing build. */
+export async function writeCompletedBuildReceipt(
+  config,
+  successfulBuild,
+  writer,
+) {
+  assert.ok(
+    ["preflight", "build"].includes(config.phase),
+    "Known acceptance phase required",
+  );
+  if (config.phase === "preflight") {
+    assert.equal(
+      successfulBuild,
+      undefined,
+      "Read-only preflight cannot produce a successful build",
+    );
+    return;
+  }
+  if (config.artifactMode === "stdlib-build-v1") {
+    assert.ok(
+      successfulBuild,
+      "Full browser journey must finish before its success receipt is written",
+    );
+    await writer(config, "successful-run.json", successfulBuild);
+  }
+}
 
 function isArtifactDownload(method, path) {
   return (
@@ -156,13 +275,24 @@ export function actualBackendConfig(env = process.env) {
       /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i,
       "Fixture commit must be a full Git SHA",
     );
+  const phase = env.ARCENTRA_ACCEPTANCE_PHASE ?? "build";
+  assert.ok(
+    ["preflight", "build"].includes(phase),
+    "Unsupported acceptance phase",
+  );
+  const contract = artifactContractConfig(env, required);
+  assert.ok(
+    phase !== "preflight" || contract.artifactMode === "stdlib-build-v1",
+    "Preflight requires the full build contract",
+  );
   return {
+    phase,
     expectedCommit: env.ARCENTRA_ACCEPTANCE_COMMIT,
     backend: backend.origin,
     repository: repository.href,
     orgId: required("ARCENTRA_ACCEPTANCE_ORG_ID"),
     artifactName,
-    ...artifactContractConfig(env, required),
+    ...contract,
     branch: env.ARCENTRA_ACCEPTANCE_BRANCH || "main",
     definitionPath:
       env.ARCENTRA_ACCEPTANCE_DEFINITION_PATH || ".arcentra/pipeline.yaml",
@@ -191,7 +321,7 @@ export function expectedResourceError(message, expected) {
 export async function runBrowserTest(
   kind,
   callback,
-  { backend, totalTimeoutMs } = {},
+  { backend, totalTimeoutMs, firstBuildEvidence } = {},
 ) {
   assert.ok(["simulated-transport", "actual-backend"].includes(kind));
   const timeoutMs =
@@ -404,7 +534,7 @@ export async function runBrowserTest(
     if (page && !page.isClosed())
       await page
         .screenshot({
-          path: `${output}/failure.png`,
+          path: `${output}/${firstBuildEvidence?.phase === "preflight" ? "preflight-" : ""}failure.png`,
           fullPage: true,
           mask: [
             page.locator(
@@ -444,6 +574,7 @@ export async function runBrowserTest(
           unhandledRouteCount: diagnostics.unhandledRoutes.length,
           apiResponseCount: diagnostics.requests.length,
           ...artifactDownloadEvidence(diagnostics),
+          ...firstBuildReadinessEvidence(firstBuildEvidence),
         },
         null,
         2,
