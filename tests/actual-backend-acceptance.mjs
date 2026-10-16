@@ -1,3 +1,4 @@
+import { runHonestyJourney } from "./ui-honesty-journey.mjs";
 /**
  * Real-browser / real-Control / real-Agent acceptance against disposable local
  * dependencies. No API response fixtures, session seeding, or remote services.
@@ -299,7 +300,18 @@ await runBrowserTest(
     await page
       .getByRole("heading", { name: projectName, exact: true })
       .waitFor();
-    await record("create-project-via-ui", { projectId: project.projectId });
+    const honesty = await runHonestyJourney({
+      page,
+      base,
+      output,
+      project,
+      envelope,
+      diagnostics,
+    });
+    await record("create-project-via-ui", {
+      projectId: project.projectId,
+      honesty,
+    });
 
     setStage("pipeline-create");
     await page

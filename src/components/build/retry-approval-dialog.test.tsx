@@ -10,12 +10,21 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get, post } from "@/api/client";
 import { RunApprovals } from "./run-approvals";
+import { validateRetryApproval } from "./retry-approval-review";
 import { retryFixture, retryScope } from "./retry-approval.test-fixture";
 vi.mock("@/api/client", () => ({ get: vi.fn(), post: vi.fn() }));
 describe.each([false, true])(
   "exact retry dialog failedStep=%s",
   (failedStep) => {
     let fixture: ReturnType<typeof retryFixture>;
+    function expireReviewFixture() {
+      const now = Date.now();
+      fixture.evidence.createdAtUnixMilli = now - 3_600_001;
+      fixture.evidence.expiresAtUnixMilli = now - 1;
+      fixture.approval.expiresAt = new Date(
+        fixture.evidence.expiresAtUnixMilli,
+      ).toISOString();
+    }
     function read(url: string) {
       if (url === "/approvals/") return [fixture.approval];
       if (url === "/approvals/approval")
@@ -161,15 +170,34 @@ describe.each([false, true])(
       await act(async () => finish?.());
       expect(post).not.toHaveBeenCalled();
     });
+    it("keeps expired evidence structurally valid when the clock advances between reads", () => {
+      const now = Date.now();
+      const clock = vi
+        .spyOn(Date, "now")
+        .mockReturnValueOnce(now)
+        .mockReturnValue(now + 1);
+      try {
+        expireReviewFixture();
+        // Expired evidence must remain inspectable: invalid lifetime evidence
+        // would exercise a different refusal path and hide the pinned source.
+        expect(() =>
+          validateRetryApproval(retryScope, fixture.approval, fixture.run),
+        ).not.toThrow();
+        expect(
+          fixture.evidence.expiresAtUnixMilli -
+            fixture.evidence.createdAtUnixMilli,
+        ).toBe(3_600_000);
+        expect(fixture.evidence.expiresAtUnixMilli).toBe(now - 1);
+        expect(clock).toHaveBeenCalledTimes(1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
     it.each(["expired", "cancelled", "wrong project"])(
       "refuses %s review",
       async (reason) => {
         if (reason === "expired") {
-          fixture.evidence.createdAtUnixMilli = Date.now() - 3_600_001;
-          fixture.evidence.expiresAtUnixMilli = Date.now() - 1;
-          fixture.approval.expiresAt = new Date(
-            fixture.evidence.expiresAtUnixMilli,
-          ).toISOString();
+          expireReviewFixture();
         } else if (reason === "cancelled") fixture.run.status = "cancelled";
         else fixture.evidence.context.projectId = "other";
         show();

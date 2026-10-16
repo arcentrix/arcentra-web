@@ -1,15 +1,16 @@
-/**
- * Project Members 标签面板 — Engineering Blueprint 重做
- * Panel + 表格：User (avatar) / Role chip / Email / Action。
- * 保留全部搜索/分页/Add Member 按钮逻辑。
- */
-
-import { useState, useMemo, useEffect } from "react";
-import type { FC } from "react";
-import { Plus, Search } from "lucide-react";
+import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { RefreshCw } from "lucide-react";
+import { Apis } from "@/api";
+import { listProjectMembers } from "@/api/project";
+import {
+  ColumnHead,
+  Panel,
+  PanelHeader,
+  StatusBadge,
+} from "@/components/blueprint";
+import { SnapshotError } from "@/components/observe/shared";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Table,
   TableBody,
@@ -18,167 +19,165 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DataTablePagination } from "@/components/data-table-pagination";
-import { Panel, PanelHeader, ColumnHead } from "@/components/blueprint";
+import { useApiResource } from "@/hooks/use-api-resource";
+import authStore from "@/store/auth";
+import userStore from "@/store/user";
 
-interface Member {
-  name: string;
-  email: string;
-  role: string;
-  avatar: string;
+export default function Members() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const auth = authStore.useState();
+  const user = userStore.useState();
+  if (!auth.initialized || !projectId) {
+    return (
+      <Panel>
+        <PanelHeader title="Members" />
+        <p className="p-5 text-sm text-fg-muted">
+          {!auth.initialized
+            ? "Sign in to view project member associations."
+            : "Choose a project to view member associations."}
+        </p>
+      </Panel>
+    );
+  }
+  // A different account or project discards prior permissions, rows, and requests.
+  return (
+    <MemberAssociations
+      key={JSON.stringify([auth.accessToken, user.userinfo?.userId, projectId])}
+      projectId={projectId}
+    />
+  );
 }
 
-const Members: FC = () => {
-  const [members] = useState<Member[]>([
-    { name: "John Doe",       email: "john@example.com",    role: "Owner",  avatar: "JD" },
-    { name: "Jane Smith",     email: "jane@example.com",    role: "Admin",  avatar: "JS" },
-    { name: "Bob Johnson",    email: "bob@example.com",     role: "Member", avatar: "BJ" },
-    { name: "Alice Brown",    email: "alice@example.com",   role: "Member", avatar: "AB" },
-    { name: "Charlie Wilson", email: "charlie@example.com", role: "Admin",  avatar: "CW" },
-    { name: "Diana Prince",   email: "diana@example.com",   role: "Member", avatar: "DP" },
-  ]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [pageNum, setPageNum] = useState(1);
-  const [pageSize] = useState(5);
-
-  const filteredMembers = useMemo(() => {
-    return members.filter((member) => {
-      if (searchTerm) {
-        const term = searchTerm.toLowerCase();
-        return (
-          member.name.toLowerCase().includes(term) ||
-          member.email.toLowerCase().includes(term) ||
-          member.role.toLowerCase().includes(term)
-        );
-      }
-      return true;
-    });
-  }, [members, searchTerm]);
-
-  const totalPages = Math.ceil(filteredMembers.length / pageSize);
-  const paginatedMembers = useMemo(() => {
-    const startIndex = (pageNum - 1) * pageSize;
-    return filteredMembers.slice(startIndex, startIndex + pageSize);
-  }, [filteredMembers, pageNum, pageSize]);
-
-  useEffect(() => {
-    setPageNum(1);
-  }, [searchTerm]);
+function MemberAssociations({ projectId }: { projectId: string }) {
+  const [revision, setRevision] = useState(0);
+  const refresh = () => setRevision((value) => value + 1);
+  const permission = useApiResource(
+    `members:permission:${JSON.stringify([projectId, revision])}`,
+    (signal) =>
+      Apis.me.getEffectiveActions(
+        { scopeType: "project", scopeId: projectId },
+        signal,
+      ),
+  );
+  const allowed =
+    !permission.loading &&
+    !permission.error &&
+    Array.isArray(permission.data) &&
+    (permission.data.includes("project:manage_member") ||
+      permission.data.includes("*:*"));
+  const members = useApiResource(
+    allowed ? `members:list:${JSON.stringify([projectId, revision])}` : null,
+    (signal) => listProjectMembers(projectId, signal),
+  );
+  const snapshot = members.loading || members.error ? undefined : members.data;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Search + action */}
-      <div className="flex items-center gap-2">
-        <div className="relative max-w-sm">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle" />
-          <Input
-            placeholder="Search members…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-8 pl-8 text-[13px]"
-          />
-        </div>
-        <Button size="sm" className="ml-auto gap-1.5">
-          <Plus className="h-3.5 w-3.5" />
-          Add member
-        </Button>
-      </div>
-
-      <Panel>
-        <PanelHeader
-          title="Members"
-          sub={`${filteredMembers.length} with access to this project`}
-        />
-
-        {filteredMembers.length === 0 ? (
-          <div className="flex items-center justify-center py-16 text-[13px] text-fg-muted">
-            No members match your search.
+    <Panel>
+      <PanelHeader
+        title="Members"
+        sub="Recorded project member associations"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge tone="muted">Read only</StatusBadge>
+            <Button variant="outline" size="sm" onClick={refresh}>
+              <RefreshCw aria-hidden className="size-3.5" />
+              Refresh members
+            </Button>
           </div>
-        ) : (
-          <>
-            <Table>
+        }
+      />
+      <div className="space-y-2 border-b px-5 py-4 text-sm text-fg-muted">
+        <p>
+          These stored associations do not establish a user's current roles or
+          effective permissions. Names, email addresses, and role grants are not
+          returned by this endpoint.
+        </p>
+        <p>
+          Adding, editing, and removing members are unavailable from this page.
+        </p>
+      </div>
+      {permission.error ? (
+        <SnapshotError
+          subject="Member access check"
+          permission="project:manage_member for this project"
+          error={permission.error}
+          retry={refresh}
+          loading={permission.loading}
+        />
+      ) : permission.loading ? (
+        <p role="status" className="p-5 text-sm text-fg-muted">
+          Checking project member access…
+        </p>
+      ) : !allowed ? (
+        <div className="space-y-3 p-5 text-sm text-fg-muted">
+          <h3 className="font-medium text-foreground">
+            Members access restricted
+          </h3>
+          <p>
+            Member access requires project:manage_member for this project.
+            Project read access alone does not include member management.
+          </p>
+          <Button variant="outline" size="sm" onClick={refresh}>
+            Check member access again
+          </Button>
+        </div>
+      ) : members.error ? (
+        <SnapshotError
+          subject="Member associations"
+          permission="project:manage_member for this project"
+          error={members.error}
+          retry={refresh}
+          loading={members.loading}
+        />
+      ) : members.loading ? (
+        <p role="status" className="p-5 text-sm text-fg-muted">
+          Loading member associations…
+        </p>
+      ) : snapshot ? (
+        <>
+          <p className="px-5 py-4 text-sm text-fg-muted">
+            {snapshot.total} recorded associations
+          </p>
+          {snapshot.list.length === 0 ? (
+            <p className="px-5 pb-5 text-sm text-fg-muted">
+              No member associations are recorded for this project. Access may
+              still be granted through role grants.
+            </p>
+          ) : (
+            <Table aria-label="Project member associations">
               <TableHeader>
                 <TableRow>
-                  <TableHead><ColumnHead>User</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>Role</ColumnHead></TableHead>
-                  <TableHead><ColumnHead>Email</ColumnHead></TableHead>
-                  <TableHead className="text-right"><ColumnHead>Action</ColumnHead></TableHead>
+                  <TableHead>
+                    <ColumnHead>User ID</ColumnHead>
+                  </TableHead>
+                  <TableHead>
+                    <ColumnHead>Project ID</ColumnHead>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedMembers.map((member) => {
-                  const isOwner = member.role === "Owner";
-                  return (
-                    <TableRow key={member.email}>
-                      {/* User cell: avatar + name */}
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-7 w-7">
-                            <AvatarFallback className="font-mono text-[10px]">
-                              {member.avatar}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium text-[13px]">{member.name}</span>
-                        </div>
-                      </TableCell>
-                      {/* Role chip */}
-                      <TableCell>
-                        <span
-                          className="inline-flex h-[22px] items-center rounded px-2 font-mono text-[11px] font-medium"
-                          style={{
-                            color: isOwner
-                              ? "var(--brand-signal)"
-                              : "var(--fg-muted)",
-                            border: `1px solid ${
-                              isOwner
-                                ? "var(--brand-signal-dim)"
-                                : "var(--border)"
-                            }`,
-                          }}
-                        >
-                          {member.role}
-                        </span>
-                      </TableCell>
-                      {/* Email */}
-                      <TableCell className="text-[13px] text-fg-muted">
-                        {member.email}
-                      </TableCell>
-                      {/* Actions */}
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="sm" className="h-7 text-[12px]">
-                            Edit
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-[12px] text-accent-danger hover:text-accent-danger"
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {snapshot.list.map((member) => (
+                  <TableRow key={member.userId}>
+                    <TableCell className="break-all font-mono text-xs">
+                      {member.userId}
+                    </TableCell>
+                    <TableCell className="break-all font-mono text-xs">
+                      {member.projectId}
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
-
-            {totalPages > 1 && (
-              <div className="border-t px-5 py-3">
-                <DataTablePagination
-                  page={pageNum}
-                  pageSize={pageSize}
-                  total={filteredMembers.length}
-                  onPageChange={setPageNum}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
-    </div>
+          )}
+        </>
+      ) : null}
+      <nav aria-label="Project navigation" className="border-t p-5">
+        <Button asChild size="sm" variant="outline">
+          <Link to={`/projects/${encodeURIComponent(projectId)}`}>
+            Back to project
+          </Link>
+        </Button>
+      </nav>
+    </Panel>
   );
-};
-
-export default Members;
+}
