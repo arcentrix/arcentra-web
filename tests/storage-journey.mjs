@@ -96,6 +96,38 @@ export async function assertStoragePageSafe(page, diagnostics, endpoint) {
   assertNoStorageSecrets(diagnostics, endpoint);
 }
 
+/** Bind a list response to the new document, excluding an older mutation refresh. */
+export async function storageResponseAfterReload(page) {
+  const mainFrame = page.mainFrame();
+  const requests = new Set();
+  let committed = false;
+  const onNavigation = (frame) => {
+    if (frame === mainFrame) committed = true;
+  };
+  const onRequest = (request) => {
+    if (
+      committed &&
+      request.frame() === mainFrame &&
+      request.method() === "GET" &&
+      new URL(request.url()).pathname === "/api/v1/storage/configs"
+    )
+      requests.add(request);
+  };
+  page.on("framenavigated", onNavigation);
+  page.on("request", onRequest);
+  try {
+    const response = page.waitForResponse(
+      (value) => requests.has(value.request()),
+      { timeout: 30_000 },
+    );
+    const [reloaded] = await Promise.all([response, page.reload()]);
+    return reloaded;
+  } finally {
+    page.off("framenavigated", onNavigation);
+    page.off("request", onRequest);
+  }
+}
+
 /** All mutations are explicit product UI clicks. Never submit through page.evaluate or APIRequestContext. */
 export async function runStorageSetup({
   page,
@@ -240,16 +272,25 @@ export async function runStorageSetup({
   });
   await dialog.waitFor();
   const changed = responseFor("POST", "/storage/configs/acceptance/default");
+  // The dialog closes before mutate() finishes its permission/list refresh.
+  // Consume that response while its document still exists, then navigate.
+  const refreshedDefault = responseFor("GET", "/storage/configs");
+  refreshedDefault.catch(() => {});
   await dialog
     .getByRole("button", { name: "Confirm default", exact: true })
     .click();
   assertNoStorageSecrets(await envelope(await changed), endpoint);
+  const refreshedList = await envelope(await refreshedDefault);
+  assert.equal(refreshedList.length, 1);
+  assertPublicStorage(refreshedList[0], endpoint, {
+    edited: true,
+    isDefault: 1,
+  });
   await dialog.waitFor({ state: "hidden" });
+  await card.getByText("Default (saved)", { exact: true }).waitFor();
 
   setStage("storage-reload");
-  const reloaded = responseFor("GET", "/storage/configs");
-  await page.reload();
-  const list = await envelope(await reloaded);
+  const list = await envelope(await storageResponseAfterReload(page));
   assert.equal(list.length, 1);
   assertPublicStorage(list[0], endpoint, { edited: true, isDefault: 1 });
   await card.getByText(storageEditedName, { exact: true }).waitFor();

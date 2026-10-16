@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { EventEmitter } from "node:events";
 import {
   chmod,
   link,
@@ -54,6 +55,7 @@ import {
   storageSensitiveValues,
   syntheticStorageConfig,
   storageInitialName,
+  storageResponseAfterReload,
 } from "./storage-journey.mjs";
 import {
   assertRetryEditorViewports,
@@ -1607,4 +1609,93 @@ test("clean observation passes only after close and final drain; sealed late del
   assert.equal(diagnostics.lateConsoleEventCount, 1);
   assert.equal(diagnostics.consoleInspectionFailureCount, 1);
   assert.throws(() => collector.assertClean(), /must be inspectable/);
+});
+
+test("storage reload ignores old-document refresh and binds the new main-frame request", async () => {
+  const page = new EventEmitter();
+  const mainFrame = {};
+  const childFrame = {};
+  const request = (
+    frame = mainFrame,
+    method = "GET",
+    path = "/api/v1/storage/configs",
+  ) => ({
+    frame: () => frame,
+    method: () => method,
+    url: () => `http://127.0.0.1:5174${path}`,
+  });
+  const oldRequest = request();
+  const earlyRequest = request();
+  const childRequest = request(childFrame);
+  const wrongMethod = request(mainFrame, "POST");
+  const newRequest = request();
+  const ignored = [];
+  let bodyReads = 0;
+  const staleResponse = (req) => ({
+    request: () => req,
+    json: async () => {
+      throw new Error("Destroyed old document body must never be read");
+    },
+  });
+  const freshResponse = {
+    request: () => newRequest,
+    json: async () => {
+      bodyReads++;
+      return { code: 200, detail: [{ isDefault: 1 }] };
+    },
+  };
+  page.mainFrame = () => mainFrame;
+  page.waitForResponse = (predicate, options) => {
+    assert.equal(options.timeout, 30_000);
+    return new Promise((resolve) => {
+      const listener = (response) => {
+        if (predicate(response)) {
+          page.off("response", listener);
+          resolve(response);
+        } else ignored.push(response);
+      };
+      page.on("response", listener);
+    });
+  };
+  page.reload = async () => {
+    // A pre-reload request can respond after navigation; so can a request
+    // launched before the new main-frame document commits.
+    page.emit("request", oldRequest);
+    page.emit("framenavigated", childFrame);
+    page.emit("request", earlyRequest);
+    page.emit("framenavigated", mainFrame);
+    page.emit("response", staleResponse(oldRequest));
+    page.emit("response", staleResponse(earlyRequest));
+    page.emit("request", childRequest);
+    page.emit("response", staleResponse(childRequest));
+    page.emit("request", wrongMethod);
+    page.emit("response", staleResponse(wrongMethod));
+    page.emit("request", newRequest);
+    page.emit("response", freshResponse);
+  };
+  const response = await storageResponseAfterReload(page);
+  assert.equal(response, freshResponse);
+  assert.deepEqual(await response.json(), {
+    code: 200,
+    detail: [{ isDefault: 1 }],
+  });
+  assert.equal(bodyReads, 1);
+  assert.equal(ignored.length, 4);
+  assert.equal(page.listenerCount("framenavigated"), 0);
+  assert.equal(page.listenerCount("request"), 0);
+});
+
+test("storage reload does not hide navigation failure or leave request observers attached", async () => {
+  const page = new EventEmitter();
+  page.mainFrame = () => ({});
+  page.waitForResponse = () => new Promise(() => {});
+  page.reload = async () => {
+    throw new Error("Synthetic reload rejected");
+  };
+  await assert.rejects(
+    storageResponseAfterReload(page),
+    /Synthetic reload rejected/,
+  );
+  assert.equal(page.listenerCount("framenavigated"), 0);
+  assert.equal(page.listenerCount("request"), 0);
 });

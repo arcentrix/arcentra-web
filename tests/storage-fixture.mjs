@@ -4,6 +4,7 @@ import {
   assertStoragePageSafe,
   runStorageSetup,
   storageEditedName,
+  storageResponseAfterReload,
   syntheticStorageConfig,
 } from "./storage-journey.mjs";
 
@@ -199,9 +200,8 @@ export async function assertStorageFixtureUI({
   );
   assert.equal(storage.state.rejectedWrites, 1);
   storage.state.mode = "normal";
-  const reloaded = responseFor("GET", "/storage/configs");
-  await page.reload();
-  assert.equal((await envelope(await reloaded))[0].name, storageEditedName);
+  const reloaded = await storageResponseAfterReload(page);
+  assert.equal((await envelope(reloaded))[0].name, storageEditedName);
   await card.waitFor();
   await assertStoragePageSafe(page, diagnostics, "127.0.0.1:19000");
 
@@ -209,9 +209,8 @@ export async function assertStorageFixtureUI({
   // saved configuration from view and must not become a fabricated empty list.
   storage.state.mode = "revoked-read";
   expectHttpError("/api/v1/storage/configs", 403);
-  const rejectedRead = responseFor("GET", "/storage/configs");
-  await page.reload();
-  assert.equal((await rejectedRead).status(), 403);
+  const rejectedRead = await storageResponseAfterReload(page);
+  assert.equal(rejectedRead.status(), 403);
   await page.getByText(/Storage access restricted/i).waitFor();
   assert.equal(await card.count(), 0);
   assert.equal(
