@@ -267,11 +267,13 @@ export default function SystemInfoPage({
               <span className="text-accent-success">healthy</span>
             </span>
           </FormRow>
-          <FormRow label="Object storage" hint="s3-compatible">
-            <span className="inline-flex items-center gap-2 font-mono text-[13px]">
-              <StatusDot tone="ok" />
-              <span className="text-accent-success">healthy</span>
-            </span>
+          <FormRow label="Object storage" hint="Connectivity not verified">
+            <a
+              href="/settings?section=storage"
+              className="text-[13px] text-fg-muted underline underline-offset-4"
+            >
+              Review saved configuration
+            </a>
           </FormRow>
         </SettingsCard>
       )}

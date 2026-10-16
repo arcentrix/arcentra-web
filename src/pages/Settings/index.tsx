@@ -7,6 +7,7 @@ import { type FC } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Bell,
+  Database,
   Fingerprint,
   Info,
   KeyRound,
@@ -19,14 +20,11 @@ import { PlaceholderPanel } from "@/components/placeholder-panel";
 import GeneralSettingsPage from "@/pages/GeneralSettings";
 import NotificationsPage from "@/pages/Settings/Notifications";
 import IdentityPage from "@/pages/Identity";
+import StoragePage from "@/pages/Settings/Storage";
 import SystemInfoPage from "@/pages/Settings/SystemInfo";
 
 type SectionId =
-  | "general"
-  | "notifications"
-  | "identity"
-  | "system"
-  | "tokens";
+  "storage" | "general" | "notifications" | "identity" | "system" | "tokens";
 
 interface SectionDef {
   id: SectionId;
@@ -36,6 +34,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
+  { id: "storage", label: "Storage", icon: Database },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "identity", label: "Identity", icon: Fingerprint },
   { id: "system", label: "System info", icon: Info },
@@ -61,7 +60,7 @@ const SettingsPage: FC = () => {
   };
 
   return (
-    <section className="flex flex-1 flex-col gap-6 p-8">
+    <section className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <PageHeader
         eyebrow="workspace / configuration"
         title="Settings"
@@ -98,6 +97,7 @@ const SettingsPage: FC = () => {
         </nav>
 
         <div className="min-w-0">
+          {section === "storage" && <StoragePage headless />}
           {section === "general" && <GeneralSettingsPage headless />}
           {section === "notifications" && <NotificationsPage headless />}
           {section === "identity" && <IdentityPage headless />}

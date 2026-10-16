@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Activity,
   Bot,
+  Database,
   ExternalLink,
   Hammer,
   LayoutDashboard,
@@ -39,6 +40,14 @@ type CommandItem = {
 };
 
 const PAGE_ITEMS: Omit<CommandItem, "group">[] = [
+  {
+    id: "storage",
+    title: "Artifact storage",
+    description: "Saved MinIO / S3 configuration",
+    icon: Database,
+    to: "/settings?section=storage",
+    keywords: ["bucket", "minio", "s3"],
+  },
   {
     id: "overview",
     title: "Overview",

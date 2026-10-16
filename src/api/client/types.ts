@@ -3,8 +3,11 @@ import type { AxiosRequestConfig } from "axios";
 /**
  * API Request Config
  */
-export type RequestConfig = AxiosRequestConfig & { silence?: boolean };
-
+export type RequestConfig = AxiosRequestConfig & {
+  silence?: boolean;
+  /** Never retain or expose response diagnostics or request bodies for secrets. */
+  sensitive?: boolean;
+};
 
 export interface ApiClientResponse<T = any> {
   code: number;

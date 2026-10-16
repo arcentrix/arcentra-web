@@ -6,6 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { usePermission } from "@/hooks/use-permission";
 import type { FirstBuildResource } from "@/hooks/use-first-build";
 
 export function FirstBuildGuidance({
@@ -13,6 +14,7 @@ export function FirstBuildGuidance({
 }: {
   readiness: FirstBuildResource;
 }) {
+  const permission = usePermission();
   if (!readiness.signedIn) return null;
   const { data, loading, error, refresh } = readiness;
   const stale = !!data && (loading || !!error);
@@ -86,7 +88,7 @@ export function FirstBuildGuidance({
                     </span>
                     {data.configuration.defaultStorageConfigured
                       ? "Configured (persisted record)."
-                      : "Not configured. An administrator must configure enabled default storage through the setup API/CLI."}
+                      : "Not configured. An administrator must create enabled storage and explicitly choose it as default."}
                   </li>
                   <li>
                     <span className="font-medium">Agent signing: </span>
@@ -120,6 +122,16 @@ export function FirstBuildGuidance({
             1.25.6, Git, Python 3 and a shell. Project-creation permission does
             not grant pipeline creation or run permission.
           </p>
+          {data?.configuration.access === "visible" &&
+            !stale &&
+            permission.has("org:update") && (
+              <a
+                className="mr-4 text-xs underline underline-offset-4"
+                href="/settings?section=storage"
+              >
+                Open storage settings
+              </a>
+            )}
           <a
             className="text-xs underline underline-offset-4"
             href="https://github.com/arcentrix/arcentra/blob/main/scripts/acceptance/FIRST_BUILD.md"

@@ -3,6 +3,13 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FirstBuildGuidance } from "./first-build-guidance";
 import type { FirstBuildResource } from "@/hooks/use-first-build";
 
+const { hasPermission } = vi.hoisted(() => ({
+  hasPermission: vi.fn(() => false),
+}));
+vi.mock("@/hooks/use-permission", () => ({
+  usePermission: () => ({ has: hasPermission }),
+}));
+
 const readiness: FirstBuildResource = {
   signedIn: true,
   loading: false,
@@ -20,7 +27,10 @@ const readiness: FirstBuildResource = {
     agent: { access: "visible", enabledRecentlySeen: false },
   },
 };
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  hasPermission.mockReturnValue(false);
+});
 
 it("does not render private guidance for an anonymous session", () => {
   const { container } = render(
@@ -139,4 +149,32 @@ it("shows refreshed configured observations with no overall ready or success cla
   expect(screen.getByText(/Agent heartbeat:/).closest("li")).toHaveTextContent(
     "does not guarantee job capacity or build success",
   );
+});
+
+it("links current visible setup to Storage only with the platform permission hint", () => {
+  hasPermission.mockReturnValue(true);
+  const { rerender } = render(<FirstBuildGuidance readiness={readiness} />);
+  expect(
+    screen.getByRole("link", { name: "Open storage settings" }),
+  ).toHaveAttribute("href", "/settings?section=storage");
+  rerender(<FirstBuildGuidance readiness={{ ...readiness, loading: true }} />);
+  expect(
+    screen.queryByRole("link", { name: "Open storage settings" }),
+  ).not.toBeInTheDocument();
+  rerender(
+    <FirstBuildGuidance
+      readiness={{
+        ...readiness,
+        data: { ...readiness.data!, configuration: { access: "restricted" } },
+      }}
+    />,
+  );
+  expect(
+    screen.queryByRole("link", { name: "Open storage settings" }),
+  ).not.toBeInTheDocument();
+  hasPermission.mockReturnValue(false);
+  rerender(<FirstBuildGuidance readiness={readiness} />);
+  expect(
+    screen.queryByRole("link", { name: "Open storage settings" }),
+  ).not.toBeInTheDocument();
 });

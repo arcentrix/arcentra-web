@@ -93,7 +93,8 @@ client.interceptors.response.use(
       const apiResponse = data as ApiClientResponse;
       return apiResponse.detail;
     }
-    if (isDev()) {
+    const sensitive = !!(response.config as RequestConfig).sensitive;
+    if (isDev() && !sensitive) {
       const pathname = window.location.pathname || "";
       const isPublicRoute =
         pathname === "/login" ||
@@ -113,11 +114,13 @@ client.interceptors.response.use(
     const errResponse = data as ApiClientErrorResponse;
     const requestId = extractRequestId(response.headers);
     const apiError = new ApiError({
-      message: errResponse.errMsg || "Request failed",
+      message: sensitive
+        ? "Storage request failed"
+        : errResponse.errMsg || "Request failed",
       code: errResponse.code,
       status: response.status,
       requestId,
-      path: errResponse.path,
+      path: sensitive ? undefined : errResponse.path,
     });
 
     // Token 相关错误，自动登出并跳转
@@ -133,12 +136,12 @@ client.interceptors.response.use(
           code: data.code,
           status: response.status,
           requestId,
-          path: errResponse.path,
+          path: sensitive ? undefined : errResponse.path,
         }),
       );
     }
 
-    if (!(response.config as RequestConfig).silence) {
+    if (!sensitive && !(response.config as RequestConfig).silence) {
       toast.error(errResponse.errMsg);
     }
 
@@ -155,6 +158,9 @@ client.interceptors.response.use(
         // A non-JSON transport failure still exposes its status and request ID.
       }
     }
+    const sensitive =
+      !!(error.config as RequestConfig | undefined)?.sensitive ||
+      !!(error.response?.config as RequestConfig | undefined)?.sensitive;
     const requestId = extractRequestId(error.response?.headers);
     const status = error.response?.status as number | undefined;
 
@@ -173,11 +179,13 @@ client.interceptors.response.use(
       "Network error";
 
     const apiError = new ApiError({
-      message,
+      message: sensitive ? "Storage request failed" : message,
       status,
       requestId,
-      path: (error.response?.data as ApiClientErrorResponse | undefined)?.path,
-      cause: error,
+      path: sensitive
+        ? undefined
+        : (error.response?.data as ApiClientErrorResponse | undefined)?.path,
+      cause: sensitive ? undefined : error,
     });
 
     return Promise.reject(apiError);

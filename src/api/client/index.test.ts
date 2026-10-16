@@ -66,3 +66,78 @@ describe("binary API responses", () => {
     expect(clearLocalAuth).not.toHaveBeenCalled();
   });
 });
+
+describe("sensitive API requests", () => {
+  it("never logs or toasts raw envelope failures and preserves only safe error metadata", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { post } = await import("./index");
+    let caught: unknown;
+    try {
+      await post(
+        "/storage/configs",
+        { config: "REQUEST-SECRET-CANARY" },
+        {
+          silence: true,
+          sensitive: true,
+          adapter: async (config) => ({
+            config,
+            status: 200,
+            statusText: "OK",
+            headers: {},
+            data: {
+              code: 400,
+              errMsg: "RESPONSE-SECRET-CANARY",
+              path: "PATH-SECRET-CANARY",
+            },
+          }),
+        },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      message: "Storage request failed",
+      code: 400,
+    });
+    expect(JSON.stringify(caught)).not.toContain("CANARY");
+    expect(caught).not.toHaveProperty("cause");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+  it("drops transport causes containing request bodies while retaining 403 status", async () => {
+    const { post } = await import("./index");
+    let caught: unknown;
+    try {
+      await post(
+        "/storage/configs",
+        { config: "REQUEST-SECRET-CANARY" },
+        {
+          silence: true,
+          sensitive: true,
+          adapter: async (config) => {
+            throw Object.assign(new Error("TRANSPORT-SECRET-CANARY"), {
+              config,
+              response: {
+                config,
+                status: 403,
+                data: {
+                  errMsg: "RESPONSE-SECRET-CANARY",
+                  path: "PATH-SECRET-CANARY",
+                },
+              },
+            });
+          },
+        },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      message: "Storage request failed",
+      status: 403,
+    });
+    expect(caught).not.toHaveProperty("cause");
+    expect(JSON.stringify(caught)).not.toContain("CANARY");
+    expect(clearLocalAuth).not.toHaveBeenCalled();
+  });
+});
