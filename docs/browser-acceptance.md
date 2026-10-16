@@ -23,6 +23,12 @@ Artifact controls are checked at 390×844, 320×568, and 1440×1050. Pointer hit
 
 Run filtering waits for the exact run-scoped GET response and the rendered matching list before download. Actual downloads require one ordinary click, an HTTP 200 response from the specific artifact endpoint, and browser-saved bytes; there is no retry. The safe summary records only numeric download request/response/success/HTTP-error/failed-request counts to distinguish absent download requests from HTTP/network or browser-save failures. The simulated suite includes a delayed filtered response.
 
+### GitLab polling setup fixture
+
+The `polling-fixture.mjs` section of the simulated transport suite exercises the project-only polling panel: read-only refresh, review/dismissal without a write, non-executing baseline before separate enable, current candidate permissions, explicit selections across five pages (101 readable candidates), mobile enable review, disabled state, replacement-baseline discard acknowledgement and 409 recovery without automatic mutation retry. The fixture asserts exact revision/baseline/selected-ID request bodies and the distinction between saved observation, configured definition and actual Agent checkout. It also displays a completed observation with zero event/ref matches without a build-success claim.
+
+These are synthetic frontend assertions. They do not establish a real GitLab scan, baseline completeness, polling admission, revocation fencing, Agent execution, historical replay or cross-webhook deduplication. Actual polling setup requires a separate supported integration and real backend acceptance. Component tests additionally cover stale reads, cross-project navigation, duplicate submission, in-flight dismissal, permission/eligibility errors, restricted summaries and enabled streams with unresolved execution evidence.
+
 ## Actual backend / Agent journey
 
 The backend repository's disposable acceptance runner owns service setup and teardown. It must start real Control and Agent binaries, MySQL, Redis, Kafka, MinIO artifact storage and a local Git daemon, initialize/register the synthetic account, and bootstrap its platform-admin role. After services and the Agent are ready, it invokes this command **with the frontend repository as its working directory**:

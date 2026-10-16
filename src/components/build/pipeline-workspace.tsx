@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineErrorState } from "@/components/inline-error-state";
 import { AgentReadiness } from "./agent-readiness";
+import { PollingPanel } from "./polling-panel";
 import {
   CreatePipelineDialog,
   PipelineSpecDialog,
@@ -59,6 +60,7 @@ export function PipelineWorkspace({
   };
   return (
     <div className="space-y-5">
+      {projectId && <PollingPanel projectId={projectId} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Input
