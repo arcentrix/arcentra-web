@@ -547,6 +547,87 @@ const buildEnv = () => ({
   ARCENTRA_ACCEPTANCE_COORDINATION_DIR: "/tmp/private-fixture/coordination",
 });
 
+test("image acceptance profile admits only the exact private Git fixture URL", () => {
+  const env = {
+    ...buildEnv(),
+    ARCENTRA_ACCEPTANCE_PROFILE: "image-build-v1",
+    ARCENTRA_ACCEPTANCE_REPO_URL: "git://git:9418/acceptance.git",
+  };
+  assert.equal(
+    actualBackendConfig(env).repository,
+    env.ARCENTRA_ACCEPTANCE_REPO_URL,
+  );
+  assert.equal(
+    actualBackendConfig(buildEnv()).repository,
+    buildEnv().ARCENTRA_ACCEPTANCE_REPO_URL,
+  );
+  assert.deepEqual(actualBackendConfig(env), {
+    ...actualBackendConfig(buildEnv()),
+    repository: env.ARCENTRA_ACCEPTANCE_REPO_URL,
+  });
+  for (const repository of [
+    "git://git:9419/acceptance.git",
+    "git://git/acceptance.git",
+    "git://git:9418/other.git",
+    "git://git:9418/acceptance.git/",
+    "git://user:pass@git:9418/acceptance.git",
+    "git://git:9418/acceptance.git?query=value",
+    "git://git:9418/acceptance.git#fragment",
+    "git://git:9418/acceptance.git?",
+    "git://git:9418/acceptance.git#",
+    "git://git:9418/path/../acceptance.git",
+    "git://git:09418/acceptance.git",
+    "git://GIT:9418/acceptance.git",
+    "http://git:9418/acceptance.git",
+    "git://other:9418/acceptance.git",
+    "git://127.0.0.1:19418/acceptance.git",
+    " git://git:9418/acceptance.git",
+    "git://git:9418/acceptance.git\n",
+  ])
+    assert.throws(
+      () =>
+        actualBackendConfig({
+          ...env,
+          ARCENTRA_ACCEPTANCE_REPO_URL: repository,
+        }),
+      /exact private fixture URL/,
+      repository,
+    );
+  assert.throws(
+    () =>
+      actualBackendConfig({ ...env, ARCENTRA_ACCEPTANCE_PROFILE: undefined }),
+    /numeric loopback host/,
+  );
+  for (const profile of [
+    "",
+    "host",
+    "image-build-v2",
+    "IMAGE-BUILD-V1",
+    "arbitrary",
+  ])
+    assert.throws(
+      () =>
+        actualBackendConfig({
+          ...buildEnv(),
+          ARCENTRA_ACCEPTANCE_PROFILE: profile,
+        }),
+      /Unsupported acceptance profile/,
+    );
+  assert.throws(
+    () =>
+      actualBackendConfig({
+        ...env,
+        ARCENTRA_ACCEPTANCE_BACKEND_URL: "http://control:8080",
+      }),
+    /numeric loopback host/,
+  );
+  // The shared UI/API URL validator never recognizes the private Git exception.
+  assert.throws(
+    () => loopbackURL("http://git:9418", "UI_TEST_BASE_URL"),
+    /numeric loopback host/,
+  );
+});
+
 test("actual acceptance phase defaults to the full build and rejects any unknown skip mode", () => {
   assert.equal(actualBackendConfig(buildEnv()).phase, "build");
   for (const phase of ["preflight", "build"])

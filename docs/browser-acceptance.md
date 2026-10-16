@@ -47,6 +47,7 @@ Required environment:
 
 Optional environment:
 
+- `ARCENTRA_ACCEPTANCE_PROFILE`: omit for the default loopback repository fixture. The disposable application-image runner sets exactly `image-build-v1`, which requires exactly `git://git:9418/acceptance.git` for `ARCENTRA_ACCEPTANCE_REPO_URL` on its private Docker bridge. No other profiles or repository URL variants are accepted in image mode. UI and backend URLs remain numeric loopback in both modes; all build, compile-failure and download assertions remain unchanged.
 - `ARCENTRA_ACCEPTANCE_COMMIT`: expected full Git commit SHA, asserted against the reviewed definition and initial checkout
 - `ARCENTRA_ACCEPTANCE_BRANCH`: defaults to `main`
 - `ARCENTRA_ACCEPTANCE_DEFINITION_PATH`: defaults to `.arcentra/pipeline.yaml`
