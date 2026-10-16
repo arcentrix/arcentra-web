@@ -30,6 +30,13 @@ import {
   firstBuildConfiguredSteps,
   firstBuildJourney,
   firstBuildPreflightSteps,
+  firstBuildStorageSteps,
+  storageSetupStepsFromSummary,
+  redactDiagnosticText,
+  safeFailureScreenshot,
+  createConsoleCollector,
+  finalizeConsoleObservation,
+  withBrowserDeadline,
   firstBuildReadinessEvidence,
   preflightStepsFromSummary,
   artifactDownloadEvidence,
@@ -41,6 +48,13 @@ import {
   writeCompletedBuildReceipt,
 } from "./browser-harness.mjs";
 import { fileURLToPath } from "node:url";
+import {
+  assertPublicStorage,
+  assertNoStorageSecrets,
+  storageSensitiveValues,
+  syntheticStorageConfig,
+  storageInitialName,
+} from "./storage-journey.mjs";
 import {
   assertRetryEditorViewports,
   containerRetryFixtures,
@@ -384,6 +398,8 @@ test("all static browser journey stages are explicitly allowlisted", async () =>
   for (const file of [
     "ui-fixture-smoke.mjs",
     "actual-backend-acceptance.mjs",
+    "storage-journey.mjs",
+    "storage-fixture.mjs",
   ]) {
     const source = await readFile(new URL(file, import.meta.url), "utf8");
     const stages = [...source.matchAll(/setStage\("([^"\n]+)"\)/g)].map(
@@ -564,6 +580,7 @@ test("image acceptance profile admits only the exact private Git fixture URL", (
   assert.deepEqual(actualBackendConfig(env), {
     ...actualBackendConfig(buildEnv()),
     repository: env.ARCENTRA_ACCEPTANCE_REPO_URL,
+    storageEndpoint: "minio:9000",
   });
   for (const repository of [
     "git://git:9419/acceptance.git",
@@ -630,7 +647,7 @@ test("image acceptance profile admits only the exact private Git fixture URL", (
 
 test("actual acceptance phase defaults to the full build and rejects any unknown skip mode", () => {
   assert.equal(actualBackendConfig(buildEnv()).phase, "build");
-  for (const phase of ["preflight", "build"])
+  for (const phase of ["preflight", "storage-setup", "build"])
     assert.equal(
       actualBackendConfig({ ...buildEnv(), ARCENTRA_ACCEPTANCE_PHASE: phase })
         .phase,
@@ -1219,3 +1236,375 @@ for (const artifactCase of [
       ]);
     } else await assert.rejects(result);
   });
+
+test("storage setup cannot write successful build receipts and preserves separate-context evidence", async () => {
+  const config = actualBackendConfig({
+    ...buildEnv(),
+    ARCENTRA_ACCEPTANCE_PHASE: "storage-setup",
+  });
+  const calls = [];
+  await writeCompletedBuildReceipt(config, undefined, async (...args) =>
+    calls.push(args),
+  );
+  assert.deepEqual(calls, []);
+  await assert.rejects(
+    writeCompletedBuildReceipt(config, { runId: "wrong" }, async () => {}),
+    /cannot produce/,
+  );
+  const sourceCommit = "a".repeat(40);
+  const summary = {
+    kind: "actual-backend",
+    status: "passed",
+    stage: "storage-setup-complete",
+    ...firstBuildReadinessEvidence({
+      phase: "storage-setup",
+      sourceCommit,
+      steps: [...firstBuildPreflightSteps, ...firstBuildStorageSteps],
+    }),
+  };
+  assert.deepEqual(storageSetupStepsFromSummary(summary, sourceCommit), [
+    ...firstBuildPreflightSteps,
+    ...firstBuildStorageSteps,
+  ]);
+  for (const patch of [
+    { status: "failed" },
+    { kind: "simulated-transport" },
+    { stage: "preflight-complete" },
+  ])
+    assert.throws(
+      () =>
+        storageSetupStepsFromSummary({ ...summary, ...patch }, sourceCommit),
+      /same-source/,
+    );
+  for (const patch of [
+    { phase: "build" },
+    { sourceCommit: "b".repeat(40) },
+    { steps: [...firstBuildPreflightSteps] },
+    {
+      steps: [
+        ...firstBuildPreflightSteps,
+        ...firstBuildStorageSteps,
+        "extra-secret",
+      ],
+    },
+    { token: "private-token" },
+  ])
+    assert.throws(
+      () =>
+        storageSetupStepsFromSummary(
+          {
+            ...summary,
+            firstBuildReadiness: { ...summary.firstBuildReadiness, ...patch },
+          },
+          sourceCommit,
+        ),
+      /same-source/,
+    );
+  assert.throws(
+    () => preflightStepsFromSummary(summary, sourceCommit),
+    /same-source/,
+  );
+});
+
+test("storage fixture profiles are exact and public data cannot expose credential values", () => {
+  for (const endpoint of ["127.0.0.1:19000", "minio:9000"]) {
+    const config = syntheticStorageConfig(endpoint);
+    const { accessKey, secretKey, ...publicConfig } = config;
+    const value = {
+      storageId: "acceptance",
+      storageType: "minio",
+      name: storageInitialName,
+      isDefault: 0,
+      isEnabled: 1,
+      config: publicConfig,
+      configuredFields: ["accessKey", "secretKey"],
+    };
+    assertPublicStorage(value, endpoint);
+    assertNoStorageSecrets(value, endpoint);
+    for (const patch of [
+      { config },
+      { configuredFields: ["secretKey"] },
+      { isEnabled: 0 },
+      { storageType: "s3" },
+      { config: { ...publicConfig, token: "unknown-value" } },
+      { description: secretKey },
+    ]) {
+      assert.throws(() =>
+        assertPublicStorage({ ...value, ...patch }, endpoint),
+      );
+    }
+    for (const secret of storageSensitiveValues(endpoint)) {
+      let error;
+      try {
+        assertNoStorageSecrets({ secret }, endpoint);
+      } catch (caught) {
+        error = caught;
+      }
+      assert.ok(error);
+      assert.equal(
+        error.message.includes(secret),
+        false,
+        "Credential values must not enter assertion errors",
+      );
+      assert.equal(
+        redactDiagnosticText(
+          `before ${secret} after`,
+          storageSensitiveValues(endpoint),
+        ),
+        "before [REDACTED] after",
+      );
+    }
+  }
+  for (const endpoint of [
+    "localhost:19000",
+    "http://127.0.0.1:19000",
+    "minio:9001",
+    "https://external.example",
+    "127.0.0.1:19000/",
+  ])
+    assert.throws(() => syntheticStorageConfig(endpoint), /exact synthetic/);
+});
+
+test("diagnostics detect and redact actual UI wire config and arbitrary JSON field order", () => {
+  const endpoint = "127.0.0.1:19000";
+  const config = syntheticStorageConfig(endpoint);
+  const wire = Object.fromEntries(
+    [
+      "endpoint",
+      "bucket",
+      "region",
+      "basePath",
+      "useTLS",
+      "accessKey",
+      "secretKey",
+    ].map((key) => [key, config[key]]),
+  );
+  for (const value of [
+    wire,
+    Object.fromEntries(Object.entries(config).reverse()),
+  ]) {
+    for (const spacing of [undefined, 2]) {
+      const encoded = Buffer.from(
+        JSON.stringify(value, null, spacing),
+      ).toString("base64");
+      const body = JSON.stringify({ config: encoded });
+      assert.throws(
+        () => assertNoStorageSecrets(body, endpoint),
+        /credentials must not appear/,
+      );
+      assert.equal(
+        redactDiagnosticText(body, [config.accessKey, config.secretKey]),
+        '{"config":"[REDACTED]"}',
+      );
+    }
+  }
+});
+
+test("failure screenshots fail closed on exposed credentials or populated inputs", async () => {
+  const secret = "synthetic-sensitive-credential";
+  let content = "safe page";
+  let inputs = [{ value: "" }];
+  const page = {
+    content: async () => content,
+    locator: () => ({ evaluateAll: async (fn) => fn(inputs) }),
+  };
+  assert.equal(await safeFailureScreenshot(page, [secret]), true);
+  inputs = [{ value: secret }];
+  assert.equal(await safeFailureScreenshot(page, [secret]), false);
+  inputs = [];
+  content = `<div>${secret}</div>`;
+  assert.equal(await safeFailureScreenshot(page, [secret]), false);
+  content = Buffer.from(JSON.stringify({ secretKey: secret })).toString(
+    "base64",
+  );
+  assert.equal(await safeFailureScreenshot(page, [secret]), false);
+  assert.equal(
+    await safeFailureScreenshot(
+      {
+        content: async () => {
+          throw new Error("page closed");
+        },
+      },
+      [secret],
+    ),
+    false,
+  );
+});
+
+function consoleDiagnosticFixture() {
+  const diagnostics = {
+    console: [],
+    secretExposureCount: 0,
+    consoleInspectionFailureCount: 0,
+    lateConsoleEventCount: 0,
+  };
+  const secret = "synthetic-console-private-value";
+  const collector = createConsoleCollector(diagnostics, [secret]);
+  const message = ({
+    text = "Object",
+    level = "log",
+    value,
+    inspect,
+  } = {}) => ({
+    type: () => level,
+    text: () => text,
+    location: () => ({ url: "http://127.0.0.1/source.js" }),
+    args: () =>
+      inspect
+        ? [{ jsonValue: inspect }]
+        : value === undefined
+          ? []
+          : [{ jsonValue: async () => value }],
+  });
+  return { diagnostics, secret, collector, message };
+}
+
+test("console collector detects text canaries at every level without retaining values", async () => {
+  for (const level of ["log", "info", "debug", "warning", "error"]) {
+    const { diagnostics, secret, collector, message } =
+      consoleDiagnosticFixture();
+    collector.accept(message({ text: secret, level }));
+    await assert.rejects(
+      finalizeConsoleObservation(collector, async () => {}),
+      /synthetic credential/,
+    );
+    assert.equal(diagnostics.secretExposureCount, 1);
+    assert.equal(JSON.stringify(diagnostics).includes(secret), false);
+  }
+});
+
+test("console Object arguments expose nested raw and reordered encoded Axios-like data", async () => {
+  for (const encoded of [false, true]) {
+    const { diagnostics, secret, collector, message } =
+      consoleDiagnosticFixture();
+    const config = {
+      region: "fixture",
+      secretKey: secret,
+      endpoint: "127.0.0.1:19000",
+    };
+    const data = encoded
+      ? Buffer.from(JSON.stringify(config, null, 2)).toString("base64")
+      : JSON.stringify(config);
+    collector.accept(message({ value: { config: { data } } }));
+    await assert.rejects(
+      finalizeConsoleObservation(collector, async () => {}),
+      /synthetic credential/,
+    );
+    assert.equal(diagnostics.secretExposureCount, 1);
+    assert.equal(JSON.stringify(diagnostics).includes(secret), false);
+    assert.equal(JSON.stringify(diagnostics).includes(data), false);
+  }
+});
+
+test("console inspection rejection, synchronous throw and cyclic values fail without copying private errors", async () => {
+  for (const mode of ["reject", "throw", "cyclic"]) {
+    const { diagnostics, secret, collector, message } =
+      consoleDiagnosticFixture();
+    const cyclic = {};
+    cyclic.self = cyclic;
+    const inspect = () => {
+      if (mode === "throw") throw new Error(secret);
+      if (mode === "reject") return Promise.reject(new Error(secret));
+      return Promise.resolve(cyclic);
+    };
+    collector.accept(message({ inspect }));
+    await assert.rejects(
+      finalizeConsoleObservation(collector, async () => {}),
+      (error) => {
+        assert.match(error.message, /must be inspectable/);
+        assert.equal(error.message.includes(secret), false);
+        return true;
+      },
+    );
+    assert.equal(diagnostics.consoleInspectionFailureCount, 1);
+    assert.equal(JSON.stringify(diagnostics).includes(secret), false);
+  }
+});
+
+test("never-resolving console inspection remains inside the journey deadline", async () => {
+  const { collector, message } = consoleDiagnosticFixture();
+  collector.accept(message({ inspect: () => new Promise(() => {}) }));
+  let closed = false;
+  let passed = false;
+  await assert.rejects(
+    withBrowserDeadline(async () => {
+      await finalizeConsoleObservation(collector, async () => {
+        closed = true;
+      });
+      passed = true;
+    }, 25),
+    /total timeout/,
+  );
+  assert.equal(passed, false);
+  assert.equal(closed, false);
+});
+
+test("events added during a pending drain are inspected before closure and verdict", async () => {
+  const { diagnostics, secret, collector, message } =
+    consoleDiagnosticFixture();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  collector.accept(message({ inspect: () => gate }));
+  let closed = false;
+  const finalized = withBrowserDeadline(
+    () =>
+      finalizeConsoleObservation(collector, async () => {
+        closed = true;
+      }),
+    1000,
+  );
+  collector.accept(message({ value: { config: { data: secret } } }));
+  release({ safe: true });
+  await assert.rejects(finalized, /synthetic credential/);
+  assert.equal(closed, true);
+  assert.equal(diagnostics.secretExposureCount, 1);
+});
+
+test("console events delivered during browser close cannot pass unnoticed", async () => {
+  const { diagnostics, secret, collector, message } =
+    consoleDiagnosticFixture();
+  let passed = false;
+  let closed = false;
+  await assert.rejects(
+    withBrowserDeadline(async () => {
+      await finalizeConsoleObservation(collector, async () => {
+        collector.accept(message({ value: { secret } }));
+        closed = true;
+      });
+      passed = true;
+    }, 1000),
+    /synthetic credential/,
+  );
+  assert.equal(closed, true);
+  assert.equal(passed, false);
+  assert.equal(diagnostics.secretExposureCount, 1);
+});
+
+test("clean observation passes only after close and final drain; sealed late delivery fails closed", async () => {
+  const { diagnostics, collector, message } = consoleDiagnosticFixture();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let closing = false;
+  let passed = false;
+  const final = withBrowserDeadline(async () => {
+    await finalizeConsoleObservation(collector, async () => {
+      closing = true;
+      collector.accept(message({ inspect: () => gate }));
+    });
+    passed = true;
+  }, 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closing, true);
+  assert.equal(passed, false);
+  release({ safe: true });
+  await final;
+  assert.equal(passed, true);
+  collector.accept(message());
+  assert.equal(diagnostics.lateConsoleEventCount, 1);
+  assert.equal(diagnostics.consoleInspectionFailureCount, 1);
+  assert.throws(() => collector.assertClean(), /must be inspectable/);
+});

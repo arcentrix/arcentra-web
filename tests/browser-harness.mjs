@@ -13,6 +13,13 @@ const acceptanceStages = new Set([
   "first-build-status",
   "first-build-refresh",
   "preflight-complete",
+  "storage-setup-evidence",
+  "storage-create",
+  "storage-edit",
+  "storage-default",
+  "storage-reload",
+  "storage-permissions",
+  "storage-setup-complete",
   "project-create",
   "pipeline-create",
   "definition-review",
@@ -41,12 +48,19 @@ const acceptanceStages = new Set([
   "container-failed-step-draft",
 ]);
 
-export const firstBuildJourney = "two-phase-separate-browser-contexts";
+export const firstBuildJourney = "three-phase-separate-browser-contexts";
 export const firstBuildPreflightSteps = Object.freeze([
   "preflight-login-via-real-api",
   "preflight-missing-configuration-no-agent-no-scope-manual-scope-allowed",
   "preflight-explicit-status-refresh",
   "preflight-no-product-mutations",
+]);
+export const firstBuildStorageSteps = Object.freeze([
+  "storage-login-via-real-api",
+  "storage-create-via-ui-redacted-response",
+  "storage-edit-metadata-preserves-blank-credentials",
+  "storage-explicit-default-and-reload",
+  "storage-no-secret-in-page-or-diagnostics",
 ]);
 export const firstBuildConfiguredSteps = Object.freeze([
   "configured-persisted-storage-and-signing-recent-agent",
@@ -93,11 +107,15 @@ export function assertFirstBuildSnapshot(value, configured) {
 export function firstBuildReadinessEvidence(evidence) {
   if (!evidence) return {};
   assert.ok(
-    ["preflight", "build"].includes(evidence.phase),
+    ["preflight", "storage-setup", "build"].includes(evidence.phase),
     "Known first-build phase required",
   );
   assert.match(evidence.sourceCommit, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
-  const allowed = [...firstBuildPreflightSteps, ...firstBuildConfiguredSteps];
+  const allowed = [
+    ...firstBuildPreflightSteps,
+    ...firstBuildStorageSteps,
+    ...firstBuildConfiguredSteps,
+  ];
   return {
     firstBuildReadiness: {
       journey: firstBuildJourney,
@@ -129,6 +147,27 @@ export function preflightStepsFromSummary(summary, sourceCommit) {
   return [...firstBuildPreflightSteps];
 }
 
+/** Full builds require completed, same-source UI configuration as well as preflight. */
+export function storageSetupStepsFromSummary(summary, sourceCommit) {
+  assert.match(sourceCommit, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
+  const evidence = summary?.firstBuildReadiness;
+  const steps = [...firstBuildPreflightSteps, ...firstBuildStorageSteps];
+  assert.ok(
+    summary?.kind === "actual-backend" &&
+      summary.status === "passed" &&
+      summary.stage === "storage-setup-complete" &&
+      evidence &&
+      Object.keys(evidence).sort().join(",") ===
+        "journey,phase,sourceCommit,steps" &&
+      evidence.journey === firstBuildJourney &&
+      evidence.phase === "storage-setup" &&
+      evidence.sourceCommit === sourceCommit &&
+      JSON.stringify(evidence.steps) === JSON.stringify(steps),
+    "Full build requires successful same-source browser storage setup after read-only preflight",
+  );
+  return steps;
+}
+
 /** A preflight can never publish the final build receipt or bypass a missing build. */
 export async function writeCompletedBuildReceipt(
   config,
@@ -136,14 +175,14 @@ export async function writeCompletedBuildReceipt(
   writer,
 ) {
   assert.ok(
-    ["preflight", "build"].includes(config.phase),
+    ["preflight", "storage-setup", "build"].includes(config.phase),
     "Known acceptance phase required",
   );
-  if (config.phase === "preflight") {
+  if (config.phase !== "build") {
     assert.equal(
       successfulBuild,
       undefined,
-      "Read-only preflight cannot produce a successful build",
+      "Setup phases cannot produce a successful build",
     );
     return;
   }
@@ -211,6 +250,8 @@ export function safeFailureEvidence(stage, error) {
     "artifact-controls.mjs",
     "stdlib-build-contract.mjs",
     "retry-policy-fixture.mjs",
+    "storage-journey.mjs",
+    "storage-fixture.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
     if (!/^\s+at /.test(frame)) continue;
@@ -293,17 +334,19 @@ export function actualBackendConfig(env = process.env) {
     );
   const phase = env.ARCENTRA_ACCEPTANCE_PHASE ?? "build";
   assert.ok(
-    ["preflight", "build"].includes(phase),
+    ["preflight", "storage-setup", "build"].includes(phase),
     "Unsupported acceptance phase",
   );
   const contract = artifactContractConfig(env, required);
   assert.ok(
-    phase !== "preflight" || contract.artifactMode === "stdlib-build-v1",
-    "Preflight requires the full build contract",
+    phase === "build" || contract.artifactMode === "stdlib-build-v1",
+    "Setup phases require the full build contract",
   );
   return {
     phase,
     expectedCommit: env.ARCENTRA_ACCEPTANCE_COMMIT,
+    storageEndpoint:
+      profile === "image-build-v1" ? "minio:9000" : "127.0.0.1:19000",
     backend: backend.origin,
     repository: repository.href,
     orgId: required("ARCENTRA_ACCEPTANCE_ORG_ID"),
@@ -337,7 +380,7 @@ export function expectedResourceError(message, expected) {
 export async function runBrowserTest(
   kind,
   callback,
-  { backend, totalTimeoutMs, firstBuildEvidence } = {},
+  { backend, totalTimeoutMs, firstBuildEvidence, sensitiveValues = [] } = {},
 ) {
   assert.ok(["simulated-transport", "actual-backend"].includes(kind));
   const timeoutMs =
@@ -363,6 +406,9 @@ export async function runBrowserTest(
     browser: "Playwright bundled Chromium",
     base: base.origin,
     console: [],
+    secretExposureCount: 0,
+    consoleInspectionFailureCount: 0,
+    lateConsoleEventCount: 0,
     pageErrors: [],
     requests: [],
     artifactDownloadRequestCount: 0,
@@ -371,15 +417,16 @@ export async function runBrowserTest(
     unhandledRoutes: [],
   };
   const expectedHttpErrors = new Set();
+  const consoleCollector = createConsoleCollector(diagnostics, sensitiveValues);
   let server;
   let serverError;
   let serverLog = "";
   let browser;
   let context;
   let page;
-  let timeout;
   let failure;
   let stage = "setup";
+  let sensitiveFormOpen = false;
   try {
     if (!process.env.UI_TEST_BASE_URL) {
       server = spawn(
@@ -455,14 +502,8 @@ export async function runBrowserTest(
       if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
         diagnostics.artifactDownloadRequestCount++;
     });
-    page.on("console", (message) => {
-      if (["error", "warning"].includes(message.type()))
-        diagnostics.console.push({
-          type: message.type(),
-          text: message.text(),
-          url: message.location().url,
-        });
-    });
+    const onConsole = (message) => consoleCollector.accept(message);
+    page.on("console", onConsole);
     page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
     page.on("requestfailed", (request) => {
       const url = new URL(request.url());
@@ -494,21 +535,30 @@ export async function runBrowserTest(
         );
         stage = value;
       },
+      protectSensitiveValue: (value) => {
+        assert.equal(typeof value, "string");
+        if (value) sensitiveValues.push(value);
+      },
+      setSensitiveFormOpen: (open) => {
+        sensitiveFormOpen = open;
+      },
       expectHttpError: (path, status) =>
         expectedHttpErrors.add(`${path}:${status}`),
     });
-    await Promise.race([
-      test,
-      new Promise((_, reject) => {
-        timeout = setTimeout(
-          () =>
-            reject(
-              new Error(`${kind} browser test exceeded its total timeout`),
-            ),
-          timeoutMs,
-        );
-      }),
-    ]);
+    await withBrowserDeadline(
+      async () => {
+        await test;
+        // Keep observing through browser close. A callback return is not an event
+        // cutoff: late console calls or failed handle inspection must fail closed.
+        await finalizeConsoleObservation(consoleCollector, async () => {
+          await browser.close();
+          browser = undefined;
+        });
+        page.off("console", onConsole);
+      },
+      timeoutMs,
+      `${kind} browser test exceeded its total timeout`,
+    );
     assert.equal(
       diagnostics.pageErrors.length,
       0,
@@ -542,15 +592,26 @@ export async function runBrowserTest(
       0,
       "No unexpected HTTP errors",
     );
+    assert.equal(
+      redactDiagnosticText(JSON.stringify(diagnostics), sensitiveValues) ===
+        JSON.stringify(diagnostics),
+      true,
+      "No synthetic credential may appear in browser diagnostics",
+    );
     diagnostics.status = "passed";
   } catch (error) {
     failure = error;
     diagnostics.status = "failed";
     diagnostics.error = error.stack || String(error);
-    if (page && !page.isClosed())
+    if (
+      page &&
+      !page.isClosed() &&
+      !sensitiveFormOpen &&
+      (await safeFailureScreenshot(page, sensitiveValues))
+    )
       await page
         .screenshot({
-          path: `${output}/${firstBuildEvidence?.phase === "preflight" ? "preflight-" : ""}failure.png`,
+          path: `${output}/${firstBuildEvidence?.phase && firstBuildEvidence.phase !== "build" ? `${firstBuildEvidence.phase}-` : ""}failure.png`,
           fullPage: true,
           mask: [
             page.locator(
@@ -560,14 +621,27 @@ export async function runBrowserTest(
         })
         .catch(() => {});
   } finally {
-    clearTimeout(timeout);
-    await browser?.close();
+    if (browser) {
+      try {
+        await withBrowserDeadline(
+          () => browser.close(),
+          5000,
+          "Browser cleanup exceeded its timeout",
+        );
+      } catch {
+        failure ??= new Error("Browser cleanup did not complete");
+        diagnostics.status = "failed";
+      }
+    }
     server?.kill("SIGTERM");
     await writeFile(
       `${output}/diagnostics.json`,
-      `${JSON.stringify(diagnostics, null, 2)}\n`,
+      `${redactDiagnosticText(JSON.stringify(diagnostics, null, 2), sensitiveValues)}\n`,
     );
-    await writeFile(`${output}/vite.log`, serverLog);
+    await writeFile(
+      `${output}/vite.log`,
+      redactDiagnosticText(serverLog, sensitiveValues),
+    );
     // This is the only JSON file approved for artifact upload. Never include
     // console text, HTML, request/response bodies, headers, URLs, or credentials.
     await writeFile(
@@ -581,6 +655,10 @@ export async function runBrowserTest(
           browser: diagnostics.browser,
           browserVersion: diagnostics.browserVersion,
           pageErrorCount: diagnostics.pageErrors.length,
+          secretExposureCount: diagnostics.secretExposureCount,
+          consoleInspectionFailureCount:
+            diagnostics.consoleInspectionFailureCount,
+          lateConsoleEventCount: diagnostics.lateConsoleEventCount,
           unexpectedConsoleErrorCount: diagnostics.console.filter(
             (entry) =>
               entry.type === "error" &&
@@ -597,6 +675,149 @@ export async function runBrowserTest(
       )}\n`,
     );
   }
-  if (failure) throw failure;
+  if (failure) {
+    failure.message = redactDiagnosticText(failure.message, sensitiveValues);
+    if (failure.stack)
+      failure.stack = redactDiagnosticText(failure.stack, sensitiveValues);
+    throw failure;
+  }
   console.log(`${kind} browser acceptance passed. Evidence: ${output}`);
+}
+
+/** Diagnostics remain useful without copying known synthetic credential values. */
+export function redactDiagnosticText(text, values) {
+  let safe = String(text);
+  const secrets = [...values]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  // A JSON credential body has no canonical property order. Decode bounded
+  // base64 candidates instead of relying on one serialized fixture canary.
+  safe = safe.replace(/[A-Za-z0-9+/]{32,}={0,2}/g, (candidate) => {
+    if (candidate.length > 65536) return "[REDACTED-LARGE-ENCODED-VALUE]";
+    const decoded = Buffer.from(candidate, "base64").toString("utf8");
+    return secrets.some((secret) => decoded.includes(secret))
+      ? "[REDACTED]"
+      : candidate;
+  });
+  for (const value of secrets) safe = safe.split(value).join("[REDACTED]");
+  return safe;
+}
+
+/** Never capture a failed page that still contains credentials or a populated password field. */
+export async function safeFailureScreenshot(page, sensitiveValues) {
+  try {
+    const content = await page.content();
+    return (
+      redactDiagnosticText(content, sensitiveValues) === content &&
+      (await page
+        .locator(
+          'input[type="password"], input[autocomplete="current-password"], input[name="password"]',
+        )
+        .evaluateAll((inputs) => inputs.every((input) => !input.value)))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Inspect every observed argument without retaining raw object data or errors. */
+export function createConsoleCollector(diagnostics, sensitiveValues) {
+  const pending = new Set();
+  let sealed = false;
+  return {
+    accept(message) {
+      if (sealed) {
+        diagnostics.lateConsoleEventCount++;
+        diagnostics.consoleInspectionFailureCount++;
+        return;
+      }
+      try {
+        const entry = {
+          type: message.type(),
+          text: message.text(),
+          url: message.location().url,
+        };
+        const serialized = JSON.stringify(entry);
+        if (redactDiagnosticText(serialized, sensitiveValues) !== serialized)
+          diagnostics.secretExposureCount++;
+        diagnostics.console.push({
+          ...entry,
+          text: redactDiagnosticText(entry.text, sensitiveValues),
+          url: redactDiagnosticText(entry.url, sensitiveValues),
+        });
+      } catch {
+        diagnostics.consoleInspectionFailureCount++;
+        return;
+      }
+      const inspection = (async () => {
+        try {
+          const args = await Promise.all(
+            message.args().map((value) => value.jsonValue()),
+          );
+          const serialized = JSON.stringify(args);
+          if (redactDiagnosticText(serialized, sensitiveValues) !== serialized)
+            diagnostics.secretExposureCount++;
+        } catch {
+          diagnostics.consoleInspectionFailureCount++;
+        }
+      })();
+      pending.add(inspection);
+      void inspection.finally(() => pending.delete(inspection));
+    },
+    async drain() {
+      // Events received during a drain are included, not dropped by an array snapshot.
+      while (pending.size) await Promise.all([...pending]);
+    },
+    seal() {
+      sealed = true;
+    },
+    assertClean() {
+      assert.ok(
+        sealed && pending.size === 0,
+        "Console observation must be closed and completely inspected",
+      );
+      assert.equal(
+        diagnostics.consoleInspectionFailureCount,
+        0,
+        "Every observed console argument must be inspectable",
+      );
+      assert.equal(
+        diagnostics.lateConsoleEventCount,
+        0,
+        "No console events may arrive after the observation cutoff",
+      );
+      assert.equal(
+        diagnostics.secretExposureCount,
+        0,
+        "No console argument may expose a synthetic credential",
+      );
+    },
+  };
+}
+
+/** Closing the browser establishes the cutoff; this whole operation shares the journey deadline. */
+export async function finalizeConsoleObservation(collector, closeBrowser) {
+  await collector.drain();
+  await closeBrowser();
+  collector.seal();
+  await collector.drain();
+  collector.assertClean();
+}
+
+export async function withBrowserDeadline(
+  operation,
+  timeoutMs,
+  message = "Browser observation exceeded its total timeout",
+) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

@@ -1,3 +1,5 @@
+import { storageFixture, assertStorageFixtureUI } from "./storage-fixture.mjs";
+import { storageSensitiveValues } from "./storage-journey.mjs";
 import { pollingFixture, assertPollingSetup } from "./polling-fixture.mjs";
 import { retryFixture } from "./retry-approval-fixture.mjs";
 import { assertContainerRetryDraft } from "./retry-policy-fixture.mjs";
@@ -13,7 +15,16 @@ import {
 
 await runBrowserTest(
   "simulated-transport",
-  async ({ page, base, output, diagnostics, expectHttpError, setStage }) => {
+  async ({
+    page,
+    base,
+    output,
+    diagnostics,
+    expectHttpError,
+    setStage,
+    setSensitiveFormOpen,
+    protectSensitiveValue,
+  }) => {
     setStage("fixture-regression");
     expectHttpError("/api/v1/pipelines/", 503);
     expectHttpError("/api/v1/projects/project-1/artifacts", 403);
@@ -111,6 +122,7 @@ await runBrowserTest(
       agent: { access: "visible", enabledRecentlySeen: false },
     };
     const polling = pollingFixture();
+    const storage = storageFixture();
     let firstBuildError = false;
     let mode = "normal";
     let starts = 0;
@@ -118,6 +130,7 @@ await runBrowserTest(
     let saves = 0;
     await page.route("**/api/v1/**", async (route) => {
       if (await polling.route(route)) return;
+      if (await storage.route(route)) return;
       const request = route.request();
       const url = new URL(request.url());
       const path = url.pathname.replace("/api/v1", "");
@@ -138,6 +151,13 @@ await runBrowserTest(
             component: "Projects",
             isEnabled: true,
           },
+          {
+            menuId: "settings",
+            name: "Settings",
+            path: "/settings",
+            component: "Settings",
+            isEnabled: true,
+          },
         ]);
       if (path === "/me/first-build" && request.method() === "GET") {
         if (firstBuildError)
@@ -147,9 +167,14 @@ await runBrowserTest(
           });
         return ok(firstBuild);
       }
-      if (path === "/me/routes") return ok(["/build", "/projects"]);
+      if (path === "/me/routes")
+        return ok(["/build", "/projects", "/settings"]);
       if (path === "/me/effective-actions")
-        return ok(artifactMode === "restricted" ? [] : ["*:*"]);
+        return ok(
+          artifactMode === "restricted" || storage.state.mode === "restricted"
+            ? []
+            : ["*:*"],
+        );
       if (path === "/projects/project-1/artifacts") {
         artifactLists++;
         if (artifactMode === "restricted")
@@ -1051,8 +1076,20 @@ await runBrowserTest(
       await approvalDialog.waitFor({ state: "hidden" });
       await page.setViewportSize({ width: 1440, height: 1050 });
     }
+    await assertStorageFixtureUI({
+      page,
+      base,
+      output,
+      diagnostics,
+      expectHttpError,
+      setStage,
+      setSensitiveFormOpen,
+      protectSensitiveValue,
+      storage,
+    });
     console.log(
       `UI fixture smoke passed: run/dismiss/cancel, container failed-step draft guards/no autosave, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile. Screenshots: ${output}`,
     );
   },
+  { sensitiveValues: storageSensitiveValues("127.0.0.1:19000") },
 );

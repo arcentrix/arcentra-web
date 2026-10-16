@@ -9,11 +9,14 @@ import {
   assertFirstBuildSnapshot,
   firstBuildConfiguredSteps,
   firstBuildPreflightSteps,
+  firstBuildStorageSteps,
+  storageSetupStepsFromSummary,
   preflightStepsFromSummary,
   runBrowserTest,
   selectedRunStatus,
   writeCompletedBuildReceipt,
 } from "./browser-harness.mjs";
+import { runStorageSetup, storageSensitiveValues } from "./storage-journey.mjs";
 import {
   applyArtifactRunFilter,
   assertArtifactControlLayout,
@@ -32,13 +35,23 @@ import {
 const config = actualBackendConfig();
 const projectBuild = config.artifactMode === buildContract.version;
 const preflight = config.phase === "preflight";
+const storageSetup = config.phase === "storage-setup";
 const firstBuildEvidence = projectBuild
   ? { phase: config.phase, sourceCommit: config.expectedCommit, steps: [] }
   : undefined;
 let successfulBuild;
 await runBrowserTest(
   "actual-backend",
-  async ({ page, base, output, diagnostics, expectHttpError, setStage }) => {
+  async ({
+    page,
+    base,
+    output,
+    diagnostics,
+    expectHttpError,
+    setStage,
+    setSensitiveFormOpen,
+    protectSensitiveValue,
+  }) => {
     const receipt = {
       kind: "actual-backend",
       phase: config.phase,
@@ -66,13 +79,18 @@ await runBrowserTest(
         "Preflight summary must be bounded",
       );
       firstBuildEvidence.steps.push(
-        ...preflightStepsFromSummary(JSON.parse(prior), config.expectedCommit),
+        ...(storageSetup
+          ? preflightStepsFromSummary
+          : storageSetupStepsFromSummary)(
+          JSON.parse(prior),
+          config.expectedCommit,
+        ),
       );
     }
     const record = async (step, details = {}) => {
       receipt.steps.push({ step, ...details });
       await writeFile(
-        `${output}/${preflight ? "preflight-" : ""}journey.json`,
+        `${output}/${config.phase !== "build" ? `${config.phase}-` : ""}journey.json`,
         `${JSON.stringify(receipt, null, 2)}\n`,
       );
     };
@@ -90,11 +108,7 @@ await runBrowserTest(
         `${response.request().method()} ${new URL(response.url()).pathname}`,
       );
       const body = await response.json();
-      assert.equal(
-        body.code,
-        200,
-        body.errMsg || "Backend envelope must be successful",
-      );
+      assert.equal(body.code, 200, "Backend envelope must be successful");
       return body.detail;
     };
     const login = async () => {
@@ -118,6 +132,37 @@ await runBrowserTest(
     const userLabel = await login();
     await record("login-via-real-api");
     if (preflight) firstBuildEvidence.steps.push(firstBuildPreflightSteps[0]);
+    if (storageSetup) {
+      firstBuildEvidence.steps.push(firstBuildStorageSteps[0]);
+      await runStorageSetup({
+        page,
+        base,
+        output,
+        diagnostics,
+        responseFor,
+        envelope,
+        setStage,
+        setSensitiveFormOpen,
+        protectSensitiveValue,
+        endpoint: config.storageEndpoint,
+        record: async (step) => {
+          firstBuildEvidence.steps.push(step);
+          await record(step);
+        },
+      });
+      const expected = [
+        ["POST", "/api/v1/storage/configs"],
+        ["PUT", "/api/v1/storage/configs/acceptance"],
+        ["POST", "/api/v1/storage/configs/acceptance/default"],
+      ];
+      assert.deepEqual(
+        productMutations.map(({ method, path }) => [method, path]),
+        expected,
+        "Storage setup may only create, edit metadata and explicitly set default",
+      );
+      setStage("storage-setup-complete");
+      return;
+    }
     setStage("first-build-status");
     const setupResponse = responseFor("GET", "/me/first-build");
     const initialProjects = responseFor("GET", "/project/");
@@ -152,7 +197,7 @@ await runBrowserTest(
         "No authorized organization scopes were returned.",
         "Your platform permission allows you to enter an existing administrator-approved scope ID.",
         preflight
-          ? "Not configured. An administrator must configure enabled default storage through the setup API/CLI."
+          ? "Not configured. An administrator must create enabled storage and explicitly choose it as default."
           : "Configured (persisted record).",
         preflight
           ? "Not configured. An administrator must configure Agent signing through the setup API/CLI."
@@ -778,7 +823,14 @@ await runBrowserTest(
   },
   {
     backend: config.backend,
-    totalTimeoutMs: preflight ? 90_000 : projectBuild ? 600_000 : 300_000,
+    totalTimeoutMs: preflight
+      ? 90_000
+      : storageSetup
+        ? 120_000
+        : projectBuild
+          ? 600_000
+          : 300_000,
+    sensitiveValues: storageSensitiveValues(config.storageEndpoint),
     firstBuildEvidence,
   },
 );
