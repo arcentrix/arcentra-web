@@ -1,3 +1,8 @@
+import {
+  honestyFixture,
+  assertHonestyFixtureUI,
+  agentFixtureConsumer,
+} from "./ui-honesty-fixture.mjs";
 import { storageFixture, assertStorageFixtureUI } from "./storage-fixture.mjs";
 import { storageSensitiveValues } from "./storage-journey.mjs";
 import { pollingFixture, assertPollingSetup } from "./polling-fixture.mjs";
@@ -123,6 +128,7 @@ await runBrowserTest(
     };
     const polling = pollingFixture();
     const storage = storageFixture();
+    const honesty = honestyFixture(project);
     let firstBuildError = false;
     let mode = "normal";
     let starts = 0;
@@ -131,12 +137,20 @@ await runBrowserTest(
     await page.route("**/api/v1/**", async (route) => {
       if (await polling.route(route)) return;
       if (await storage.route(route)) return;
+      if (await honesty.route(route)) return;
       const request = route.request();
       const url = new URL(request.url());
       const path = url.pathname.replace("/api/v1", "");
       const ok = (detail) => route.fulfill({ json: { code: 200, detail } });
       if (path === "/me/menus")
         return ok([
+          {
+            menuId: "dashboard",
+            name: "Overview",
+            path: "/",
+            component: "Dashboard",
+            isEnabled: true,
+          },
           {
             menuId: "build",
             name: "Build",
@@ -168,7 +182,7 @@ await runBrowserTest(
         return ok(firstBuild);
       }
       if (path === "/me/routes")
-        return ok(["/build", "/projects", "/settings"]);
+        return ok(["/", "/build", "/projects", "/settings"]);
       if (path === "/me/effective-actions")
         return ok(
           artifactMode === "restricted" || storage.state.mode === "restricted"
@@ -273,7 +287,8 @@ await runBrowserTest(
       if (path === "/project/")
         return ok({ list: [project], total: 1, pageNum: 1, pageSize: 20 });
       if (path === "/project/project-1") return ok(project);
-      if (path === "/agent")
+      if (path === "/agent") {
+        assert.equal(agentFixtureConsumer(request), "build-readiness");
         return ok({
           agents: [
             {
@@ -286,7 +301,10 @@ await runBrowserTest(
             },
           ],
           count: 1,
+          pageNum: 1,
+          pageSize: 100,
         });
+      }
       if (path === "/pipelines/pipeline-1") return ok(pipeline);
       if (path === "/pipelines/pipeline-1/runs") {
         const filter = url.searchParams.get("status");
@@ -1076,6 +1094,15 @@ await runBrowserTest(
       await approvalDialog.waitFor({ state: "hidden" });
       await page.setViewportSize({ width: 1440, height: 1050 });
     }
+    await assertHonestyFixtureUI({
+      page,
+      base,
+      output,
+      diagnostics,
+      expectHttpError,
+      setStage,
+      honesty,
+    });
     await assertStorageFixtureUI({
       page,
       base,
@@ -1088,7 +1115,7 @@ await runBrowserTest(
       storage,
     });
     console.log(
-      `UI fixture smoke passed: run/dismiss/cancel, container failed-step draft guards/no autosave, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile. Screenshots: ${output}`,
+      `UI fixture smoke passed: run/dismiss/cancel, container failed-step draft guards/no autosave, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile, honest Dashboard/Inbox/Members/Secrets/Settings scoped reads/denial/mobile. Screenshots: ${output}`,
     );
   },
   { sensitiveValues: storageSensitiveValues("127.0.0.1:19000") },

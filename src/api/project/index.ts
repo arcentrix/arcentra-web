@@ -53,3 +53,53 @@ export const createProject = (data: CreateProjectInput) =>
     },
     { silence: true },
   );
+
+/** A stored association only; the endpoint does not return current role grants. */
+export interface ProjectMemberAssociation {
+  projectId: string;
+  userId: string;
+}
+
+/** Read the existing project-scoped endpoint without enriching from global users. */
+export async function listProjectMembers(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<{ list: ProjectMemberAssociation[]; total: number }> {
+  if (!projectId.trim()) throw new Error("A project ID is required.");
+  const response = await get<unknown>(
+    `/project/${encodeURIComponent(projectId)}/members`,
+    { signal, silence: true },
+  );
+  const invalid = () =>
+    new Error("Project member associations could not be verified.");
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    throw invalid();
+  }
+  const { list, total } = response as Record<string, unknown>;
+  if (
+    (list !== null && !Array.isArray(list)) ||
+    typeof total !== "number" ||
+    !Number.isSafeInteger(total) ||
+    total < 0
+  ) {
+    throw invalid();
+  }
+  const rows: unknown[] = list === null ? [] : list;
+  if (total !== rows.length) throw invalid();
+  const users = new Set<string>();
+  const associations = rows.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw invalid();
+    const member = row as Record<string, unknown>;
+    if (
+      member.projectId !== projectId ||
+      typeof member.userId !== "string" ||
+      !member.userId.trim() ||
+      users.has(member.userId)
+    ) {
+      throw invalid();
+    }
+    users.add(member.userId);
+    return { projectId, userId: member.userId };
+  });
+  return { list: associations, total };
+}

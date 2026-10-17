@@ -1699,3 +1699,338 @@ test("storage reload does not hide navigation failure or leave request observers
   assert.equal(page.listenerCount("framenavigated"), 0);
   assert.equal(page.listenerCount("request"), 0);
 });
+
+// Pure checks for the read-only honesty journey; no browser or socket is opened.
+test("honesty membership comparison rejects foreign, duplicated, absent and invented rows", async () => {
+  const { memberRows } = await import("./ui-honesty-journey.mjs");
+  assert.deepEqual(memberRows({ list: null, total: 0 }, "project-a"), []);
+  assert.deepEqual(
+    memberRows(
+      {
+        list: [
+          {
+            projectId: "project-a",
+            userId: "stored-user",
+            name: "ignored enrichment",
+          },
+        ],
+        total: 1,
+      },
+      "project-a",
+    ),
+    [["stored-user", "project-a"]],
+  );
+  for (const snapshot of [
+    { list: [{ projectId: "project-b", userId: "stored-user" }], total: 1 },
+    {
+      list: [
+        { projectId: "project-a", userId: "stored-user" },
+        { projectId: "project-a", userId: "stored-user" },
+      ],
+      total: 2,
+    },
+    { list: [], total: 1 },
+    { list: [{ projectId: "project-a", userId: " " }], total: 1 },
+    { list: undefined, total: 0 },
+  ])
+    assert.throws(() => memberRows(snapshot, "project-a"));
+});
+
+test("honesty agent totals describe only the returned page and separate registered count", async () => {
+  const { agentPageSummary } = await import("./ui-honesty-journey.mjs");
+  const snapshot = {
+    count: 37,
+    agents: [
+      { isEnabled: 1, status: 3 },
+      { isEnabled: 0, status: 2 },
+    ],
+  };
+  assert.deepEqual(agentPageSummary(snapshot), [
+    "37 registered agents · 2 loaded on this page",
+    "0 available · 1 busy · 1 offline · 1 disabled on this page",
+  ]);
+  assert.throws(() => agentPageSummary({ ...snapshot, count: 1 }));
+  assert.throws(() => agentPageSummary({ count: 0, agents: null }));
+});
+
+test("honesty settings comparison binds the project ID and does not substitute fake metadata", async () => {
+  const { projectDetailRows } = await import("./ui-honesty-journey.mjs");
+  const project = {
+    projectId: "project-a",
+    orgId: "scope-a",
+    name: "real-project",
+    displayName: "",
+    description: "",
+    repoUrl: "http://127.0.0.1:3000/team/repo.git",
+    defaultBranch: "release",
+  };
+  assert.deepEqual(projectDetailRows(project, "project-a"), [
+    ["Project ID", "project-a"],
+    ["Scope ID", "scope-a"],
+    ["Project name", "real-project"],
+    ["Display name", "Not provided"],
+    ["Description", "Not provided"],
+    ["Linked repository", project.repoUrl],
+    ["Default branch", "release"],
+  ]);
+  assert.throws(() => projectDetailRows(project, "project-b"));
+  assert.throws(() =>
+    projectDetailRows(
+      {
+        ...project,
+        repoUrl: "https://fixture-user:fixture-password@example.test/repo",
+      },
+      "project-a",
+    ),
+  );
+});
+
+test("honesty content assertions reject old fake inventory, recovery claims and actions", async () => {
+  const { assertHonestContent } = await import("./ui-honesty-journey.mjs");
+  const scope = (text, buttons = 0) => ({
+    innerText: async () => text,
+    getByRole: () => ({ count: async () => buttons }),
+  });
+  for (const text of [
+    "John Doe",
+    "API_KEY",
+    "All caught up",
+    "undone within 7 days",
+    "94.2%",
+    "cluster · running",
+  ])
+    await assert.rejects(assertHonestContent(scope(text)));
+  await assert.rejects(assertHonestContent(scope("Read only", 1)));
+  await assertHonestContent(
+    scope(
+      "No member associations are recorded. Access may still be granted through role grants.",
+    ),
+  );
+});
+
+test("honesty GET helper consumes the exact response body before returning and propagates body failure", async () => {
+  const { readAfter } = await import("./ui-honesty-journey.mjs");
+  let predicate;
+  let deliver;
+  let finishBody;
+  const page = {
+    waitForResponse: (test) => {
+      predicate = test;
+      return new Promise((resolve) => {
+        deliver = resolve;
+      });
+    },
+  };
+  const response = (path, method = "GET") => ({
+    url: () => `http://fixture.test/api/v1${path}`,
+    request: () => ({ method: () => method }),
+  });
+  let finished = false;
+  const result = readAfter(
+    page,
+    "/agent",
+    async () => {
+      assert.equal(predicate(response("/agent?pageNum=2&pageSize=20")), false);
+      assert.equal(
+        predicate(response("/agent?pageNum=1&pageSize=20", "POST")),
+        false,
+      );
+      assert.equal(
+        predicate(response("/project/a?pageNum=1&pageSize=20")),
+        false,
+      );
+      assert.equal(
+        predicate(response("/agent?pageNum=1&pageSize=100")),
+        false,
+        "An in-flight Build readiness response must not satisfy Dashboard health",
+      );
+      const matching = response("/agent?pageNum=1&pageSize=20");
+      assert.equal(predicate(matching), true);
+      deliver(matching);
+    },
+    () =>
+      new Promise((resolve) => {
+        finishBody = resolve;
+      }),
+    { pageNum: "1", pageSize: "20" },
+  ).then((value) => {
+    finished = true;
+    return value;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    finished,
+    false,
+    "Response headers alone must not finish the read",
+  );
+  finishBody({ agents: [], count: 0 });
+  assert.deepEqual(await result, { agents: [], count: 0 });
+  await assert.rejects(
+    readAfter(
+      { waitForResponse: async () => response("/agent") },
+      "/agent",
+      async () => {},
+      async () => {
+        throw new Error("Unreadable response body");
+      },
+    ),
+    /Unreadable response body/,
+  );
+});
+
+test("honesty fixture keeps member permissions project-scoped and rejects mutation requests", async () => {
+  const { honestyFixture } = await import("./ui-honesty-fixture.mjs");
+  const fixture = honestyFixture({ projectId: "project-1" });
+  fixture.state.active = true;
+  const invoke = async (path, method = "GET") => {
+    let result;
+    const handled = await fixture.route({
+      request: () => ({
+        url: () => `http://fixture.test/api/v1${path}`,
+        method: () => method,
+      }),
+      fulfill: async (value) => {
+        result = value;
+      },
+    });
+    return { handled, result };
+  };
+  assert.equal(
+    (await invoke("/me/effective-actions?scopeType=project&scopeId=project-1"))
+      .handled,
+    false,
+    "Normal project permissions must retain the existing admin response",
+  );
+  assert.equal(
+    (await invoke("/me/effective-actions?scopeType=platform")).handled,
+    false,
+  );
+  assert.equal((await invoke("/me/effective-actions")).handled, false);
+  assert.equal(
+    (await invoke("/me/effective-actions?scopeType=project")).handled,
+    false,
+    "Global Build has no project ID and retains its existing permission response",
+  );
+  assert.deepEqual(
+    (await invoke("/project/project-1/members")).result.json.detail,
+    {
+      list: [{ projectId: "project-1", userId: "association-user-1" }],
+      total: 1,
+    },
+  );
+  await assert.rejects(
+    invoke("/me/effective-actions?scopeType=project&scopeId=foreign"),
+  );
+  await assert.rejects(invoke("/project/project-1/members", "POST"));
+  fixture.state.memberMode = "denied";
+  assert.equal((await invoke("/project/project-1/members")).result.status, 403);
+  fixture.state.memberPermission = false;
+  assert.deepEqual(
+    (await invoke("/me/effective-actions?scopeType=project&scopeId=project-1"))
+      .result.json.detail,
+    ["project:read"],
+  );
+  assert.equal(
+    (await invoke("/secrets")).handled,
+    false,
+    "No fabricated secret API is provided",
+  );
+  assert.equal(
+    (await invoke("/notifications")).handled,
+    false,
+    "No fabricated notification API is provided",
+  );
+  assert.equal(
+    (await invoke("/users/")).handled,
+    false,
+    "No global user enrichment is provided",
+  );
+});
+
+test("Agent fixture request identities distinguish only exact health and Build pagination", async () => {
+  const { agentFixtureConsumer } = await import("./ui-honesty-fixture.mjs");
+  const request = (path, method = "GET") => ({
+    url: () => `http://fixture.test/api/v1${path}`,
+    method: () => method,
+  });
+  assert.equal(
+    agentFixtureConsumer(request("/agent?pageNum=1&pageSize=20")),
+    "dashboard-health",
+  );
+  assert.equal(
+    agentFixtureConsumer(request("/agent?pageSize=100&pageNum=1")),
+    "build-readiness",
+  );
+  for (const path of [
+    "/agent",
+    "/agent?pageNum=2&pageSize=20",
+    "/agent?pageNum=1&pageSize=50",
+    "/agent?pageNum=1&pageSize=100&pageSize=20",
+    "/agent?pageNum=1&pageSize=20&filter=extra",
+    "/agent?pageNum=1&pageNum=2&pageSize=100",
+    "/agent/statistics?pageNum=1&pageSize=20",
+  ])
+    assert.throws(() => agentFixtureConsumer(request(path)));
+  assert.throws(() =>
+    agentFixtureConsumer(request("/agent?pageNum=1&pageSize=20", "POST")),
+  );
+});
+
+test("active honesty fixture leaves in-flight Build reads and normal permissions to the original transport", async () => {
+  const { honestyFixture } = await import("./ui-honesty-fixture.mjs");
+  const fixture = honestyFixture({ projectId: "project-1" });
+  fixture.state.active = true;
+  const invoke = async (path) => {
+    let result;
+    const handled = await fixture.route({
+      request: () => ({
+        url: () => `http://fixture.test/api/v1${path}`,
+        method: () => "GET",
+      }),
+      fulfill: async (value) => {
+        result = value;
+      },
+    });
+    return { handled, result };
+  };
+  const readiness = "/agent?pageNum=1&pageSize=100";
+  const health = "/agent?pageNum=1&pageSize=20";
+  assert.deepEqual(await invoke(readiness), {
+    handled: false,
+    result: undefined,
+  });
+  assert.equal(fixture.state.agentReads, 0);
+  assert.deepEqual((await invoke(health)).result.json.detail, fixture.agents);
+  assert.equal(fixture.state.agentReads, 1);
+  // A delayed old-page poll remains the same consumer even after health denial.
+  fixture.state.agentDenied = true;
+  assert.deepEqual(await invoke(readiness), {
+    handled: false,
+    result: undefined,
+  });
+  assert.equal(fixture.state.agentReads, 1);
+  assert.equal((await invoke(health)).result.status, 403);
+  assert.equal(fixture.state.agentReads, 2);
+  assert.deepEqual(
+    await invoke("/me/effective-actions?scopeType=project&scopeId=project-1"),
+    { handled: false, result: undefined },
+  );
+  assert.deepEqual(await invoke("/me/effective-actions?scopeType=platform"), {
+    handled: false,
+    result: undefined,
+  });
+  fixture.state.agentPermission = false;
+  assert.deepEqual(
+    (await invoke("/me/effective-actions?scopeType=platform")).result.json
+      .detail,
+    ["pipeline:read"],
+  );
+  assert.deepEqual(
+    await invoke("/me/effective-actions?scopeType=project&scopeId=project-1"),
+    { handled: false, result: undefined },
+  );
+  assert.deepEqual(await invoke("/me/effective-actions"), {
+    handled: false,
+    result: undefined,
+  });
+});
