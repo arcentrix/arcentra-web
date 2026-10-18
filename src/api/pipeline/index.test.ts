@@ -115,6 +115,7 @@ it("carries the exact reviewed deployment definition and target hash to the real
   expect(get).toHaveBeenCalledWith("/pipelines/pipe%2Fa/spec", {
     signal: controller.signal,
     silence: true,
+    redactErrors: true,
   });
 });
 it("keeps definition provenance and release IDs from protojson or snake case", () => {
@@ -220,3 +221,32 @@ it.each([
     });
   },
 );
+
+it("saves retained DSL with explicit source format, CAS head and stable request ID", async () => {
+  const { savePipelineSpec, validatePipelineSpec } = await import("./index");
+  const spec = { namespace: "visual", jobs: [], meta: { preserve: true } };
+  await validatePipelineSpec("pipe/a", spec);
+  expect(post).toHaveBeenLastCalledWith(
+    "/pipelines/pipe%2Fa/spec/validate",
+    { spec, format: "json" },
+    { silence: true, redactErrors: true },
+  );
+  await savePipelineSpec(
+    "pipe/a",
+    spec,
+    "a".repeat(40),
+    "same-request",
+    "yaml",
+  );
+  expect(post).toHaveBeenLastCalledWith(
+    "/pipelines/pipe%2Fa/spec/save",
+    {
+      spec,
+      format: "yaml",
+      expectedHeadCommitSha: "a".repeat(40),
+      requestId: "same-request",
+      commitMessage: "Update pipeline from Arcentra",
+    },
+    { silence: true, redactErrors: true },
+  );
+});

@@ -133,7 +133,9 @@ describe("failed-step retry draft integration", () => {
       }),
     );
     fireEvent.click(save());
-    await screen.findByText("Failed-step runtime acceptance gate is closed");
+    await screen.findByText(
+      "The server rejected this definition or could not save it. Your draft is retained; check the DSL and retry explicitly.",
+    );
     expect(validatePipelineSpec).toHaveBeenCalledWith(
       "p1",
       JSON.parse(authored),
@@ -184,7 +186,7 @@ describe("failed-step retry draft integration", () => {
     );
     fireEvent.click(save());
     await screen.findByText(
-      "Repository head changed; review the definition again",
+      "The repository changed. Your draft is retained. Reload and review the latest definition before saving again.",
     );
     expect(editor()).toHaveValue(changed);
     expect(savePipelineSpec).toHaveBeenCalledTimes(1);
@@ -192,6 +194,67 @@ describe("failed-step retry draft integration", () => {
       screen.queryByText(/Committed|Saved to a pull request/),
     ).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["duplicate keys", '"variables":{"keep":"first","keep":"second"}', "off"],
+    [
+      "duplicate keys",
+      '"variables":{"keep":"first","keep":"second"}',
+      "failed_step",
+    ],
+    ["unsafe integer", '"variables":{"keep":9007199254740993}', "off"],
+    ["unsafe integer", '"variables":{"keep":9007199254740993}', "failed_step"],
+  ])(
+    "retains raw %s through the existing %s retry entry with scope %s",
+    async (_label, ambiguous, scope) => {
+      await show();
+      const repaired = {
+        ...definition.spec,
+        variables: { keep: "retained" },
+        jobs: [
+          {
+            name: "build",
+            steps: [{ name: "prepare", uses: "shell" }],
+            ...(scope === "off" ? {} : { retry }),
+          },
+        ],
+      };
+      const safeText = JSON.stringify(repaired);
+      fireEvent.change(editor(), { target: { value: safeText } });
+      expect(screen.getByLabelText("Retry scope")).toHaveValue(scope);
+      const raw =
+        "{ " +
+        ambiguous +
+        ", " +
+        JSON.stringify({ ...repaired, variables: undefined }).slice(1);
+      fireEvent.change(editor(), { target: { value: raw } });
+      expect(screen.getByLabelText("Retry scope")).toBeDisabled();
+      expect(applyRetry()).toBeDisabled();
+      fireEvent.click(applyRetry());
+      expect(editor()).toHaveValue(raw);
+      fireEvent.click(save());
+      await waitFor(() => expect(save()).toBeEnabled());
+      expect(editor()).toHaveValue(raw);
+      expect(validatePipelineSpec).not.toHaveBeenCalled();
+      expect(savePipelineSpec).not.toHaveBeenCalled();
+      fireEvent.change(editor(), { target: { value: safeText } });
+      expect(screen.getByLabelText("Retry scope")).toBeEnabled();
+      expect(screen.getByLabelText("Retry scope")).toHaveValue(scope);
+      expect(applyRetry()).toBeEnabled();
+      fireEvent.click(applyRetry());
+      expect(JSON.parse(editor().value)).toEqual({
+        ...repaired,
+        jobs: [
+          {
+            ...repaired.jobs[0],
+            ...(scope === "off" ? {} : { retry: { ...retry, delay: "1s" } }),
+          },
+        ],
+      });
+      expect(validatePipelineSpec).not.toHaveBeenCalled();
+      expect(savePipelineSpec).not.toHaveBeenCalled();
+    },
+  );
 
   it("locks draft controls during validation without inventing a saved result", async () => {
     let reject!: (reason: unknown) => void;
@@ -209,7 +272,7 @@ describe("failed-step retry draft integration", () => {
       reject(new ApiError({ code: 503, message: "Validation unavailable" })),
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Validation unavailable",
+      "The server rejected this definition or could not save it.",
     );
     expect(savePipelineSpec).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Retry scope")).toBeEnabled();

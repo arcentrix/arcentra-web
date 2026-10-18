@@ -244,6 +244,7 @@ export const getPipelineSpec = (pipelineId: string, signal?: AbortSignal) =>
   get<PipelineSpec>(`/pipelines/${id(pipelineId)}/spec`, {
     signal,
     silence: true,
+    redactErrors: true,
   });
 export const validatePipelineSpec = (
   pipelineId: string,
@@ -252,24 +253,25 @@ export const validatePipelineSpec = (
   post<{ jobsCount: number; warnings: string[] }>(
     `/pipelines/${id(pipelineId)}/spec/validate`,
     { spec, format: "json" },
-    { silence: true },
+    { silence: true, redactErrors: true },
   );
 export const savePipelineSpec = (
   pipelineId: string,
   spec: Record<string, unknown>,
   head: string,
   requestId: string,
+  format: "json" | "yaml" = "json",
 ) =>
-  post<{ commitSha: string; prUrl: string }>(
+  post<{ commitSha: string; prUrl: string; saveMode?: string }>(
     `/pipelines/${id(pipelineId)}/spec/save`,
     {
       spec,
-      format: "json",
+      format,
       expectedHeadCommitSha: head,
       requestId,
       commitMessage: "Update pipeline from Arcentra",
     },
-    { silence: true },
+    { silence: true, redactErrors: true },
   );
 export const isActiveRun = (status: RunStatus) =>
   ["pending", "queued", "running", "paused"].includes(status);

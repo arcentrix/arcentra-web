@@ -1,3 +1,4 @@
+import { runVisualCIJourney } from "./visual-ci-journey.mjs";
 import { runProjectSecretsJourney } from "./project-secrets-journey.mjs";
 import { runOrganizationJourney } from "./organization-journey.mjs";
 import { runHonestyJourney } from "./ui-honesty-journey.mjs";
@@ -10,6 +11,7 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import {
   actualBackendConfig,
   assertFirstBuildSnapshot,
+  assertInitialProjects,
   firstBuildConfiguredSteps,
   firstBuildPreflightSteps,
   firstBuildStorageSteps,
@@ -48,6 +50,7 @@ const organizationEvidence = config.organizationJourney
 const projectSecretEvidence = config.projectSecretsJourney
   ? { steps: [] }
   : undefined;
+const visualEvidence = config.visualCI ? { steps: [] } : undefined;
 let successfulBuild;
 await runBrowserTest(
   "actual-backend",
@@ -182,12 +185,7 @@ await runBrowserTest(
       .getByRole("heading", { name: "Projects", exact: true })
       .waitFor();
     const initialProjectList = await envelope(await initialProjects);
-    assert.equal(
-      initialProjectList.total,
-      0,
-      "Both first-use phases start before project creation",
-    );
-    assert.equal((initialProjectList.list || []).length, 0);
+    assertInitialProjects(initialProjectList, config.visualCI, config.phase);
     assertFirstBuildSnapshot(await envelope(await setupResponse), !preflight);
     const assertVisibleSetup = async () => {
       await page
@@ -364,7 +362,30 @@ await runBrowserTest(
         .waitFor();
     }
 
+    if (config.visualCI) {
+      const visualCI = await runVisualCIJourney({
+        page,
+        base,
+        output,
+        config,
+        diagnostics,
+        responseFor,
+        envelope,
+        setStage,
+        evidence: visualEvidence,
+      });
+      await record("visual-ci-save-reload-execute-via-ui", { visualCI });
+      await page.goto(`${base}${projectPath}/pipelines`);
+      await page
+        .getByRole("button", { name: "New pipeline", exact: true })
+        .waitFor();
+    }
+
     setStage("pipeline-create");
+    const pipelineCreatesBeforeCancel = diagnostics.requests.filter(
+      (r) => r.method === "POST" && r.path === "/api/v1/pipelines/",
+    ).length;
+    assert.equal(pipelineCreatesBeforeCancel, config.visualCI ? 1 : 0);
     await page
       .getByRole("button", { name: "New pipeline", exact: true })
       .click();
@@ -373,7 +394,7 @@ await runBrowserTest(
       diagnostics.requests.filter(
         (r) => r.method === "POST" && r.path === "/api/v1/pipelines/",
       ).length,
-      0,
+      pipelineCreatesBeforeCancel,
     );
     await page
       .getByRole("button", { name: "New pipeline", exact: true })
@@ -411,7 +432,10 @@ await runBrowserTest(
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(
       diagnostics.requests.filter(
-        (r) => r.method === "POST" && r.path.endsWith("/trigger"),
+        (r) =>
+          r.method === "POST" &&
+          r.path ===
+            `/api/v1/pipelines/${encodeURIComponent(pipelineId)}/trigger`,
       ).length,
       0,
     );
@@ -871,13 +895,13 @@ await runBrowserTest(
       diagnostics.requests.filter(
         (r) => r.method === "POST" && r.path === "/api/v1/pipelines/",
       ).length,
-      1,
+      config.visualCI ? 2 : 1,
     );
     assert.equal(
       diagnostics.requests.filter(
         (r) => r.method === "POST" && r.path.endsWith("/trigger"),
       ).length,
-      projectBuild ? 2 : 1,
+      (projectBuild ? 2 : 1) + (config.visualCI ? 1 : 0),
     );
     await record("journey-complete");
     if (projectBuild) {
@@ -915,6 +939,7 @@ await runBrowserTest(
     firstBuildEvidence,
     organizationEvidence,
     projectSecretEvidence,
+    visualEvidence,
   },
 );
 // The backend may verify/execute its trusted fixture only after the browser

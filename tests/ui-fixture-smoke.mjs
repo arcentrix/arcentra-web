@@ -424,7 +424,11 @@ await runBrowserTest(
           request.postDataJSON().expectedHeadCommitSha,
           "a".repeat(40),
         );
-        return ok({ commitSha: "saved-def456", prUrl: "" });
+        return ok({
+          commitSha: "b".repeat(40),
+          saveMode: "PIPELINE_SAVE_MODE_DIRECT",
+          prUrl: "",
+        });
       }
       diagnostics.unhandledRoutes.push(`${request.method()} ${path}`);
       return route.fulfill({
@@ -499,7 +503,7 @@ await runBrowserTest(
     await page
       .getByRole("button", { name: "Save to repository", exact: true })
       .click();
-    await page.getByText("Committed saved-def456 to main.").waitFor();
+    await page.getByText("Committed bbbbbbbbbbbb to main.").waitFor();
     assert.equal(saves, 1);
     await page
       .getByRole("button", { name: "Close", exact: true })

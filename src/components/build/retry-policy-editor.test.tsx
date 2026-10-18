@@ -56,6 +56,36 @@ describe("explicit retry configuration", () => {
       idempotent: true,
     });
   });
+  it.each([
+    ["root duplicate", '{"jobs":[],"jobs":[{"name":"build"}]}'],
+    ["nested duplicate", '{"jobs":[{"name":"build","name":"other"}]}'],
+    ["escaped duplicate", '{"jobs":[{"name":"build","na\\u006de":"other"}]}'],
+    [
+      "unsafe integer",
+      '{"variables":{"number":9007199254740993},"jobs":[{"name":"build"}]}',
+    ],
+  ])("refuses %s for both Off and an explicit retry policy", (_label, raw) => {
+    expect(() => setJobRetry(raw, 0)).toThrow(
+      /Duplicate JSON keys|cannot round-trip safely/,
+    );
+    expect(() => setJobRetry(raw, 0, wholeJob)).toThrow(
+      /Duplicate JSON keys|cannot round-trip safely/,
+    );
+    const update = vi.fn();
+    render(
+      <RetryPolicyEditor value={raw} onChange={update} disabled={false} />,
+    );
+    fireEvent.click(
+      screen.getByText("Retry policy · off unless explicitly configured"),
+    );
+    expect(screen.getByLabelText("Retry scope")).toBeDisabled();
+    expect(applyButton()).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /Duplicate JSON keys|cannot round-trip safely/,
+    );
+    fireEvent.click(applyButton());
+    expect(update).not.toHaveBeenCalled();
+  });
   it("removes retry rather than introducing an implicit default", () => {
     const configured = setJobRetry(spec, 0, {
       mode: "failed_step",
@@ -390,7 +420,9 @@ describe("offline container retry scope", () => {
       );
       expect(applyButton()).toBeDisabled();
       expect(() => setJobRetry(value, 0, wholeJob)).toThrow(
-        "Select an existing job",
+        definition === null || definition === false || Array.isArray(definition)
+          ? "The pipeline definition must be a JSON object"
+          : "Select an existing job",
       );
     },
   );

@@ -1,4 +1,9 @@
 import {
+  visualCIConfig,
+  visualCIEvidence,
+  visualCIStages,
+} from "./visual-ci-journey.mjs";
+import {
   projectSecretConfig,
   projectSecretStages,
   projectSecretsEvidence,
@@ -16,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 
 const acceptanceStages = new Set([
+  ...visualCIStages,
   ...organizationManagementStages,
   ...projectSecretStages,
   "setup",
@@ -86,6 +92,21 @@ export const firstBuildConfiguredSteps = Object.freeze([
 ]);
 
 /** Exact synthetic administrator state, without accepting leaked configuration values. */
+export function assertInitialProjects(value, visualCI, phase) {
+  const expected = visualCI ? [visualCI.projectId] : [];
+  if (visualCI) assert.equal(phase, "build");
+  assert.equal(
+    value?.total,
+    expected.length,
+    "Initial project inventory must match the isolated fixture",
+  );
+  assert.ok(Array.isArray(value?.list));
+  assert.deepEqual(
+    value.list.map((project) => project.projectId),
+    expected,
+  );
+}
+
 export function assertFirstBuildSnapshot(value, configured) {
   assert.equal(typeof configured, "boolean");
   const expected = {
@@ -274,6 +295,7 @@ export function safeFailureEvidence(stage, error) {
     "organization-journey.mjs",
     "project-secrets-journey.mjs",
     "project-secrets-fixture.mjs",
+    "visual-ci-journey.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
     if (!/^\s+at /.test(frame)) continue;
@@ -390,7 +412,22 @@ export function actualBackendConfig(env = process.env) {
       undefined,
       "Member ID requires the organization journey",
     );
+  let visualCI;
+  if (env.ARCENTRA_ACCEPTANCE_VISUAL_CI !== undefined) {
+    assert.equal(phase, "build", "Visual CI requires the actual build phase");
+    assert.equal(
+      contract.artifactMode,
+      "stdlib-build-v1",
+      "Visual CI requires the genuine build contract",
+    );
+    assert.ok(
+      Buffer.byteLength(env.ARCENTRA_ACCEPTANCE_VISUAL_CI) <= 65536,
+      "Visual CI fixture configuration must be bounded",
+    );
+    visualCI = visualCIConfig(JSON.parse(env.ARCENTRA_ACCEPTANCE_VISUAL_CI));
+  }
   return {
+    ...(visualCI ? { visualCI } : {}),
     ...(organizationJourney ? { organizationJourney: true, memberUserId } : {}),
     ...projectSecretConfig(env, phase),
     phase,
@@ -646,6 +683,7 @@ export async function runBrowserTest(
     firstBuildEvidence,
     organizationEvidence,
     projectSecretEvidence,
+    visualEvidence,
     sensitiveValues = [],
   } = {},
 ) {
@@ -992,6 +1030,7 @@ export async function runBrowserTest(
           ...firstBuildReadinessEvidence(firstBuildEvidence),
           ...organizationManagementEvidence(organizationEvidence),
           ...projectSecretsEvidence(projectSecretEvidence),
+          ...visualCIEvidence(visualEvidence),
         },
         null,
         2,

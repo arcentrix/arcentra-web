@@ -28,6 +28,7 @@ import { JSDOM } from "jsdom";
 import {
   actualBackendConfig,
   assertFirstBuildSnapshot,
+  assertInitialProjects,
   firstBuildConfiguredSteps,
   firstBuildJourney,
   firstBuildPreflightSteps,
@@ -2567,4 +2568,149 @@ test("strict secret fixture preserves metadata-only writes and rejects stale ver
   assert.equal(disabled.canRotate, false);
   fixture.state.mode = "denied-read";
   assert.equal((await invoke(path)).status, 403);
+});
+
+test("visual CI real-browser configuration is explicit, bounded and build-phase only", () => {
+  const visual = {
+    projectId: "visual-project",
+    repoUrl: "git://127.0.0.1:19418/visual.git",
+    branch: "main",
+    pipelineFilePath: "pipeline.json",
+    expectedHeadCommitSha: "a".repeat(40),
+    marker: "VISUAL_ACCEPTANCE",
+    expectedSpec: {
+      namespace: "visual-editor-acceptance",
+      variables: { PRESERVED_VISUAL_VALUE: "retained" },
+      jobs: [
+        {
+          name: "visual-build",
+          description: "Original job",
+          steps: [
+            {
+              name: "original-step",
+              uses: "shell",
+              action: "run",
+              runOnAgent: true,
+              args: { run: "printf 'VISUAL_ORIGINAL_STEP\\n'" },
+            },
+          ],
+        },
+      ],
+    },
+  };
+  assert.equal(actualBackendConfig(buildEnv()).visualCI, undefined);
+  const env = {
+    ...buildEnv(),
+    ARCENTRA_ACCEPTANCE_VISUAL_CI: JSON.stringify(visual),
+  };
+  assert.deepEqual(actualBackendConfig(env).visualCI, visual);
+  for (const phase of ["preflight", "storage-setup"])
+    assert.throws(
+      () => actualBackendConfig({ ...env, ARCENTRA_ACCEPTANCE_PHASE: phase }),
+      /build phase/,
+    );
+  assert.throws(
+    () =>
+      actualBackendConfig({
+        ...env,
+        ARCENTRA_ACCEPTANCE_VISUAL_CI: "x".repeat(65537),
+      }),
+    /bounded/,
+  );
+  for (const patch of [
+    { repoUrl: "git://other:9418/visual.git" },
+    { branch: "other" },
+    { pipelineFilePath: "other.json" },
+  ])
+    assert.throws(() =>
+      actualBackendConfig({
+        ...env,
+        ARCENTRA_ACCEPTANCE_VISUAL_CI: JSON.stringify({ ...visual, ...patch }),
+      }),
+    );
+});
+
+test("actual visual journey is wired into shared diagnostics and final summary", async () => {
+  const harness = await readFile(
+    new URL("./browser-harness.mjs", import.meta.url),
+    "utf8",
+  );
+  const actual = await readFile(
+    new URL("./actual-backend-acceptance.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(harness, /\.\.\.visualCIStages/);
+  assert.match(harness, /\.\.\.visualCIEvidence\(visualEvidence\)/);
+  assert.match(actual, /await runVisualCIJourney\(/);
+  assert.match(actual, /evidence: visualEvidence/);
+  assert.match(actual, /visual-ci-save-reload-execute-via-ui/);
+});
+
+test("combined visual and Go journeys preserve strict mutation totals and exact failure locations", async () => {
+  const source = await readFile(
+    new URL("./actual-backend-acceptance.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /assert\.equal\(pipelineCreatesBeforeCancel, config\.visualCI \? 1 : 0\)/,
+  );
+  assert.match(source, /\)\.length,\s*pipelineCreatesBeforeCancel/);
+  assert.match(
+    source,
+    /r\.path ===\s*`\/api\/v1\/pipelines\/\$\{encodeURIComponent\(pipelineId\)\}\/trigger`/,
+  );
+  assert.match(source, /config\.visualCI \? 2 : 1/);
+  assert.match(
+    source,
+    /\(projectBuild \? 2 : 1\) \+ \(config\.visualCI \? 1 : 0\)/,
+  );
+  const file = new URL("./visual-ci-journey.mjs", import.meta.url);
+  assert.deepEqual(
+    safeFailureEvidence("visual-ci-save", {
+      stack: `Error: PRIVATE\n    at ${file}:7:9`,
+    }),
+    {
+      stage: "visual-ci-save",
+      failureSite: { file: "visual-ci-journey.mjs", line: 7, column: 9 },
+    },
+  );
+});
+
+test("initial project inventory admits only the configured visual fixture and no foreign project", () => {
+  assertInitialProjects({ total: 0, list: [] }, undefined, "preflight");
+  assertInitialProjects({ total: 0, list: [] }, undefined, "build");
+  assertInitialProjects(
+    { total: 1, list: [{ projectId: "visual" }] },
+    { projectId: "visual" },
+    "build",
+  );
+  for (const value of [
+    { total: 0, list: [] },
+    { total: 1, list: [{ projectId: "foreign" }] },
+    { total: 2, list: [{ projectId: "visual" }, { projectId: "extra" }] },
+    { total: 1, list: [] },
+  ])
+    assert.throws(() =>
+      assertInitialProjects(value, { projectId: "visual" }, "build"),
+    );
+  assert.throws(() =>
+    assertInitialProjects(
+      { total: 1, list: [{ projectId: "visual" }] },
+      { projectId: "visual" },
+      "preflight",
+    ),
+  );
+  assert.throws(
+    () =>
+      actualBackendConfig({
+        ARCENTRA_ACCEPTANCE_BACKEND_URL: "http://127.0.0.1:18080",
+        ARCENTRA_ACCEPTANCE_REPO_URL: "git://127.0.0.1:19418/acceptance.git",
+        ARCENTRA_ACCEPTANCE_ORG_ID: "ci-org",
+        ARCENTRA_ACCEPTANCE_ARTIFACT_NAME: "report.json",
+        ARCENTRA_ACCEPTANCE_ARTIFACT_CONTENT: "text",
+        ARCENTRA_ACCEPTANCE_VISUAL_CI: "{}",
+      }),
+    /genuine build contract/,
+  );
 });

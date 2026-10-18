@@ -1,4 +1,9 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import authStore from "@/store/auth";
+import userStore from "@/store/user";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VisualCIEditor } from "./visual-ci-editor";
+import { isObject, parseDefinition, sourceFormat } from "./visual-ci-draft";
 import {
   createPipeline,
   triggerPipeline,
@@ -562,76 +567,208 @@ function ReviewedRunDialog({
   );
 }
 
-export function PipelineSpecDialog({
-  pipeline,
-  onClose,
-  readOnly = false,
-}: {
+const specErrorIs = (error: unknown, ...codes: number[]) =>
+  error instanceof ApiError &&
+  (codes.includes(error.code ?? 0) || codes.includes(error.status ?? 0));
+
+const completeCommitSha = (value: unknown): value is string =>
+  typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value);
+
+type SpecDialogProps = {
   pipeline: Pipeline;
   onClose: () => void;
   readOnly?: boolean;
-}) {
-  const resource = useApiResource(`spec:${pipeline.pipelineId}`, (signal) =>
-    getPipelineSpec(pipeline.pipelineId, signal),
+};
+export function PipelineSpecDialog(props: SpecDialogProps) {
+  const auth = authStore.useState();
+  const user = userStore.useState();
+  return (
+    <PipelineSpecSnapshot
+      key={JSON.stringify([
+        auth.accessToken,
+        user.userinfo?.userId,
+        props.pipeline.pipelineId,
+      ])}
+      {...props}
+    />
+  );
+}
+function PipelineSpecSnapshot({
+  pipeline,
+  onClose,
+  readOnly = false,
+}: SpecDialogProps) {
+  const resource = useApiResource(
+    `spec:${pipeline.pipelineId}`,
+    async (signal) => {
+      const snapshot = await getPipelineSpec(pipeline.pipelineId, signal);
+      // Transport success alone must never discard the retained draft on reload.
+      if (
+        !isObject(snapshot) ||
+        !isObject(snapshot.spec) ||
+        !completeCommitSha(snapshot.headCommitSha) ||
+        typeof snapshot.branch !== "string" ||
+        !snapshot.branch.trim() ||
+        typeof snapshot.pipelineFilePath !== "string" ||
+        !snapshot.pipelineFilePath.trim()
+      )
+        throw new Error("The definition response could not be verified.");
+      sourceFormat(snapshot.format);
+      return snapshot;
+    },
   );
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [conflict, setConflict] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const [confirmReload, setConfirmReload] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const observedLoading = useRef(false);
   const requestId = useRef(crypto.randomUUID());
   const pending = useRef(false);
   const mounted = useMountedRef();
+  const permission = useRef(readOnly);
+  permission.current = readOnly;
+  useEffect(() => {
+    if (!reloading) return;
+    if (resource.loading) {
+      observedLoading.current = true;
+      return;
+    }
+    if (!observedLoading.current) return;
+    observedLoading.current = false;
+    setReloading(false);
+    if (resource.error) return; // Failed reload never erases the retained draft.
+    setDraft(null);
+    setConflict(false);
+    setDenied(false);
+    setSaved(false);
+    requestId.current = crypto.randomUUID();
+  }, [reloading, resource.loading, resource.error]);
+  const reload = () => {
+    if (pending.current || reloading) return;
+    setConfirmReload(false);
+    setReloading(true);
+    setError("");
+    setNotice("");
+    observedLoading.current = false;
+    resource.refresh();
+  };
+  const change = (value: string) => {
+    if (readOnly || busy || reloading || denied || saved) return;
+    setDraft(value);
+    setNotice("");
+    if (!conflict) setError("");
+    setSaved(false);
+    requestId.current = crypto.randomUUID();
+  };
   const apply = async (save: boolean) => {
-    if (readOnly || pending.current || !resource.data) return;
+    if (
+      readOnly ||
+      pending.current ||
+      !resource.data ||
+      resource.error ||
+      resource.loading ||
+      reloading ||
+      denied ||
+      (save && (conflict || saved))
+    )
+      return;
     pending.current = true;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const spec: unknown = JSON.parse(
-        draft ?? JSON.stringify(resource.data.spec),
-      );
-      if (!spec || Array.isArray(spec) || typeof spec !== "object")
-        throw new Error("The pipeline definition must be a JSON object.");
-      const result = await validatePipelineSpec(
-        pipeline.pipelineId,
-        spec as Record<string, unknown>,
-      );
+      const spec = parseDefinition(draft ?? JSON.stringify(resource.data.spec));
+      const format = sourceFormat(resource.data.format);
+      if (!completeCommitSha(resource.data.headCommitSha))
+        throw new Error(
+          "The base commit is missing or invalid. Reload before saving.",
+        );
+      const result = await validatePipelineSpec(pipeline.pipelineId, spec);
+      if (!mounted.current || permission.current) return;
       if (save) {
-        const saved = await savePipelineSpec(
+        const response = await savePipelineSpec(
           pipeline.pipelineId,
-          spec as Record<string, unknown>,
+          spec,
           resource.data.headCommitSha,
           requestId.current,
+          format,
         );
         if (!mounted.current) return;
+        if (
+          !response ||
+          !completeCommitSha(response.commitSha) ||
+          typeof response.prUrl !== "string"
+        )
+          throw new Error(
+            "The save response could not be verified. Your draft is retained; reload before retrying.",
+          );
+        const mode = response.saveMode;
+        const prMode = mode === "PIPELINE_SAVE_MODE_PR" || mode === "pr";
+        const directMode =
+          mode === "PIPELINE_SAVE_MODE_DIRECT" || mode === "direct";
+        if (mode && !prMode && !directMode)
+          throw new Error(
+            "The save mode could not be verified. Your draft is retained; reload before retrying.",
+          );
+        setSaved(true);
         setNotice(
-          saved.prUrl
-            ? `Saved to a pull request: ${saved.prUrl}`
-            : `Committed ${saved.commitSha.slice(0, 12)} to ${resource.data.branch}.`,
+          response.prUrl
+            ? `Saved to a pull request: ${response.prUrl}. The draft is retained; the default branch has not been replaced.`
+            : prMode
+              ? `Recorded PR-mode commit ${response.commitSha.slice(0, 12)}. The pull request URL was not returned; a default-branch update is not confirmed.`
+              : directMode
+                ? `Committed ${response.commitSha.slice(0, 12)} to ${resource.data.branch}.`
+                : `Recorded commit ${response.commitSha.slice(0, 12)}. The save mode was not returned; a default-branch update is not confirmed.`,
         );
-        requestId.current = crypto.randomUUID();
-        setDraft(null);
-        resource.refresh();
+        // Retain the exact reviewed draft until the user explicitly loads a new base.
+        setDraft(draft ?? JSON.stringify(resource.data.spec, null, 2));
       } else
         setNotice(
           `Valid definition · ${result.jobsCount} jobs${result.warnings?.length ? ` · ${result.warnings.join("; ")}` : ""}`,
         );
     } catch (err) {
-      setError(errorMessage(err));
+      if (!mounted.current) return;
+      if (specErrorIs(err, 409)) {
+        setConflict(true);
+        setError(
+          "The repository changed. Your draft is retained. Reload and review the latest definition before saving again.",
+        );
+      } else if (specErrorIs(err, 401, 403)) {
+        setDenied(true);
+        setError(
+          "Definition access is restricted. Reload to check current permissions.",
+        );
+      } else
+        setError(
+          err instanceof ApiError
+            ? "The server rejected this definition or could not save it. Your draft is retained; check the DSL and retry explicitly."
+            : errorMessage(err),
+        );
     } finally {
       pending.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
+  const readDenied = specErrorIs(resource.error, 401, 403);
+  useEffect(() => {
+    if (readDenied) setDenied(true);
+  }, [readDenied]);
+  const accessDenied = denied || readDenied;
+  const locked = readOnly || busy || reloading || accessDenied || saved;
+  const text = draft ?? JSON.stringify(resource.data?.spec, null, 2) ?? "";
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open && !busy && !reloading) onClose();
       }}
     >
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[90dvh] min-w-0 overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Pipeline definition</DialogTitle>
           <DialogDescription>
@@ -641,39 +778,63 @@ export function PipelineSpecDialog({
               : "Saving commits to the repository using this pipeline's configured save mode."}
           </DialogDescription>
         </DialogHeader>
-        {resource.error ? (
+        {resource.error && (
           <InlineErrorState
-            description={resource.error.message}
-            onRetry={resource.refresh}
-            minHeight={150}
+            description="The pipeline definition could not be loaded. Any unsaved draft is retained."
+            onRetry={reload}
+            minHeight={100}
           />
+        )}
+        {accessDenied ? (
+          <p role="status">
+            Definition access is restricted. The previous snapshot is hidden.
+          </p>
         ) : !resource.data ? (
-          <p role="status">Loading definition…</p>
+          <p role="status">
+            {resource.error ? "Definition unavailable." : "Loading definition…"}
+          </p>
         ) : (
           <>
-            <Textarea
-              aria-label="Pipeline definition JSON"
-              readOnly={readOnly}
-              spellCheck={false}
-              className="h-[45vh] font-mono text-xs"
-              value={draft ?? JSON.stringify(resource.data.spec, null, 2)}
-              disabled={busy}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setNotice("");
-                requestId.current = crypto.randomUUID();
-              }}
-            />
-            <RetryPolicyEditor
-              value={draft ?? JSON.stringify(resource.data.spec, null, 2)}
-              disabled={readOnly || busy}
-              onChange={(value) => {
-                setDraft(value);
-                setNotice("");
-                requestId.current = crypto.randomUUID();
-              }}
-            />
-            <p className="truncate font-mono text-xs text-muted-foreground">
+            <Tabs defaultValue="json" className="min-w-0">
+              <TabsList aria-label="Definition editing mode">
+                <TabsTrigger value="graph">Graph</TabsTrigger>
+                <TabsTrigger value="json">JSON</TabsTrigger>
+              </TabsList>
+              <TabsContent value="graph">
+                <VisualCIEditor
+                  value={text}
+                  disabled={locked || !!resource.error || resource.loading}
+                  onChange={change}
+                />
+              </TabsContent>
+              <TabsContent value="json">
+                <Textarea
+                  aria-label="Pipeline definition JSON"
+                  readOnly={readOnly || denied || saved}
+                  spellCheck={false}
+                  className="h-[45vh] font-mono text-xs"
+                  value={text}
+                  disabled={
+                    busy || reloading || !!resource.error || resource.loading
+                  }
+                  onChange={(event) => change(event.target.value)}
+                />
+                <RetryPolicyEditor
+                  value={text}
+                  disabled={locked || !!resource.error || resource.loading}
+                  onChange={change}
+                />
+              </TabsContent>
+            </Tabs>
+            <p className="text-xs text-muted-foreground">
+              Saving preserves supported DSL fields and the repository's
+              JSON/YAML format, but normalizes serialization. Original
+              formatting, comments and YAML anchors are not available from this
+              API. Unknown fields are retained in the draft; the server may
+              reject them. Saving never starts a run. Closing discards unsaved
+              changes.
+            </p>
+            <p className="break-all font-mono text-xs text-muted-foreground">
               Based on commit {resource.data.headCommitSha || "unknown"}
             </p>
           </>
@@ -688,21 +849,64 @@ export function PipelineSpecDialog({
             {notice}
           </p>
         )}
-        <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={onClose}>
+        {saved && (
+          <p className="text-sm">
+            The saved draft is retained. Reload the latest definition before
+            making another edit or save.
+          </p>
+        )}
+        {confirmReload && (
+          <div className="space-y-2 rounded border p-3">
+            <p>
+              Reload the latest repository definition and discard this draft
+              only if loading succeeds?
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={reload}>
+                Reload and discard draft
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmReload(false)}
+              >
+                Keep draft
+              </Button>
+            </div>
+          </div>
+        )}
+        <DialogFooter className="flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={busy || reloading}
+            onClick={onClose}
+          >
             Close
           </Button>
           <Button
             variant="outline"
-            disabled={readOnly || busy || !resource.data || !!resource.error}
+            disabled={busy || reloading}
+            onClick={() =>
+              draft !== null && !accessDenied
+                ? setConfirmReload(true)
+                : reload()
+            }
+          >
+            {reloading ? "Reloading…" : "Reload definition"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={
+              locked || !resource.data || !!resource.error || resource.loading
+            }
             onClick={() => void apply(false)}
           >
             Validate
           </Button>
           <Button
             disabled={
-              readOnly ||
-              busy ||
+              locked ||
+              conflict ||
               !resource.data ||
               !!resource.error ||
               resource.loading
