@@ -92,6 +92,20 @@ export async function runOrganizationJourney({
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     );
+    if (name.endsWith("-members")) {
+      const heading = page.getByRole("heading", {
+        name: "Members",
+        exact: true,
+      });
+      await heading.scrollIntoViewIfNeeded();
+      assert.equal(
+        await heading.evaluate((node) => node.scrollWidth <= node.clientWidth),
+        true,
+        "Member heading must remain readable on mobile",
+      );
+      await button("Refresh members").click();
+      await button("Add member").waitFor();
+    }
     await page.screenshot({
       path: `${output}/organization-${name}-mobile.png`,
       fullPage: true,

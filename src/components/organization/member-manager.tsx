@@ -63,6 +63,7 @@ export function MemberManager({
   return (
     <Panel>
       <PanelHeader
+        className="flex-col items-start sm:flex-row sm:items-center [&>div]:max-w-full [&>div>div]:whitespace-normal"
         title="Members"
         sub={`Explicit ${scope === "org" ? "organization" : "project"} memberships and managed roles`}
         action={
