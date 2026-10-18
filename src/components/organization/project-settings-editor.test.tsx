@@ -152,3 +152,22 @@ it("Cancel leaves without any mutation", () => {
   expect(callbacks.onClose).toHaveBeenCalledOnce();
   expect(updateProjectSettings).not.toHaveBeenCalled();
 });
+
+it("gives the visibility select an exact standalone label with real options", () => {
+  show();
+  const select = screen.getByLabelText("Visibility metadata", {
+    exact: true,
+  }) as HTMLSelectElement;
+  expect(select).toHaveAccessibleName("Visibility metadata");
+  expect(select.labels).toHaveLength(1);
+  expect(select.labels![0].textContent).toBe("Visibility metadata");
+  expect(select.labels![0].htmlFor).toBe(select.id);
+  expect(select.labels![0].contains(select)).toBe(false);
+  expect(Array.from(select.options, (option) => option.textContent)).toEqual([
+    "Private",
+    "Internal",
+    "Public",
+  ]);
+  fireEvent.change(select, { target: { value: "1" } });
+  expect(select).toHaveValue("1");
+});

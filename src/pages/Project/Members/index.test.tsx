@@ -1,3 +1,4 @@
+import { MemberManager } from "@/components/organization/member-manager";
 import {
   act,
   cleanup,
@@ -562,3 +563,34 @@ it("does not offer changes to an additional owner when owner assignment is denie
   ).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Add member" })).toBeEnabled();
 });
+
+it.each(["org", "project"] as const)(
+  "gives the %s role select an exact standalone label with real options",
+  async (scope) => {
+    vi.mocked(Apis.me.getEffectiveActions).mockResolvedValue(["*:*"]);
+    const roles =
+      scope === "org"
+        ? ["org_admin", "org_member"]
+        : ["project_developer", "project_reporter", "project_guest"];
+    vi.mocked(get).mockResolvedValue({
+      list: [],
+      total: 0,
+      canManageMembers: true,
+      canAssignOwner: false,
+      assignableRoleIds: roles,
+    });
+    render(<MemberManager scope={scope} scopeId="synthetic-scope" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add member" }));
+    const select = screen.getByLabelText("Role", {
+      exact: true,
+    }) as HTMLSelectElement;
+    expect(select).toHaveAccessibleName("Role");
+    expect(select.labels).toHaveLength(1);
+    expect(select.labels![0].textContent).toBe("Role");
+    expect(select.labels![0].htmlFor).toBe(select.id);
+    expect(select.labels![0].contains(select)).toBe(false);
+    expect(Array.from(select.options, (option) => option.value)).toEqual(roles);
+    fireEvent.change(select, { target: { value: roles[0] } });
+    expect(select).toHaveValue(roles[0]);
+  },
+);

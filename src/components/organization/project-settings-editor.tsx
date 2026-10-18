@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import {
   archiveProject,
   restoreProject,
@@ -36,6 +36,7 @@ export function ProjectSettingsEditor({
   onReload: () => void;
   onDenied: (message: string) => void;
 }) {
+  const visibilityControlId = useId();
   const [draft, setDraft] = useState<ProjectSettingsDraft>({
     displayName: settings.displayName,
     description: settings.description,
@@ -177,9 +178,12 @@ export function ProjectSettingsEditor({
                     />
                   </label>
                 </div>
-                <label className="block space-y-1 text-sm">
-                  <span>Visibility metadata</span>
+                <div className="space-y-1 text-sm">
+                  <label htmlFor={visibilityControlId} className="block">
+                    Visibility metadata
+                  </label>
                   <select
+                    id={visibilityControlId}
                     className="h-9 w-full rounded-md border bg-background px-3"
                     value={draft.visibility}
                     onChange={(event) =>
@@ -190,7 +194,7 @@ export function ProjectSettingsEditor({
                     <option value={1}>Internal</option>
                     <option value={2}>Public</option>
                   </select>
-                </label>
+                </div>
                 <p className="text-xs text-fg-muted">
                   Visibility is descriptive metadata. It does not add or remove
                   access grants.

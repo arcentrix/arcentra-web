@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { Apis } from "@/api";
 import {
   addScopedMember,
@@ -257,6 +257,7 @@ function MemberDialog({
   onSaved: () => void;
   onFailed: (error: unknown) => void;
 }) {
+  const roleControlId = useId();
   const [userId, setUserId] = useState(member?.userId ?? "");
   const [role, setRole] = useState(
     member?.roleId ||
@@ -343,9 +344,12 @@ function MemberDialog({
             </p>
           )}
           {kind !== "remove" && (
-            <label className="block space-y-1 text-sm">
-              <span>Role</span>
+            <div className="space-y-1 text-sm">
+              <label htmlFor={roleControlId} className="block">
+                Role
+              </label>
               <select
+                id={roleControlId}
                 className="h-9 w-full rounded-md border bg-background px-3"
                 value={role}
                 onChange={(event) => setRole(event.target.value)}
@@ -363,7 +367,7 @@ function MemberDialog({
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
           )}
           <p className="text-xs text-fg-muted">
             The server checks current access, protected owners, and the latest
