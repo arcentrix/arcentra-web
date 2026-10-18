@@ -107,6 +107,19 @@ afterEach(() => {
 });
 
 describe("visual CI definition dialog", () => {
+  it("gives command textareas an exact stable accessible name independent of initial command text", async () => {
+    await show();
+    tab("Graph");
+    const command = screen.getByRole("textbox", {
+      name: "Command for compile",
+    });
+    expect(command).toHaveAttribute("aria-label", "Command for compile");
+    expect(command).toHaveValue("echo original");
+    fireEvent.change(command, { target: { value: "printf 'updated\\n'" } });
+    expect(
+      screen.getByRole("textbox", { name: "Command for compile" }),
+    ).toHaveValue("printf 'updated\\n'");
+  });
   it("keeps one draft across modes and saves only explicitly with original format, head and request ID", async () => {
     await show();
     const original = JSON.parse(json().value);

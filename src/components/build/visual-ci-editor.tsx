@@ -488,6 +488,7 @@ function StepEditor({
         <label className="block break-all text-sm">
           Command for {step.name}
           <Textarea
+            aria-label={`Command for ${step.name}`}
             className="min-h-24 font-mono text-xs"
             disabled={disabled}
             value={
