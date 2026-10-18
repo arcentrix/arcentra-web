@@ -1,3 +1,4 @@
+import { runProjectSecretsJourney } from "./project-secrets-journey.mjs";
 import { runOrganizationJourney } from "./organization-journey.mjs";
 import { runHonestyJourney } from "./ui-honesty-journey.mjs";
 /**
@@ -42,6 +43,9 @@ const firstBuildEvidence = projectBuild
   ? { phase: config.phase, sourceCommit: config.expectedCommit, steps: [] }
   : undefined;
 const organizationEvidence = config.organizationJourney
+  ? { steps: [] }
+  : undefined;
+const projectSecretEvidence = config.projectSecretsJourney
   ? { steps: [] }
   : undefined;
 let successfulBuild;
@@ -333,6 +337,27 @@ await runBrowserTest(
       await record("organization-members-settings-via-ui", {
         organizationManagement,
       });
+      await page.goto(`${base}${projectPath}/pipelines`);
+      await page
+        .getByRole("button", { name: "New pipeline", exact: true })
+        .waitFor();
+    }
+
+    if (config.projectSecretsJourney) {
+      const projectSecrets = await runProjectSecretsJourney({
+        page,
+        base,
+        output,
+        project,
+        config,
+        diagnostics,
+        responseFor,
+        envelope,
+        setStage,
+        setSensitiveFormOpen,
+        evidence: projectSecretEvidence,
+      });
+      await record("project-secrets-via-ui", { projectSecrets });
       await page.goto(`${base}${projectPath}/pipelines`);
       await page
         .getByRole("button", { name: "New pipeline", exact: true })
@@ -868,9 +893,15 @@ await runBrowserTest(
         : projectBuild
           ? 600_000
           : 300_000,
-    sensitiveValues: storageSensitiveValues(config.storageEndpoint),
+    sensitiveValues: [
+      ...storageSensitiveValues(config.storageEndpoint),
+      ...(config.projectSecretsJourney
+        ? [config.secretInitialValue, config.secretRotatedValue]
+        : []),
+    ],
     firstBuildEvidence,
     organizationEvidence,
+    projectSecretEvidence,
   },
 );
 // The backend may verify/execute its trusted fixture only after the browser

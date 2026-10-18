@@ -2391,3 +2391,158 @@ test("diagnostics distinguish browser cleanup without forgiving its errors", () 
     "browser-closing",
   );
 });
+
+test("project secret config accepts only distinct synthetic build-phase values", async () => {
+  const { projectSecretConfig } = await import("./project-secrets-journey.mjs");
+  const env = {
+    ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE:
+      "synthetic-ci-secret-InitialFixture001",
+    ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE:
+      "synthetic-ci-secret-RotatedFixture002",
+  };
+  assert.equal(projectSecretConfig(env, "build").projectSecretsJourney, true);
+  assert.deepEqual(projectSecretConfig({}, "build"), {});
+  for (const phase of ["preflight", "storage-setup"])
+    assert.throws(() => projectSecretConfig(env, phase));
+  for (const change of [
+    { ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE: undefined },
+    { ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE: undefined },
+    {
+      ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE:
+        env.ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE,
+    },
+    {
+      ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE:
+        "actual-looking-unbounded-credential",
+    },
+  ])
+    assert.throws(() => projectSecretConfig({ ...env, ...change }, "build"));
+});
+
+test("secret evidence and safe failure sites retain only bounded metadata", async () => {
+  const {
+    projectSecretSteps,
+    projectSecretStages,
+    projectSecretsEvidence,
+    assertNoProjectSecretValues,
+  } = await import("./project-secrets-journey.mjs");
+  const evidence = {
+    projectId: "project-1",
+    activeSecretId: "secret-1",
+    disabledSecretId: "secret-2",
+    steps: [...projectSecretSteps],
+    value: "synthetic-private-ignored",
+  };
+  const result = projectSecretsEvidence(evidence).projectSecrets;
+  assert.equal(result.completed, true);
+  assert.deepEqual(
+    Object.keys(result).sort(),
+    [
+      "journey",
+      "completed",
+      "projectId",
+      "activeSecretId",
+      "disabledSecretId",
+      "steps",
+    ].sort(),
+  );
+  assert.equal(
+    JSON.stringify(result).includes("synthetic-private-ignored"),
+    false,
+  );
+  assert.throws(() =>
+    projectSecretsEvidence({
+      ...evidence,
+      activeSecretId: "private?key=value",
+    }),
+  );
+  assert.throws(() =>
+    projectSecretsEvidence({
+      ...evidence,
+      steps: [...projectSecretSteps, projectSecretSteps[0]],
+    }),
+  );
+  assert.throws(() =>
+    projectSecretsEvidence({ ...evidence, steps: ["unknown"] }),
+  );
+  assert.throws(() =>
+    assertNoProjectSecretValues({ nested: "synthetic-sensitive-canary" }, [
+      "synthetic-sensitive-canary",
+    ]),
+  );
+  for (const stage of projectSecretStages)
+    assert.equal(safeFailureEvidence(stage, new Error("private")).stage, stage);
+  const error = {
+    stack: `Error: PRIVATE-CANARY\n    at test (${fileURLToPath(new URL("./project-secrets-journey.mjs", import.meta.url))}:9:3)`,
+  };
+  assert.deepEqual(safeFailureEvidence(projectSecretStages[0], error), {
+    stage: projectSecretStages[0],
+    failureSite: { file: "project-secrets-journey.mjs", line: 9, column: 3 },
+  });
+});
+
+test("strict secret fixture preserves metadata-only writes and rejects stale versions", async () => {
+  const { projectSecretsFixture, syntheticProjectSecretValues } =
+    await import("./project-secrets-fixture.mjs");
+  const fixture = projectSecretsFixture();
+  fixture.state.active = true;
+  async function invoke(path, method = "GET", body) {
+    let result;
+    const handled = await fixture.route({
+      request: () => ({
+        url: () => `http://127.0.0.1/api/v1${path}`,
+        method: () => method,
+        postDataJSON: () => body,
+      }),
+      fulfill: async (value) => {
+        result = value;
+      },
+    });
+    assert.equal(handled, true);
+    return result;
+  }
+  const path = "/project/project-1/secrets";
+  assert.equal((await invoke(path)).json.detail.total, 0);
+  const row = (
+    await invoke(path, "POST", {
+      name: "CI_BUILD_TOKEN",
+      secretType: "token",
+      description: "",
+      value: syntheticProjectSecretValues[0],
+    })
+  ).json.detail;
+  assert.equal(row.version, "opaque-v1");
+  const edited = (
+    await invoke(`${path}/${row.secretId}`, "PATCH", {
+      version: row.version,
+      description: "Reviewed",
+    })
+  ).json.detail;
+  assert.equal(edited.version, "opaque-v2");
+  assert.ok(
+    fixture.state.stored.get(row.secretId) === syntheticProjectSecretValues[0],
+  );
+  await assert.rejects(
+    invoke(`${path}/${row.secretId}`, "PATCH", {
+      version: row.version,
+      description: "Stale",
+    }),
+  );
+  await assert.rejects(invoke(`${path}/${row.secretId}`, "GET"));
+  const rotated = (
+    await invoke(`${path}/${row.secretId}/rotate`, "POST", {
+      version: edited.version,
+      value: syntheticProjectSecretValues[1],
+    })
+  ).json.detail;
+  assert.equal(rotated.version, "opaque-v3");
+  const disabled = (
+    await invoke(`${path}/${row.secretId}/disable`, "POST", {
+      version: rotated.version,
+    })
+  ).json.detail;
+  assert.equal(disabled.isEnabled, 0);
+  assert.equal(disabled.canRotate, false);
+  fixture.state.mode = "denied-read";
+  assert.equal((await invoke(path)).status, 403);
+});

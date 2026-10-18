@@ -1,4 +1,9 @@
 import {
+  projectSecretsFixture,
+  assertProjectSecretsFixtureUI,
+  syntheticProjectSecretValues,
+} from "./project-secrets-fixture.mjs";
+import {
   honestyFixture,
   assertHonestyFixtureUI,
   agentFixtureConsumer,
@@ -130,12 +135,14 @@ await runBrowserTest(
     const polling = pollingFixture();
     const storage = storageFixture();
     const honesty = honestyFixture(project);
+    const secrets = projectSecretsFixture(project.projectId);
     let firstBuildError = false;
     let mode = "normal";
     let starts = 0;
     let cancellations = 0;
     let saves = 0;
     await page.route("**/api/v1/**", async (route) => {
+      if (await secrets.route(route)) return;
       if (await polling.route(route)) return;
       if (await storage.route(route)) return;
       if (await honesty.route(route)) return;
@@ -1112,6 +1119,18 @@ await runBrowserTest(
       setStage,
       honesty,
     });
+    await assertProjectSecretsFixtureUI({
+      page,
+      base,
+      output,
+      diagnostics,
+      expectHttpError,
+      setStage,
+      setSensitiveFormOpen,
+      protectSensitiveValue,
+      secrets,
+      project,
+    });
     await assertStorageFixtureUI({
       page,
       base,
@@ -1127,5 +1146,10 @@ await runBrowserTest(
       `UI fixture smoke passed: run/dismiss/cancel, container failed-step draft guards/no autosave, definition validate/save, mobile layout, empty/error/retry, project navigation/back, artifact list/filter/pagination/download/access/error/mobile, exact retry approval review/vote/mobile, honest Dashboard/Inbox/Members/Secrets/Settings scoped reads/denial/mobile. Screenshots: ${output}`,
     );
   },
-  { sensitiveValues: storageSensitiveValues("127.0.0.1:19000") },
+  {
+    sensitiveValues: [
+      ...storageSensitiveValues("127.0.0.1:19000"),
+      ...syntheticProjectSecretValues,
+    ],
+  },
 );

@@ -5,7 +5,7 @@ import { assertControlReachable } from "./artifact-controls.mjs";
 export const honestyChecks = Object.freeze([
   "project-settings-match-scoped-response",
   "member-associations-match-scoped-response",
-  "secrets-inventory-explicitly-unavailable",
+  "secrets-inventory-matches-scoped-response",
   "inbox-history-explicitly-unavailable",
   "dashboard-agent-page-matches-response",
   "readonly-navigation-and-mobile-layout",
@@ -326,18 +326,30 @@ export async function assertAgentSnapshot(page, snapshot) {
   await assertHonestContent(page.locator("body"));
 }
 
-export async function assertUnavailableSecrets(page) {
+export async function assertSecretSnapshot(page, snapshot, projectId) {
+  assert.equal(snapshot.projectId, projectId);
+  assert.ok(Array.isArray(snapshot.list) || snapshot.list === null);
+  assert.equal(snapshot.total, (snapshot.list ?? []).length);
   await page
     .getByRole("heading", { name: "Project secrets", exact: true })
     .waitFor();
   await page
-    .getByText("Project secret management is not connected.", { exact: true })
+    .getByText(
+      `${snapshot.total} recorded ${snapshot.total === 1 ? "secret" : "secrets"}`,
+      { exact: true },
+    )
     .waitFor();
-  await page
-    .getByText(/No secret inventory has been loaded for this project/)
-    .waitFor();
-  assert.equal(await page.getByRole("table").count(), 0);
-  assert.equal(await page.getByRole("textbox").count(), 0);
+  if (!snapshot.total)
+    await page
+      .getByText("No secrets are recorded for this project.", { exact: true })
+      .waitFor();
+  for (const row of snapshot.list ?? []) {
+    assert.equal(row.projectId, projectId);
+    assert.equal(Object.hasOwn(row, "value"), false);
+    assert.equal(Object.hasOwn(row, "encryptedValue"), false);
+    await page.getByRole("heading", { name: row.name, exact: true }).waitFor();
+  }
+  assert.equal(await page.getByRole("dialog").count(), 0);
   await assertHonestContent(page.locator("body"));
 }
 
@@ -454,8 +466,13 @@ export async function runHonestyJourney({
     "members",
     page.getByRole("button", { name: "Refresh members" }),
   );
-  await page.getByRole("tab", { name: "Secrets", exact: true }).click();
-  await assertUnavailableSecrets(page);
+  const secrets = await readAfter(
+    page,
+    `/project/${encodeURIComponent(projectId)}/secrets`,
+    () => page.getByRole("tab", { name: "Secrets", exact: true }).click(),
+    envelope,
+  );
+  await assertSecretSnapshot(page, secrets, projectId);
   await honestyMobileScreenshot(
     page,
     output,
@@ -471,7 +488,7 @@ export async function runHonestyJourney({
     page.getByRole("link", { name: "Open Build", exact: true }),
   );
   await page.goBack();
-  await assertUnavailableSecrets(page);
+  await assertSecretSnapshot(page, secrets, projectId);
   await page.goForward();
   await assertUnavailableInbox(page);
 
@@ -505,7 +522,9 @@ export async function runHonestyJourney({
   );
   assert.equal(
     reads.filter((request) =>
-      /\/(?:secrets|notifications)(?:\/|$)|\/users\/$/.test(request.path),
+      /^\/api\/v1\/secrets(?:\/|$)|\/notifications(?:\/|$)|\/users\/$/.test(
+        request.path,
+      ),
     ).length,
     0,
     "Unavailable inventory must not query platform secrets, notifications, or global users",

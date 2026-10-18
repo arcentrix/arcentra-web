@@ -1,4 +1,9 @@
 import {
+  projectSecretConfig,
+  projectSecretStages,
+  projectSecretsEvidence,
+} from "./project-secrets-journey.mjs";
+import {
   organizationManagementEvidence,
   organizationManagementStages,
 } from "./organization-journey.mjs";
@@ -12,6 +17,7 @@ import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 
 const acceptanceStages = new Set([
   ...organizationManagementStages,
+  ...projectSecretStages,
   "setup",
   "login",
   "first-build-preflight-evidence",
@@ -259,6 +265,8 @@ export function safeFailureEvidence(stage, error) {
     "storage-journey.mjs",
     "storage-fixture.mjs",
     "organization-journey.mjs",
+    "project-secrets-journey.mjs",
+    "project-secrets-fixture.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
     if (!/^\s+at /.test(frame)) continue;
@@ -377,6 +385,7 @@ export function actualBackendConfig(env = process.env) {
     );
   return {
     ...(organizationJourney ? { organizationJourney: true, memberUserId } : {}),
+    ...projectSecretConfig(env, phase),
     phase,
     expectedCommit: env.ARCENTRA_ACCEPTANCE_COMMIT,
     storageEndpoint:
@@ -629,6 +638,7 @@ export async function runBrowserTest(
     totalTimeoutMs,
     firstBuildEvidence,
     organizationEvidence,
+    projectSecretEvidence,
     sensitiveValues = [],
   } = {},
 ) {
@@ -900,7 +910,7 @@ export async function runBrowserTest(
           fullPage: true,
           mask: [
             page.locator(
-              "input[type=password], input[autocomplete=current-password], input[name=password]",
+              "input[type=password], input[autocomplete=current-password], input[name=password], [data-private=true]",
             ),
           ],
         })
@@ -974,6 +984,7 @@ export async function runBrowserTest(
           ...artifactDownloadEvidence(diagnostics),
           ...firstBuildReadinessEvidence(firstBuildEvidence),
           ...organizationManagementEvidence(organizationEvidence),
+          ...projectSecretsEvidence(projectSecretEvidence),
         },
         null,
         2,
@@ -1016,7 +1027,7 @@ export async function safeFailureScreenshot(page, sensitiveValues) {
       redactDiagnosticText(content, sensitiveValues) === content &&
       (await page
         .locator(
-          'input[type="password"], input[autocomplete="current-password"], input[name="password"]',
+          'input[type="password"], input[autocomplete="current-password"], input[name="password"], [data-private="true"]',
         )
         .evaluateAll((inputs) => inputs.every((input) => !input.value)))
     );
