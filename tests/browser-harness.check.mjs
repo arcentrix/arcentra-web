@@ -391,6 +391,28 @@ test("failure evidence only includes allowlisted stage, source basename and nume
     );
 });
 
+test("missing persisted-log diagnostics allow only fixed marker categories, never log text", () => {
+  for (const category of [
+    "baseline",
+    "toolchain",
+    "test",
+    "build",
+    "behavior",
+    "stdout",
+    "compile-error",
+  ]) {
+    const stage = `persisted-run-log-${category}`;
+    assert.deepEqual(
+      safeFailureEvidence(stage, new Error("PRIVATE-LOG-CONTENT")),
+      { stage },
+    );
+  }
+  assert.deepEqual(
+    safeFailureEvidence("persisted-run-log-PRIVATE-LOG-CONTENT", null),
+    { stage: "unknown" },
+  );
+});
+
 test("browser URLs fail closed outside numeric loopback", () => {
   assert.equal(loopbackURL("http://127.0.0.1:5174", "test").port, "5174");
   assert.equal(loopbackURL("http://[::1]:5174", "test").hostname, "[::1]");

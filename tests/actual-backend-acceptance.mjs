@@ -513,22 +513,35 @@ await runBrowserTest(
       setStage("persisted-run-logs");
       const logs = page.getByLabel("Execution logs", { exact: true });
       const requiredLogs = !projectBuild
-        ? ["arcentra-real-stack-acceptance"]
+        ? [["persisted-run-log-baseline", "arcentra-real-stack-acceptance"]]
         : success
           ? [
-              "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
-              "ACTUAL_PROJECT_TEST",
-              "ACTUAL_PROJECT_BUILD",
-              "ACTUAL_PROJECT_BEHAVIOR",
-              buildContract.stdout.trim(),
+              [
+                "persisted-run-log-toolchain",
+                "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
+              ],
+              ["persisted-run-log-test", "ACTUAL_PROJECT_TEST"],
+              ["persisted-run-log-build", "ACTUAL_PROJECT_BUILD"],
+              ["persisted-run-log-behavior", "ACTUAL_PROJECT_BEHAVIOR"],
+              ["persisted-run-log-stdout", buildContract.stdout.trim()],
             ]
           : [
-              "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
-              "ACTUAL_PROJECT_TEST",
-              "undefined: acceptanceCompileError",
+              [
+                "persisted-run-log-toolchain",
+                "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
+              ],
+              ["persisted-run-log-test", "ACTUAL_PROJECT_TEST"],
+              [
+                "persisted-run-log-compile-error",
+                "undefined: acceptanceCompileError",
+              ],
             ];
-      for (const marker of requiredLogs)
+      for (const [stage, marker] of requiredLogs) {
+        // Only a fixed category reaches failure diagnostics, never log content.
+        // Keep the actual rendered-text assertion strict.
+        setStage(stage);
         await logs.filter({ hasText: marker }).waitFor({ timeout: 45_000 });
+      }
       setStage("initial-checkout");
       await page
         .getByText("Agent-reported initial checkout", { exact: true })

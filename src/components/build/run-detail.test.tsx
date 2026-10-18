@@ -17,7 +17,18 @@ import {
   normalizeJob,
   stopRun,
 } from "@/api/pipeline";
-import type { PipelineRun } from "@/api/pipeline/types";
+import type { PipelineRun, RunLog, RunLogs } from "@/api/pipeline/types";
+const session = vi.hoisted(() => ({
+  initialized: true,
+  accessToken: "test-session",
+  userId: "test-user",
+}));
+vi.mock("@/store/auth", () => ({
+  default: { useState: () => session },
+}));
+vi.mock("@/store/user", () => ({
+  default: { useState: () => ({ userinfo: { userId: session.userId } }) },
+}));
 vi.mock("./run-approvals", () => ({
   RunApprovals: () => <div>Run approval panel</div>,
 }));
@@ -66,6 +77,9 @@ afterEach(() => {
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  session.initialized = true;
+  session.accessToken = "test-session";
+  session.userId = "test-user";
   vi.mocked(getRun).mockResolvedValue(run);
   vi.mocked(getRunJobs).mockResolvedValue([
     normalizeJob({
@@ -224,6 +238,341 @@ it("collects delayed logs for 15 seconds after completion, then supports manual 
   });
   expect(getRunLogs).toHaveBeenCalledTimes(calls + 1);
   view.unmount();
+});
+
+const logChunk = (
+  lineNumber: number,
+  message: string,
+  extra: Partial<RunLog> = {},
+): RunLog => ({
+  jobId: "j1",
+  stepId: "s1",
+  stream: "stdout",
+  lineNumber,
+  timestamp: 123,
+  level: "info",
+  message,
+  ...extra,
+});
+
+it("renders ordered fragmented output as text and copies exactly the visible text including boundaries", async () => {
+  vi.mocked(getRunLogs).mockResolvedValue({
+    entries: [
+      logChunk(3, "VERIFIED\n<script>literal</script>\r\n  tail  "),
+      logChunk(2, "warning\n", { stream: "stderr" }),
+      logChunk(1, "SECRET_"),
+    ],
+    truncated: true,
+  });
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const { container } = show();
+  await waitFor(() =>
+    expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+      "SECRET_VERIFIED",
+    ),
+  );
+  const visible = screen.getByLabelText("Execution logs").textContent;
+  expect(visible).toContain(
+    "SECRET_VERIFIED\n<script>literal</script>\r\n  tail  ",
+  );
+  expect(visible).toContain('Job "Compile" ("j1"); step "Build binary" ("s1")');
+  expect(visible).toContain("Partial page");
+  expect(container.querySelector("script")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(visible));
+  expect(
+    await screen.findByRole("button", { name: "Copied" }),
+  ).toBeInTheDocument();
+});
+
+it.each(["logs", "jobs"])(
+  "disables copying stale output after a %s refresh failure",
+  async (resource) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    show();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled(),
+    );
+    if (resource === "logs")
+      vi.mocked(getRunLogs).mockRejectedValue(new Error("Refresh failed"));
+    else vi.mocked(getRunJobs).mockRejectedValue(new Error("Refresh failed"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh execution" }));
+    await screen.findByText("Refresh failed");
+    expect(screen.getByRole("button", { name: "Copy" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).not.toHaveBeenCalled();
+    if (resource === "logs")
+      expect(screen.queryByLabelText("Execution logs")).not.toBeInTheDocument();
+  },
+);
+
+it.each(["changed", "unchanged", "failed"])(
+  "only marks the current visible text copied after a deferred clipboard write and %s refresh",
+  async (refreshResult) => {
+    let finishCopy!: () => void;
+    const writeText = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCopy = resolve;
+        }),
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    show();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+        "Actual fixture output",
+      ),
+    );
+    const copiedText = screen.getByLabelText("Execution logs").textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(copiedText));
+    const calls = vi.mocked(getRunLogs).mock.calls.length;
+    if (refreshResult === "changed")
+      vi.mocked(getRunLogs).mockResolvedValue({
+        entries: [logChunk(1, "REPLACED OUTPUT")],
+      });
+    else if (refreshResult === "failed")
+      vi.mocked(getRunLogs).mockRejectedValue(
+        new Error("Deferred refresh failed"),
+      );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh execution" }));
+    await waitFor(() => expect(getRunLogs).toHaveBeenCalledTimes(calls + 1));
+    if (refreshResult === "changed")
+      await waitFor(() =>
+        expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+          "REPLACED OUTPUT",
+        ),
+      );
+    if (refreshResult === "failed")
+      await screen.findByText("Deferred refresh failed");
+    await act(async () => finishCopy());
+    if (refreshResult === "unchanged")
+      expect(screen.getByRole("button", { name: "Copied" })).toBeEnabled();
+    else {
+      expect(
+        screen.queryByRole("button", { name: "Copied" }),
+      ).not.toBeInTheDocument();
+      const button = screen.getByRole("button", { name: "Copy" });
+      if (refreshResult === "failed") expect(button).toBeDisabled();
+      else expect(button).toBeEnabled();
+    }
+  },
+);
+
+it("keeps missing-position legacy output separate and disables unsafe pagination", async () => {
+  vi.mocked(getRunLogs).mockResolvedValue({
+    entries: [
+      logChunk(1, "PREFIX_", { lineNumber: undefined }),
+      logChunk(2, "SUFFIX", { lineNumber: undefined }),
+    ],
+    truncated: true,
+  });
+  show();
+  await screen.findByText("Build binary");
+  fireEvent.change(screen.getByLabelText("Output"), {
+    target: { value: "s1" },
+  });
+  await waitFor(() =>
+    expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+      "Next output is unavailable",
+    ),
+  );
+  expect(screen.getByLabelText("Execution logs")).not.toHaveTextContent(
+    "PREFIX_SUFFIX",
+  );
+  expect(screen.getByRole("button", { name: "Next output" })).toBeDisabled();
+});
+
+it("does not stitch across pages and resets output selection when the run identity changes", async () => {
+  vi.mocked(getRunLogs).mockImplementation(
+    async (_pipeline, _run, _signal, params) => ({
+      entries: [
+        logChunk(
+          params?.fromLine ? 2 : 1,
+          params?.fromLine ? "SUFFIX" : "PREFIX_",
+        ),
+      ],
+      truncated: !params?.fromLine,
+    }),
+  );
+  const view = show();
+  await screen.findByText("Build binary");
+  fireEvent.change(screen.getByLabelText("Output"), {
+    target: { value: "s1" },
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Next output" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next output" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Execution logs")).toHaveTextContent("SUFFIX"),
+  );
+  expect(screen.getByLabelText("Execution logs")).not.toHaveTextContent(
+    "PREFIX_",
+  );
+  expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+    "no fragments are joined across pages",
+  );
+  let resolve!: (value: RunLogs) => void;
+  vi.mocked(getRunLogs).mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Refresh execution" }));
+  await waitFor(() => expect(resolve).toBeDefined());
+  vi.mocked(getRun).mockResolvedValue({ ...run, runId: "r2" });
+  vi.mocked(getRunLogs).mockResolvedValue({
+    entries: [logChunk(1, "NEW RUN")],
+  });
+  view.rerender(
+    <MemoryRouter>
+      <RunDetail
+        pipelineId="p1"
+        runId="r2"
+        projectId="pr1"
+        onChanged={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  expect(screen.queryByText(/SUFFIX/)).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Output")).toHaveValue("");
+  await waitFor(() =>
+    expect(getRunLogs).toHaveBeenLastCalledWith(
+      "p1",
+      "r2",
+      expect.any(AbortSignal),
+      { stepRunId: undefined, fromLine: 0 },
+    ),
+  );
+  await act(async () => resolve({ entries: [logChunk(2, "STALE RESPONSE")] }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+      "NEW RUN",
+    ),
+  );
+  expect(screen.getByLabelText("Execution logs")).not.toHaveTextContent(
+    "STALE RESPONSE",
+  );
+  expect(
+    screen.queryByRole("button", { name: "Previous output" }),
+  ).not.toBeInTheDocument();
+});
+
+it("invalidates output and late responses on session changes, including sign-out", async () => {
+  const view = show();
+  await waitFor(() =>
+    expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+      "Actual fixture output",
+    ),
+  );
+  let resolve!: (value: RunLogs) => void;
+  let previousSignal!: AbortSignal;
+  vi.mocked(getRunLogs).mockImplementation((_pipeline, _run, signal) => {
+    previousSignal = signal!;
+    return new Promise((done) => {
+      resolve = done;
+    });
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh execution" }));
+  await waitFor(() => expect(resolve).toBeDefined());
+  session.accessToken = "new-session";
+  session.userId = "new-user";
+  vi.mocked(getRunLogs).mockResolvedValue({
+    entries: [logChunk(1, "NEW SESSION")],
+  });
+  const rerender = () =>
+    view.rerender(
+      <MemoryRouter>
+        <RunDetail
+          pipelineId="p1"
+          runId="r1"
+          projectId="pr1"
+          onChanged={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+  rerender();
+  expect(screen.queryByText(/Actual fixture output/)).not.toBeInTheDocument();
+  expect(previousSignal.aborted).toBe(true);
+  await act(async () =>
+    resolve({ entries: [logChunk(1, "PREVIOUS SESSION")] }),
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("Execution logs")).toHaveTextContent(
+      "NEW SESSION",
+    ),
+  );
+  expect(screen.getByLabelText("Execution logs")).not.toHaveTextContent(
+    "PREVIOUS SESSION",
+  );
+  const calls = vi.mocked(getRunLogs).mock.calls.length;
+  session.initialized = false;
+  session.accessToken = "";
+  session.userId = "";
+  rerender();
+  expect(
+    screen.getByText("Sign in to view execution details."),
+  ).toBeInTheDocument();
+  expect(screen.queryByLabelText("Execution logs")).not.toBeInTheDocument();
+  expect(getRunLogs).toHaveBeenCalledTimes(calls);
+});
+
+it("starts a new bounded catch-up window after switching terminal runs", async () => {
+  vi.useFakeTimers();
+  vi.mocked(getRun).mockResolvedValue({ ...run, status: "success" });
+  const view = show();
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(16000);
+  });
+  expect(
+    screen.queryByText("Collecting final output…"),
+  ).not.toBeInTheDocument();
+  vi.mocked(getRun).mockResolvedValue({
+    ...run,
+    runId: "r2",
+    status: "success",
+  });
+  await act(async () => {
+    view.rerender(
+      <MemoryRouter>
+        <RunDetail
+          pipelineId="p1"
+          runId="r2"
+          projectId="pr1"
+          onChanged={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+  });
+  expect(screen.getByText("Collecting final output…")).toBeInTheDocument();
+  const calls = vi.mocked(getRunLogs).mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(6000);
+  });
+  expect(vi.mocked(getRunLogs).mock.calls.length).toBeGreaterThan(calls);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10000);
+  });
+  expect(
+    screen.queryByText("Collecting final output…"),
+  ).not.toBeInTheDocument();
 });
 
 it.each([
