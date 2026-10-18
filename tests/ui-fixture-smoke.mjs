@@ -142,6 +142,23 @@ await runBrowserTest(
     let cancellations = 0;
     let saves = 0;
     await page.route("**/api/v1/**", async (route) => {
+      const inboxPath = new URL(route.request().url()).pathname;
+      if (["/api/v1/inbox", "/api/v1/inbox/unread-count"].includes(inboxPath)) {
+        assert.equal(route.request().method(), "GET");
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: { "Cache-Control": "no-store" },
+          body: JSON.stringify({
+            code: 200,
+            detail: inboxPath.endsWith("unread-count")
+              ? { count: 0, capped: false, incomplete: false }
+              : { list: [], nextCursor: null, scanIncomplete: false },
+          }),
+        });
+        return;
+      }
+
       if (await secrets.route(route)) return;
       if (await polling.route(route)) return;
       if (await storage.route(route)) return;

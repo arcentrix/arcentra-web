@@ -353,6 +353,139 @@ export async function assertSecretSnapshot(page, snapshot, projectId) {
   await assertHonestContent(page.locator("body"));
 }
 
+/** Inbox has real unread counts and explicit read controls; legacy placeholder bans do not apply. */
+export async function assertPersonalInboxContent(scope) {
+  const fabricated =
+    /mark\.weber|ml-inference|STRIPE_SECRET|runner-29|j\.park|API_KEY|DATABASE_URL|SECRET_TOKEN|AWS_ACCESS_KEY|GITHUB_TOKEN|SLACK_WEBHOOK|All caught up|No notifications|Inbox is not connected/;
+  assert.ok(
+    !fabricated.test(await scope.innerText()),
+    "Inbox must not display fabricated or sensitive placeholder content",
+  );
+  assert.equal(
+    await scope
+      .getByRole("button", {
+        name: /^(Approve|Reject|Retry|Deploy|Send|Mark all|Delete)\b/i,
+      })
+      .count(),
+    0,
+  );
+}
+
+/** Refresh and consume both actual endpoint bodies before checking displayed state. */
+export async function assertPersonalInboxShell(page) {
+  await page
+    .getByRole("heading", { name: "Personal inbox", exact: true })
+    .waitFor();
+  await page
+    .getByText(/Historical and automatic runs are not backfilled/)
+    .waitFor();
+  await page.getByText(/Email and chat delivery are not supported/).waitFor();
+  await page.getByRole("group", { name: "Inbox filter" }).waitFor();
+  const requests = new Set();
+  const origin = new URL(page.url()).origin;
+  const observe = (request) => {
+    const url = new URL(request.url());
+    if (
+      request.method() === "GET" &&
+      request.frame() === page.mainFrame() &&
+      url.origin === origin &&
+      ["/api/v1/inbox", "/api/v1/inbox/unread-count"].includes(url.pathname)
+    )
+      requests.add(request);
+  };
+  page.on("request", observe);
+  let snapshot, count;
+  try {
+    const pending = ["/api/v1/inbox", "/api/v1/inbox/unread-count"].map(
+      (path) =>
+        page
+          .waitForResponse(
+            (response) =>
+              requests.has(response.request()) &&
+              new URL(response.url()).pathname === path,
+            { timeout: 30_000 },
+          )
+          .then(async (response) => {
+            assert.ok(
+              response.status() === 200,
+              "Inbox refresh must return actual successful endpoint responses",
+            );
+            let body;
+            try {
+              body = await response.json();
+            } catch {
+              throw new Error("Inbox refresh must return a valid envelope");
+            }
+            assert.ok(
+              body?.code === 200,
+              "Inbox refresh envelope must succeed",
+            );
+            return body.detail;
+          }),
+    );
+    pending.forEach((promise) => {
+      void promise.catch(() => {});
+    });
+    [snapshot, count] = await Promise.all([
+      ...pending,
+      page.getByRole("button", { name: "Refresh", exact: true }).click(),
+    ]);
+  } finally {
+    page.off("request", observe);
+  }
+  assert.ok(
+    Array.isArray(snapshot?.list) && snapshot.list.length <= 20,
+    "Inbox page must return a bounded real list",
+  );
+  const ids = snapshot.list.map((row) => row.id);
+  assert.ok(
+    ids.every(
+      (id) => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id),
+    ) && new Set(ids).size === ids.length,
+    "Inbox returned invalid or duplicate delivery identities",
+  );
+  assert.ok(
+    Number.isSafeInteger(count?.count) &&
+      count.count >= 0 &&
+      count.count <= 99 &&
+      typeof count.capped === "boolean" &&
+      typeof count.incomplete === "boolean" &&
+      (!count.capped || count.count === 99),
+    "Inbox count must use the real bounded count contract",
+  );
+  const label =
+    count.incomplete && count.count === 0
+      ? "Unread count unavailable"
+      : count.capped
+        ? "99+ unread"
+        : count.incomplete
+          ? `At least ${count.count} unread`
+          : `${count.count} unread`;
+  await page.getByText(label, { exact: true }).waitFor();
+  await page
+    .getByText("Loading inbox…", { exact: true })
+    .waitFor({ state: "hidden" });
+  await page.waitForFunction(
+    (expected) =>
+      JSON.stringify(
+        [...document.querySelectorAll("[data-inbox-id]")].map((row) => ({
+          id: row.getAttribute("data-inbox-id"),
+          read: row.getAttribute("data-inbox-read"),
+        })),
+      ) === JSON.stringify(expected),
+    snapshot.list.map((row) => ({
+      id: row.id,
+      read: row.readAt === null ? "false" : "true",
+    })),
+  );
+  assert.equal(
+    await page.getByRole("alert").count(),
+    0,
+    "Inbox refresh must not leave an error state",
+  );
+  await assertPersonalInboxContent(page.locator("body"));
+}
+
 export async function assertUnavailableInbox(page) {
   await page
     .getByRole("heading", { name: "Inbox is not connected", exact: true })
@@ -421,7 +554,11 @@ export async function runHonestyJourney({
   project,
   envelope,
   diagnostics,
+  personalInbox = false,
 }) {
+  const checkInbox = personalInbox
+    ? assertPersonalInboxShell
+    : assertUnavailableInbox;
   const start = diagnostics.requests.length;
   const projectId = project.projectId;
   const path = `/projects/${encodeURIComponent(projectId)}`;
@@ -480,17 +617,19 @@ export async function runHonestyJourney({
     page.getByRole("tab", { name: "Settings", exact: true }),
   );
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
-  await assertUnavailableInbox(page);
+  await checkInbox(page);
   await honestyMobileScreenshot(
     page,
     output,
     "inbox",
-    page.getByRole("link", { name: "Open Build", exact: true }),
+    personalInbox
+      ? page.getByRole("button", { name: "Refresh", exact: true })
+      : page.getByRole("link", { name: "Open Build", exact: true }),
   );
   await page.goBack();
   await assertSecretSnapshot(page, secrets, projectId);
   await page.goForward();
-  await assertUnavailableInbox(page);
+  await checkInbox(page);
 
   const agents = await readAfter(
     page,
@@ -529,5 +668,11 @@ export async function runHonestyJourney({
     0,
     "Unavailable inventory must not query platform secrets, notifications, or global users",
   );
-  return honestyChecks;
+  return personalInbox
+    ? honestyChecks.map((check) =>
+        check === "inbox-history-explicitly-unavailable"
+          ? "personal-inbox-shell-scoped-transport"
+          : check,
+      )
+    : honestyChecks;
 }

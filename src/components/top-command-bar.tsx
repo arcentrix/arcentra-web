@@ -23,6 +23,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { inboxCountLabel } from "@/api/inbox";
+import { useInboxCount } from "@/hooks/use-inbox";
 import { uiShellStore } from "@/store/ui-shell";
 
 // Product identity, separate from the explicitly navigated organization.
@@ -46,8 +48,8 @@ function WorkspaceLabel() {
 export function TopCommandBar() {
   const navigate = useNavigate();
   const { resolvedTheme, setTheme } = useTheme();
-  // 暂无收件箱 store，未读数先用占位；接入 Inbox 后替换为真实计数。
-  const unreadCount: number = 0;
+  const unreadCount = useInboxCount();
+  const unreadLabel = inboxCountLabel(unreadCount);
 
   return (
     <header className="sticky top-0 z-20 flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:gap-x-3 sm:px-4 lg:flex-nowrap lg:py-0">
@@ -106,12 +108,18 @@ export function TopCommandBar() {
         type="button"
         onClick={() => navigate("/inbox")}
         aria-label="Inbox"
+        aria-description={unreadLabel}
+        title={unreadLabel}
         className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground cursor-pointer"
       >
         <Bell className="h-3.5 w-3.5" />
-        {unreadCount > 0 && (
+        {unreadCount && unreadCount.count > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-background bg-brand-signal px-1 font-mono text-[10px] font-semibold tabular-nums text-background">
-            {unreadCount}
+            {unreadCount.capped
+              ? "99+"
+              : unreadCount.incomplete
+                ? `≥${unreadCount.count}`
+                : unreadCount.count}
           </span>
         )}
       </button>
