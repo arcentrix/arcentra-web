@@ -42,6 +42,8 @@ import {
   preflightStepsFromSummary,
   artifactDownloadEvidence,
   expectedResourceError,
+  safeConsoleErrorEvidence,
+  safeBrowserRuntimeEvidence,
   isNativeOptionDisabled,
   loopbackURL,
   safeFailureEvidence,
@@ -65,6 +67,75 @@ import {
   applyArtifactRunFilter,
   assertControlReachable,
 } from "./artifact-controls.mjs";
+import { assertCommandBarActions } from "./command-bar-controls.mjs";
+
+test("command bar checks all five exact actions and their pointer clickability", async () => {
+  for (const theme of ["light", "dark"]) {
+    const names = [
+      "Organizations",
+      "Open command palette",
+      `Switch to ${theme} theme`,
+      "Inbox",
+      "Create new",
+    ];
+    const checked = [];
+    const header = {
+      getByRole(role, options) {
+        assert.equal(role, "button");
+        if (!options)
+          return {
+            evaluateAll: async (callback) =>
+              callback(names.map((name) => ({ getAttribute: () => name }))),
+          };
+        assert.equal(options.exact, true);
+        assert.ok(names.includes(options.name));
+        return {
+          scrollIntoViewIfNeeded: async () => {},
+          evaluate: async () => ({
+            label: options.name,
+            insideViewport: true,
+            overlapsLauncher: false,
+            pointerHits: true,
+          }),
+          click: async (clickOptions) => {
+            assert.deepEqual(clickOptions, { trial: true });
+            checked.push(options.name);
+          },
+        };
+      },
+    };
+    const page = {
+      getByRole(role) {
+        assert.equal(role, "banner");
+        return header;
+      },
+    };
+    await assertCommandBarActions(page);
+    assert.deepEqual(checked, names);
+    for (const invalidNames of [
+      names.slice(1),
+      [...names, "Organizations"],
+      names.map((name) => (name === "Organizations" ? "Unknown" : name)),
+      names.map((name) => (name === "Organizations" ? null : name)),
+      names.map((name) =>
+        name.startsWith("Switch to") ? "Switch theme" : name,
+      ),
+    ]) {
+      const original = [...names];
+      names.splice(0, names.length, ...invalidNames);
+      await assert.rejects(
+        assertCommandBarActions(page),
+        /Every command-bar action must be present exactly once/,
+      );
+      names.splice(0, names.length, ...original);
+    }
+    assert.equal(
+      checked.length,
+      5,
+      "Invalid inventories must fail before clicking",
+    );
+  }
+});
 
 test("native option disabled checks inspect a labeled option, not its enabled select", () => {
   const dom = new JSDOM(`<label>Scope<select>
@@ -1914,8 +1985,22 @@ test("honesty fixture keeps member permissions project-scoped and rejects mutati
   assert.deepEqual(
     (await invoke("/project/project-1/members")).result.json.detail,
     {
-      list: [{ projectId: "project-1", userId: "association-user-1" }],
+      list: [
+        {
+          projectId: "project-1",
+          userId: "association-user-1",
+          username: "",
+          displayName: "",
+          roleId: "",
+          version: 1,
+          hasOtherAccess: true,
+          isProtectedOwner: false,
+        },
+      ],
       total: 1,
+      canManageMembers: false,
+      canAssignOwner: false,
+      assignableRoleIds: [],
     },
   );
   await assert.rejects(
@@ -2033,4 +2118,276 @@ test("active honesty fixture leaves in-flight Build reads and normal permissions
     handled: false,
     result: undefined,
   });
+});
+
+test("organization journey summary includes only bounded IDs and verified exact steps", async () => {
+  const { organizationManagementEvidence, organizationManagementSteps } =
+    await import("./organization-journey.mjs");
+  assert.deepEqual(organizationManagementEvidence(undefined), {});
+  const evidence = {
+    orgId: "org-one",
+    projectId: "project-one",
+    steps: [...organizationManagementSteps],
+    token: "PRIVATE-CANARY",
+  };
+  const summary =
+    organizationManagementEvidence(evidence).organizationManagement;
+  assert.deepEqual(Object.keys(summary).sort(), [
+    "completed",
+    "journey",
+    "orgId",
+    "projectId",
+    "steps",
+  ]);
+  assert.equal(summary.completed, true);
+  assert.equal(summary.steps.length, 15);
+  assert.equal(JSON.stringify(summary).includes("CANARY"), false);
+  assert.equal(
+    organizationManagementEvidence({ steps: [] }).organizationManagement
+      .completed,
+    false,
+  );
+  assert.throws(() =>
+    organizationManagementEvidence({ ...evidence, steps: ["fake-success"] }),
+  );
+  assert.throws(() =>
+    organizationManagementEvidence({
+      ...evidence,
+      steps: [...organizationManagementSteps, organizationManagementSteps[0]],
+    }),
+  );
+  assert.throws(() =>
+    organizationManagementEvidence({
+      ...evidence,
+      orgId: "https://private.example/secret",
+    }),
+  );
+});
+
+test("actual organization journey requires explicit build opt-in and an existing bounded synthetic user ID", () => {
+  const env = {
+    ...buildEnv(),
+    ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: "1",
+    ARCENTRA_ACCEPTANCE_MEMBER_USER_ID: "observer-user",
+  };
+  const config = actualBackendConfig(env);
+  assert.equal(config.organizationJourney, true);
+  assert.equal(config.memberUserId, "observer-user");
+  for (const change of [
+    { ARCENTRA_ACCEPTANCE_MEMBER_USER_ID: undefined },
+    { ARCENTRA_ACCEPTANCE_MEMBER_USER_ID: "https://untrusted.example" },
+    { ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: undefined },
+    { ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: "true" },
+    { ARCENTRA_ACCEPTANCE_PHASE: "preflight" },
+  ])
+    assert.throws(() => actualBackendConfig({ ...env, ...change }));
+});
+
+test("every organization browser stage and failure location is explicitly allowlisted", async () => {
+  const { organizationManagementStages } =
+    await import("./organization-journey.mjs");
+  const source = await readFile(
+    new URL("./organization-journey.mjs", import.meta.url),
+    "utf8",
+  );
+  const emitted = [...source.matchAll(/setStage\("([^"]+)"\)/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(emitted.length >= 10);
+  assert.deepEqual(emitted, [...organizationManagementStages]);
+  for (const stage of emitted)
+    assert.equal(
+      safeFailureEvidence(stage, new Error("PRIVATE-CANARY")).stage,
+      stage,
+    );
+  const error = {
+    stack: `Error: PRIVATE-CANARY\n    at test (${fileURLToPath(new URL("./organization-journey.mjs", import.meta.url))}:9:3)`,
+  };
+  assert.deepEqual(safeFailureEvidence(emitted[0], error), {
+    stage: emitted[0],
+    failureSite: { file: "organization-journey.mjs", line: 9, column: 3 },
+  });
+  assert.throws(() =>
+    actualBackendConfig({
+      ...buildEnv(),
+      ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: "0",
+    }),
+  );
+  assert.equal(actualBackendConfig(buildEnv()).organizationJourney, undefined);
+});
+
+test("public console evidence keeps only bounded classifications and never raw values", () => {
+  const secret = "PRIVATE_CANARY";
+  const path = `/api/v1/organization/${secret}`;
+  const entries = [
+    {
+      type: "error",
+      text: `Failed to load resource: the server responded with a status of 409 (${secret})`,
+      url: `http://${secret}.invalid${path}?token=${secret}`,
+      stage: "organization-archive-conflict",
+    },
+    {
+      type: "error",
+      text: `In HTML, <button> cannot be a descendant of <button>. ${secret}`,
+      url: `http://fixture.invalid/src/${secret}.tsx`,
+      stage: secret,
+    },
+  ];
+  const value = safeConsoleErrorEvidence(
+    entries,
+    [{ path, status: 409 }],
+    new Set(),
+  );
+  assert.equal(JSON.stringify(value).includes(secret), false);
+  assert.deepEqual(value.consoleErrorEvidence[0], {
+    category: "http-resource",
+    observationPhase: "journey",
+    stage: "organization-archive-conflict",
+    source: "organization",
+    status: 409,
+    responseStatuses: [409],
+    networkError: "unclassified",
+  });
+  assert.equal(value.consoleErrorEvidence[1].category, "react-dom-nesting");
+  assert.equal(value.consoleErrorEvidence[1].stage, "unknown");
+  assert.equal(
+    safeConsoleErrorEvidence(entries, [], new Set([`${path}:409`]))
+      .consoleErrorEvidence.length,
+    1,
+  );
+  const bounded = safeConsoleErrorEvidence(
+    Array(40).fill(entries[1]),
+    [],
+    new Set(),
+  );
+  assert.equal(bounded.consoleErrorEvidence.length, 16);
+  assert.equal(bounded.consoleErrorEvidenceTruncated, true);
+  assert.equal(expectedResourceError(entries[1], new Set()), false);
+});
+
+test("resource failure detail is a fixed network enum and static asset category", () => {
+  for (const [path, source] of [
+    ["/node_modules/.vite/deps/PRIVATE.js?token=PRIVATE", "vite-dependency"],
+    ["/src/PRIVATE.tsx", "application-module"],
+    ["/@vite/PRIVATE", "vite-client"],
+  ]) {
+    const [entry] = safeConsoleErrorEvidence(
+      [
+        {
+          type: "error",
+          text: "Failed to load resource: net::ERR_CONNECTION_RESET PRIVATE",
+          url: `http://PRIVATE.invalid${path}`,
+          stage: "login",
+        },
+      ],
+      [],
+      new Set(),
+    ).consoleErrorEvidence;
+    assert.equal(entry.source, source);
+    assert.equal(entry.networkError, "ERR_CONNECTION_RESET");
+    assert.equal(JSON.stringify(entry).includes("PRIVATE"), false);
+  }
+  const value = safeConsoleErrorEvidence(
+    [{ type: "error", text: "net::PRIVATE", url: "invalid", stage: "login" }],
+    [],
+    new Set(),
+  );
+  assert.equal(value.consoleErrorEvidence[0].networkError, "unclassified");
+  assert.equal(JSON.stringify(value).includes("PRIVATE"), false);
+});
+
+test("unlisted network error suffixes never match a shorter known enum", () => {
+  for (const token of [
+    "ERR_FAILED_PRIVATE",
+    "ERR_CONNECTION_RESET_EXTRA",
+    "ERR_NOT_LISTED",
+  ]) {
+    const entry = safeConsoleErrorEvidence(
+      [{ type: "error", text: `net::${token}`, url: "invalid" }],
+      [],
+      new Set(),
+    ).consoleErrorEvidence[0];
+    assert.equal(entry.networkError, "unclassified");
+    assert.equal(JSON.stringify(entry).includes(token), false);
+  }
+});
+
+test("static frontend evidence bounds resource and server diagnostics without raw data", () => {
+  const event = {
+    url: "http://PRIVATE.invalid/node_modules/.vite/deps/chunk-ABC12345.js?token=PRIVATE",
+    error: "net::ERR_ABORTED PRIVATE",
+    mime: "text/javascript; PRIVATE",
+    status: 504,
+    stage: "login",
+    atMs: 123.9,
+  };
+  const value = safeBrowserRuntimeEvidence(
+    [event],
+    {
+      managed: true,
+      ready: true,
+      readyAfterMs: 42,
+      observedForMs: 123,
+      exitCode: 1,
+      signal: "PRIVATE",
+    },
+    "PRIVATE Pre-transform error",
+  );
+  assert.equal(JSON.stringify(value).includes("PRIVATE"), false);
+  assert.deepEqual(value.staticResourceEvidence[0], {
+    source: "vite-dependency",
+    observationPhase: "journey",
+    asset: "hashed-chunk.js",
+    mime: "text/javascript",
+    status: 504,
+    networkError: "ERR_ABORTED",
+    stage: "login",
+    atMs: 123,
+  });
+  assert.equal(value.frontendServer.exitCodeBeforeCleanup, 1);
+  assert.deepEqual(value.frontendServer.logFlags, ["Pre-transform error"]);
+  assert.equal(value.frontendServer.signalBeforeCleanup, null);
+  const bounded = safeBrowserRuntimeEvidence(
+    Array(40).fill({
+      ...event,
+      url: "http://PRIVATE.invalid/src/PRIVATE.tsx",
+      atMs: Infinity,
+      status: 999,
+      mime: "PRIVATE",
+    }),
+    {},
+    "",
+  );
+  assert.equal(bounded.staticResourceEvidence.length, 16);
+  assert.equal(bounded.staticResourceEvidenceTruncated, true);
+  assert.equal(bounded.staticResourceEvidence[0].asset, "other");
+  assert.equal(bounded.staticResourceEvidence[0].status, null);
+  assert.equal(bounded.staticResourceEvidence[0].atMs, null);
+  assert.equal(JSON.stringify(bounded).includes("PRIVATE"), false);
+});
+
+test("diagnostics distinguish browser cleanup without forgiving its errors", () => {
+  const entry = {
+    type: "error",
+    text: "Failed to load resource: net::ERR_ABORTED",
+    url: "http://127.0.0.1/src/main.tsx",
+    stage: "journey-complete",
+    observationPhase: "browser-closing",
+  };
+  assert.equal(
+    safeConsoleErrorEvidence([entry], [], new Set()).consoleErrorEvidence[0]
+      .observationPhase,
+    "browser-closing",
+  );
+  assert.equal(expectedResourceError(entry, new Set()), false);
+  const value = safeBrowserRuntimeEvidence(
+    [{ ...entry, error: entry.text }],
+    { managed: false },
+    "",
+  );
+  assert.equal(value.frontendServer.mode, "external-unknown");
+  assert.equal(
+    value.staticResourceEvidence[0].observationPhase,
+    "browser-closing",
+  );
 });

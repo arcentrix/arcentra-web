@@ -1,3 +1,4 @@
+import { getProjectSettings } from "@/api/project/settings";
 import {
   act,
   cleanup,
@@ -14,6 +15,7 @@ import authStore from "@/store/auth";
 import userStore from "@/store/user";
 import ProjectSettings from ".";
 
+vi.mock("@/api/project/settings", () => ({ getProjectSettings: vi.fn() }));
 vi.mock("@/api/project", () => ({ getProject: vi.fn() }));
 
 const project: Project = {
@@ -73,6 +75,9 @@ function details() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(getProjectSettings).mockRejectedValue(
+    new Error("Settings service unavailable"),
+  );
   authStore.updateState((state) => {
     state.initialized = true;
     state.accessToken = "synthetic-session-one";
@@ -477,5 +482,87 @@ describe("read-only project settings", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Select a project");
     expect(getProject).not.toHaveBeenCalled();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+});
+
+describe("current project settings capabilities", () => {
+  const settings = {
+    ...project,
+    tags: "build,worker",
+    language: "Go",
+    framework: "stdlib",
+    visibility: 1,
+    version: "opaque-current-version",
+    canUpdate: true,
+    canArchive: true,
+    canRestore: false,
+  };
+  it("exposes only server-authorized editing and lifecycle controls, with no credential fields", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue(settings);
+    renderPage();
+    await screen.findByRole("button", { name: "Edit settings" });
+    expect(
+      screen.getByRole("button", { name: "Archive project" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Restore project" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit settings" }));
+    expect(screen.getByLabelText("Display name")).toHaveValue(
+      project.displayName,
+    );
+    expect(screen.getByLabelText("Visibility metadata")).toHaveValue("1");
+    expect(
+      screen.queryByLabelText(
+        /Repository URL|Credential|Password|Organization ID/i,
+      ),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("removes details and controls when the narrow endpoint reports a live denial, even if project read still succeeds", async () => {
+    vi.mocked(getProjectSettings)
+      .mockResolvedValueOnce(settings)
+      .mockRejectedValueOnce(
+        new ApiError({ status: 403, message: "PRIVATE-CANARY" }),
+      );
+    renderPage();
+    await screen.findByRole("button", { name: "Edit settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh settings" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Project settings access restricted",
+    );
+    expect(screen.queryByLabelText("Project details")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Archive project" }),
+    ).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("PRIVATE-CANARY");
+  });
+  it("discards a late capability response after account identity changes", async () => {
+    const old = deferred<typeof settings>();
+    vi.mocked(getProjectSettings)
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValueOnce({
+        ...settings,
+        canUpdate: false,
+        canArchive: false,
+      });
+    renderPage();
+    await screen.findByText(project.name);
+    const signal = vi.mocked(getProjectSettings).mock.calls[0][1]!;
+    await act(async () =>
+      authStore.updateState((state) => {
+        state.accessToken = "synthetic-new-account";
+      }),
+    );
+    expect(signal.aborted).toBe(true);
+    await act(async () => old.resolve(settings));
+    expect(
+      screen.queryByRole("button", { name: "Edit settings" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Archive project" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/No changes are available/)).toBeInTheDocument();
   });
 });

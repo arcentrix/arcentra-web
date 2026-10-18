@@ -1,3 +1,6 @@
+import authStore from "@/store/auth";
+import userStore from "@/store/user";
+import { repositoryAddress } from "@/lib/repository-address";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -33,6 +36,21 @@ import { Pagination } from "@/components/build/pipeline-workspace";
 import { errorMessage } from "@/components/build/run-status";
 
 export default function Projects() {
+  const auth = authStore.useState();
+  const user = userStore.useState();
+  if (!auth.initialized)
+    return (
+      <p role="status" className="p-6">
+        Sign in to view projects.
+      </p>
+    );
+  return (
+    <ProjectsSnapshot
+      key={JSON.stringify([auth.accessToken, user.userinfo?.userId])}
+    />
+  );
+}
+function ProjectsSnapshot() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -41,6 +59,8 @@ export default function Projects() {
   const projects = useApiResource(`projects:${page}:${search}`, (signal) =>
     listProjects({ name: search, pageNum: page }, signal),
   );
+  const snapshot =
+    !projects.loading && !projects.error ? projects.data : undefined;
   return (
     <section className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <PageHeader
@@ -83,27 +103,27 @@ export default function Projects() {
           />
         </Button>
         <span className="ml-auto text-xs text-muted-foreground">
-          {projects.data ? `${projects.data.total} projects` : ""}
+          {snapshot ? `${snapshot.total} projects` : ""}
         </span>
       </div>
       {projects.error && (
         <Panel>
           <InlineErrorState
             title="Projects unavailable"
-            description={projects.error.message}
+            description="The current project list could not be loaded. Refresh to check access and try again."
             onRetry={projects.refresh}
           />
         </Panel>
       )}
-      {!projects.data && projects.loading && (
+      {!snapshot && projects.loading && (
         <p role="status" className="p-8 text-sm text-muted-foreground">
           Loading projects…
         </p>
       )}
-      {projects.data && (
+      {snapshot && (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {projects.data.list?.map((project) => (
+            {snapshot.list?.map((project) => (
               <Link
                 key={project.projectId}
                 to={`/projects/${encodeURIComponent(project.projectId)}`}
@@ -120,7 +140,7 @@ export default function Projects() {
                   {project.description || "No description added."}
                 </p>
                 <p className="truncate font-mono text-xs text-muted-foreground">
-                  {project.repoUrl}
+                  {repositoryAddress(project.repoUrl)}
                 </p>
                 <div className="mt-auto flex items-center gap-2 border-t pt-4 text-xs">
                   <GitBranch className="size-3" />
@@ -134,7 +154,7 @@ export default function Projects() {
               </Link>
             ))}
           </div>
-          {!projects.data.list?.length && (
+          {!snapshot.list?.length && (
             <Panel>
               <div className="p-12 text-center">
                 <FolderGit2 className="mx-auto mb-4 size-8 text-muted-foreground" />
@@ -151,10 +171,10 @@ export default function Projects() {
               </div>
             </Panel>
           )}
-          {projects.data.total > 20 && (
+          {snapshot.total > 20 && (
             <Pagination
               page={page}
-              total={projects.data.total}
+              total={snapshot.total}
               pageSize={20}
               onPage={setPage}
               loading={projects.loading}
@@ -306,6 +326,7 @@ function CreateProjectDialog({
           <label className="block space-y-1 text-sm">
             <span>Organization ID</span>
             <Input
+              disabled={saving}
               required
               aria-describedby="project-organization-help"
               value={orgId}
@@ -318,12 +339,17 @@ function CreateProjectDialog({
             className="text-xs text-muted-foreground"
           >
             Enter a stable organization scope ID approved by your administrator.
-            Creating a project does not create an organization. Organization and
-            member management are not available yet.
+            Creating a project does not create an organization or membership.
+            Manage real organization records in the{" "}
+            <Link to="/organizations" className="underline">
+              Organizations directory
+            </Link>
+            .
           </p>
           <label className="block space-y-1 text-sm">
             <span>Project name</span>
             <Input
+              disabled={saving}
               required
               minLength={2}
               maxLength={128}
@@ -335,6 +361,7 @@ function CreateProjectDialog({
           <label className="block space-y-1 text-sm">
             <span>Repository URL</span>
             <Input
+              disabled={saving}
               required
               value={repoUrl}
               onChange={(e) => setRepo(e.target.value)}
@@ -344,6 +371,7 @@ function CreateProjectDialog({
           <label className="block space-y-1 text-sm">
             <span>Default branch</span>
             <Input
+              disabled={saving}
               required
               value={branch}
               onChange={(e) => setBranch(e.target.value)}

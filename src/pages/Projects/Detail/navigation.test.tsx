@@ -17,6 +17,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ProjectDetail from "./index";
 import ProjectOverview from "./Overview";
 
+vi.mock("@/store/auth", () => ({
+  default: {
+    useState: () => ({ initialized: true, accessToken: "synthetic" }),
+  },
+}));
 vi.mock("@/api/project", () => ({
   getProject: vi.fn().mockResolvedValue({
     projectId: "project-1",

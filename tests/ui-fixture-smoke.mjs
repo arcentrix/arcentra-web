@@ -17,6 +17,7 @@ import {
   assertArtifactControlLayout,
   assertControlReachable,
 } from "./artifact-controls.mjs";
+import { assertCommandBarActions } from "./command-bar-controls.mjs";
 
 await runBrowserTest(
   "simulated-transport",
@@ -189,6 +190,14 @@ await runBrowserTest(
             ? []
             : ["*:*"],
         );
+      if (path === "/organization" && request.method() === "GET")
+        return ok({
+          list: [],
+          total: 0,
+          page: Number(url.searchParams.get("page")),
+          pageSize: Number(url.searchParams.get("pageSize")),
+          canCreate: false,
+        });
       if (path === "/projects/project-1/artifacts") {
         artifactLists++;
         if (artifactMode === "restricted")
@@ -857,7 +866,6 @@ await runBrowserTest(
         const lastCell = table.querySelector("tbody tr td:last-child");
         const lastCellRect = lastCell.getBoundingClientRect();
         const scrollerRect = scroller.getBoundingClientRect();
-        const headerButtons = [...document.querySelectorAll("header button")];
         const layout = {
           viewportWidth: innerWidth,
           documentWidth: document.documentElement.scrollWidth,
@@ -870,11 +878,6 @@ await runBrowserTest(
           downloadColumnVisible:
             lastCellRect.left >= scrollerRect.left &&
             lastCellRect.right <= scrollerRect.right,
-          headerButtonCount: headerButtons.length,
-          overflowingHeaderButtons: headerButtons.filter((button) => {
-            const rect = button.getBoundingClientRect();
-            return rect.width === 0 || rect.left < 0 || rect.right > innerWidth;
-          }).length,
         };
         scroller.scrollLeft = originalScrollLeft;
         return layout;
@@ -887,16 +890,6 @@ await runBrowserTest(
       artifactLayout.pageScrollX,
       0,
       "The page itself must not scroll sideways",
-    );
-    assert.equal(
-      artifactLayout.headerButtonCount,
-      4,
-      "All command-bar actions remain available on mobile",
-    );
-    assert.equal(
-      artifactLayout.overflowingHeaderButtons,
-      0,
-      "Command-bar actions must stay inside the viewport",
     );
     assert.ok(
       ["auto", "scroll"].includes(artifactLayout.tableOverflowX),
@@ -922,6 +915,22 @@ await runBrowserTest(
       { width: 1440, height: 1050 },
     ]) {
       await page.setViewportSize(viewport);
+      await assertCommandBarActions(page);
+      const artifactURL = page.url();
+      await page
+        .getByRole("banner")
+        .getByRole("button", { name: "Organizations", exact: true })
+        .click();
+      await page.waitForURL(`${base}/organizations`);
+      await page
+        .getByRole("heading", { name: "Organizations", exact: true })
+        .waitFor();
+      await page
+        .getByText("No accessible organization records.", { exact: false })
+        .waitFor();
+      await page.goBack();
+      await page.waitForURL(artifactURL);
+      await page.getByRole("table", { name: "Project artifacts" }).waitFor();
       await assertArtifactControlLayout(page, artifactRunId);
       const refresh = page.getByRole("button", { name: "Refresh artifacts" });
       await assertControlReachable(refresh);

@@ -78,10 +78,28 @@ export function honestyFixture(project) {
     pageNum: 1,
     pageSize: 20,
   };
+  const settings = (item) => ({
+    ...item,
+    status: 1,
+    tags: "",
+    language: "",
+    framework: "",
+    visibility: 0,
+    version: "synthetic-version",
+    canUpdate: false,
+    canArchive: false,
+    canRestore: false,
+  });
   const memberships = (projectId) => ({
     list: [
       {
         projectId,
+        username: "",
+        displayName: "",
+        roleId: "",
+        version: 1,
+        hasOtherAccess: true,
+        isProtectedOwner: false,
         userId:
           projectId === project.projectId
             ? "association-user-1"
@@ -89,6 +107,9 @@ export function honestyFixture(project) {
       },
     ],
     total: 1,
+    canManageMembers: false,
+    canAssignOwner: false,
+    assignableRoleIds: [],
   });
   return {
     state,
@@ -96,6 +117,7 @@ export function honestyFixture(project) {
     secondProject,
     agents,
     memberships,
+    settings,
     async route(route) {
       if (!state.active) return false;
       const request = route.request();
@@ -145,13 +167,24 @@ export function honestyFixture(project) {
       for (const item of [project, secondProject]) {
         if (path === `/project/${item.projectId}`) {
           assert.equal(request.method(), "GET");
-          return state.settingsDenied ? denied() : ok(item);
+          return ok(item);
+        }
+        if (path === `/project/${item.projectId}/settings`) {
+          assert.equal(request.method(), "GET");
+          return state.settingsDenied ? denied() : ok(settings(item));
         }
         if (path === `/project/${item.projectId}/members`) {
           assert.equal(request.method(), "GET");
           state.memberReads++;
           if (state.memberMode === "denied") return denied();
-          if (state.memberMode === "empty") return ok({ list: null, total: 0 });
+          if (state.memberMode === "empty")
+            return ok({
+              list: null,
+              total: 0,
+              canManageMembers: false,
+              canAssignOwner: false,
+              assignableRoleIds: [],
+            });
           if (state.memberMode === "foreign")
             return ok(memberships("foreign-project"));
           return ok(memberships(item.projectId));
@@ -205,25 +238,30 @@ export async function assertHonestyFixtureUI({
     6,
   );
 
-  // Settings refresh hides its own snapshot on 403; the surrounding project
-  // header has a separate resource and is not a global revocation mechanism.
+  // A denied settings read also hides the surrounding project shell until
+  // an explicit retry revalidates this project. Member-only denial stays scoped.
   const settings = await readAfter(
     page,
     `/project/${project.projectId}`,
     () => page.getByRole("tab", { name: "Settings", exact: true }).click(),
     envelope,
   );
-  await assertSettingsSnapshot(page, settings, project.projectId);
-  expectHttpError(`/api/v1/project/${project.projectId}`, 403);
+  await assertSettingsSnapshot(
+    page,
+    settings,
+    project.projectId,
+    honesty.settings(project),
+  );
+  expectHttpError(`/api/v1/project/${project.projectId}/settings`, 403);
   state.settingsDenied = true;
   await readAfter(
     page,
-    `/project/${project.projectId}`,
+    `/project/${project.projectId}/settings`,
     () => page.getByRole("button", { name: "Refresh settings" }).click(),
     denied,
   );
   await page
-    .getByRole("heading", { name: "Project settings access restricted" })
+    .getByRole("heading", { name: "Project access restricted" })
     .waitFor();
   assert.equal(
     await page.locator('dl[aria-label="Project details"]').count(),
@@ -233,10 +271,15 @@ export async function assertHonestyFixtureUI({
   const restored = await readAfter(
     page,
     `/project/${project.projectId}`,
-    () => page.getByRole("button", { name: "Refresh settings" }).click(),
+    () => page.getByRole("button", { name: "Retry", exact: true }).click(),
     envelope,
   );
-  await assertSettingsSnapshot(page, restored, project.projectId);
+  await assertSettingsSnapshot(
+    page,
+    restored,
+    project.projectId,
+    honesty.settings(project),
+  );
 
   // Route identity changes must display only the second project's details.
   const secondSettings = await readAfter(
@@ -245,7 +288,12 @@ export async function assertHonestyFixtureUI({
     () => page.goto(`${base}/projects/${secondProject.projectId}/settings`),
     envelope,
   );
-  await assertSettingsSnapshot(page, secondSettings, secondProject.projectId);
+  await assertSettingsSnapshot(
+    page,
+    secondSettings,
+    secondProject.projectId,
+    honesty.settings(secondProject),
+  );
   assert.doesNotMatch(
     await page.locator('dl[aria-label="Project details"]').innerText(),
     /Core API build pipeline|project-1|org-1/,
@@ -278,12 +326,10 @@ export async function assertHonestyFixtureUI({
     denied,
   );
   await page
-    .getByRole("heading", { name: "Member associations access restricted" })
+    .getByRole("heading", { name: "Members access restricted" })
     .waitFor();
   assert.equal(
-    await page
-      .getByRole("table", { name: "Project member associations" })
-      .count(),
+    await page.getByRole("list", { name: "Project members" }).count(),
     0,
   );
   assert.equal(
@@ -311,9 +357,7 @@ export async function assertHonestyFixtureUI({
     "Project read alone must not fetch members",
   );
   assert.equal(
-    await page
-      .getByRole("table", { name: "Project member associations" })
-      .count(),
+    await page.getByRole("list", { name: "Project members" }).count(),
     0,
   );
   state.memberPermission = true;
@@ -332,13 +376,9 @@ export async function assertHonestyFixtureUI({
     () => page.getByRole("button", { name: "Refresh members" }).click(),
     envelope,
   );
-  await page
-    .getByRole("heading", { name: "Member associations unavailable" })
-    .waitFor();
+  await page.getByRole("heading", { name: "Members unavailable" }).waitFor();
   assert.equal(
-    await page
-      .getByRole("table", { name: "Project member associations" })
-      .count(),
+    await page.getByRole("list", { name: "Project members" }).count(),
     0,
   );
   assert.equal(

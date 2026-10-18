@@ -34,11 +34,13 @@ export const listProjects = (
     params: { pageNum: 1, pageSize: 20, ...params },
     signal,
     silence: true,
+    redactErrors: true,
   });
 export const getProject = (projectId: string, signal?: AbortSignal) =>
   get<Project>(`/project/${encodeURIComponent(projectId)}`, {
     signal,
     silence: true,
+    redactErrors: true,
   });
 export const createProject = (data: CreateProjectInput) =>
   post<Project>(
@@ -51,7 +53,7 @@ export const createProject = (data: CreateProjectInput) =>
       visibility: 0,
       accessLevel: "team",
     },
-    { silence: true },
+    { silence: true, redactErrors: true },
   );
 
 /** A stored association only; the endpoint does not return current role grants. */
@@ -68,7 +70,7 @@ export async function listProjectMembers(
   if (!projectId.trim()) throw new Error("A project ID is required.");
   const response = await get<unknown>(
     `/project/${encodeURIComponent(projectId)}/members`,
-    { signal, silence: true },
+    { signal, silence: true, redactErrors: true },
   );
   const invalid = () =>
     new Error("Project member associations could not be verified.");

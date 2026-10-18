@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
+  Building2,
   Frame,
   Moon,
   Play,
@@ -24,10 +25,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { uiShellStore } from "@/store/ui-shell";
 
-// 暂无后端工作区接口，名称先固定；接入工作区后替换为真实数据。
+// Product identity, separate from the explicitly navigated organization.
 const WORKSPACE_NAME = "Arcentra";
 
-/** 当前工作区标识 —— 仅展示名称，无组织切换。 */
+/** Product label; it does not imply organization membership. */
 function WorkspaceLabel() {
   return (
     <div
@@ -51,6 +52,15 @@ export function TopCommandBar() {
   return (
     <header className="sticky top-0 z-20 flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:gap-x-3 sm:px-4 lg:flex-nowrap lg:py-0">
       <WorkspaceLabel />
+      <button
+        type="button"
+        onClick={() => navigate("/organizations")}
+        aria-label="Organizations"
+        className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-2 text-xs text-muted-foreground hover:bg-accent/40"
+      >
+        <Building2 className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Organizations</span>
+      </button>
       <div
         className="hidden h-4 w-px shrink-0 bg-border/60 lg:block"
         aria-hidden

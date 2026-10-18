@@ -93,7 +93,11 @@ client.interceptors.response.use(
       const apiResponse = data as ApiClientResponse;
       return apiResponse.detail;
     }
-    const sensitive = !!(response.config as RequestConfig).sensitive;
+    const config = response.config as RequestConfig;
+    const sensitive = !!(config.sensitive || config.redactErrors);
+    const redactedMessage = config.sensitive
+      ? "Storage request failed"
+      : "Scoped request failed";
     if (isDev() && !sensitive) {
       const pathname = window.location.pathname || "";
       const isPublicRoute =
@@ -115,7 +119,7 @@ client.interceptors.response.use(
     const requestId = extractRequestId(response.headers);
     const apiError = new ApiError({
       message: sensitive
-        ? "Storage request failed"
+        ? redactedMessage
         : errResponse.errMsg || "Request failed",
       code: errResponse.code,
       status: response.status,
@@ -158,9 +162,17 @@ client.interceptors.response.use(
         // A non-JSON transport failure still exposes its status and request ID.
       }
     }
+    const requestConfig = error.config as RequestConfig | undefined;
+    const responseConfig = error.response?.config as RequestConfig | undefined;
+    const storageSensitive = !!(
+      requestConfig?.sensitive || responseConfig?.sensitive
+    );
     const sensitive =
-      !!(error.config as RequestConfig | undefined)?.sensitive ||
-      !!(error.response?.config as RequestConfig | undefined)?.sensitive;
+      storageSensitive ||
+      !!(requestConfig?.redactErrors || responseConfig?.redactErrors);
+    const redactedMessage = storageSensitive
+      ? "Storage request failed"
+      : "Scoped request failed";
     const requestId = extractRequestId(error.response?.headers);
     const status = error.response?.status as number | undefined;
 
@@ -179,7 +191,7 @@ client.interceptors.response.use(
       "Network error";
 
     const apiError = new ApiError({
-      message: sensitive ? "Storage request failed" : message,
+      message: sensitive ? redactedMessage : message,
       status,
       requestId,
       path: sensitive
@@ -284,4 +296,12 @@ export function put<T = unknown, D = unknown>(
 
 export function del<T = unknown>(url: string, config?: RequestConfig) {
   return client.delete<unknown, T>(url, config);
+}
+
+export function patch<T = unknown, D = unknown>(
+  url: string,
+  data?: D,
+  config?: RequestConfig,
+) {
+  return client.patch<unknown, T>(url, data, config);
 }

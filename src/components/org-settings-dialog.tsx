@@ -1,234 +1,199 @@
-/**
- * 组织设置对话框
- * TODO: 实现完整的组织设置功能
- */
-
-import * as React from "react";
-import { useState, useRef } from "react";
-import { Upload } from "lucide-react";
-import { toast } from "@/lib/toast";
+import { isApiError } from "@/lib/api-error";
+import { useRef, useState, type FormEvent } from "react";
+import {
+  createOrganization,
+  updateOrganization,
+  type Organization,
+  type CreateOrganizationRequest,
+} from "@/api/organization";
+import { useMountedRef } from "@/hooks/use-mounted-ref";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Apis } from "@/api";
-
-interface OrgSettingsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  organizationId?: string;
-  mode: "create" | "edit";
-}
+import { mutationError } from "@/components/organization/mutation-error";
 
 export function OrgSettingsDialog({
-  open,
-  onOpenChange,
-  organizationId: _organizationId,
-  mode,
-}: OrgSettingsDialogProps) {
-  const isEditMode = mode === "edit";
-  const [isUploading, setIsUploading] = useState(false);
-  const [isSaving, _setIsSaving] = useState(false);
-  const [logoPreview, setLogoPreview] = useState<string>("");
-  const [logoUrl, setLogoUrl] = useState<string>("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // TODO: 从 API 获取组织数据（编辑模式）
-  // TODO: 实现表单状态管理
-  // TODO: 实现表单验证
-  // TODO: 实现创建/更新组织 API 调用
-
-  // 处理 Logo 上传
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 验证文件类型
-    const validTypes = [
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-    ];
-    if (!validTypes.includes(file.type)) {
-      toast.error(
-        "Invalid file type",
-        "Please upload an image file (JPEG, PNG, GIF, or WebP)",
-      );
-      return;
-    }
-
-    // 验证文件大小 (最大 5MB)
-    const maxSize = 5 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error("File too large", "Please upload an image smaller than 5MB");
-      return;
-    }
-
+  organization,
+  onClose,
+  onSaved,
+  onReload,
+  onDenied,
+}: {
+  organization?: Organization;
+  onClose: () => void;
+  onSaved: (organization: Organization) => void;
+  onReload: () => void;
+  onDenied: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState<CreateOrganizationRequest>({
+    name: organization?.name ?? "",
+    displayName: organization?.displayName ?? "",
+    description: organization?.description ?? "",
+    website: organization?.website ?? "",
+    email: organization?.email ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const pending = useRef(false);
+  const mounted = useMountedRef();
+  const set = (key: keyof CreateOrganizationRequest, value: string) =>
+    setDraft((old) => ({ ...old, [key]: value }));
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (pending.current || error) return;
+    pending.current = true;
+    setSaving(true);
+    const data = Object.fromEntries(
+      Object.entries(draft).map(([key, value]) => [key, value.trim()]),
+    ) as unknown as CreateOrganizationRequest;
     try {
-      setIsUploading(true);
-
-      // 创建预览
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-
-      // 上传到服务器
-      const response = await Apis.user.uploadAvatar(file);
-
-      // 更新 logo URL
-      setLogoUrl(response.url);
-
-      toast.success(
-        "Logo uploaded",
-        "Organization logo has been uploaded successfully",
-      );
+      const { name: _name, ...metadata } = data;
+      const saved = organization
+        ? await updateOrganization(organization.orgId, {
+            ...metadata,
+            version: organization.version,
+          })
+        : await createOrganization(data);
+      if (mounted.current) onSaved(saved);
     } catch (error) {
-      toast.error("Upload failed", (error as Error).message);
-      setLogoPreview("");
+      if (mounted.current) {
+        const message = mutationError(error);
+        if (
+          isApiError(error) &&
+          [error.status, error.code].some(
+            (code) => code === 401 || code === 403,
+          )
+        )
+          onDenied(message);
+        else setError(message);
+      }
     } finally {
-      setIsUploading(false);
+      pending.current = false;
+      if (mounted.current) setSaving(false);
     }
   };
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !pending.current) onClose();
+      }}
+    >
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? "组织设置" : "创建组织"}</DialogTitle>
+          <DialogTitle>
+            {organization ? "Edit organization" : "Create organization"}
+          </DialogTitle>
           <DialogDescription>
-            {isEditMode ? "管理您的组织信息和设置" : "创建一个新的组织来协作"}
+            {organization
+              ? "Update this organization's metadata. Current permissions and record version are checked when you save."
+              : "Create a new organization with an explicit owner membership. Existing legacy permission scopes are not adopted."}
           </DialogDescription>
         </DialogHeader>
-
-        <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="general">基本信息</TabsTrigger>
-            <TabsTrigger value="members" disabled={!isEditMode}>
-              成员
-            </TabsTrigger>
-            <TabsTrigger value="settings" disabled={!isEditMode}>
-              设置
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="general" className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="org-name">组织名称</Label>
+        <form onSubmit={submit} className="space-y-4">
+          <fieldset disabled={saving || !!error} className="space-y-4">
+            <label className="block space-y-1 text-sm">
+              <span>Organization name</span>
               <Input
-                id="org-name"
-                placeholder="输入组织名称"
-                // TODO: 绑定表单状态
+                value={draft.name}
+                required
+                minLength={2}
+                maxLength={64}
+                pattern={"[a-z0-9][a-z0-9_\\-]{1,63}"}
+                readOnly={!!organization}
+                onChange={(event) => set("name", event.target.value)}
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="org-description">描述</Label>
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>Display name</span>
               <Input
-                id="org-description"
-                placeholder="简短描述您的组织"
-                // TODO: 绑定表单状态
+                value={draft.displayName}
+                required={!!organization}
+                maxLength={128}
+                onChange={(event) => set("displayName", event.target.value)}
               />
-            </div>
-
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>Description</span>
+              <Textarea
+                value={draft.description}
+                maxLength={2000}
+                onChange={(event) => set("description", event.target.value)}
+              />
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>Website</span>
+              <Input
+                type="url"
+                value={draft.website}
+                maxLength={2048}
+                onChange={(event) => set("website", event.target.value)}
+                placeholder="https://example.com"
+              />
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>Contact email</span>
+              <Input
+                type="email"
+                value={draft.email}
+                maxLength={254}
+                onChange={(event) => set("email", event.target.value)}
+              />
+            </label>
+          </fieldset>
+          {error && (
             <div className="space-y-2">
-              <Label htmlFor="org-logo">Logo</Label>
-              <div className="flex items-center gap-4">
-                {logoPreview && (
-                  <div className="relative h-20 w-20 overflow-hidden rounded-lg border-2 border-border">
-                    <img
-                      src={logoPreview}
-                      alt="Logo preview"
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                )}
-                <div className="flex-1 flex items-center gap-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-                    onChange={handleLogoUpload}
-                    className="hidden"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading || isSaving}
-                  >
-                    <Upload className="mr-2 h-4 w-4" />
-                    {isUploading ? "Uploading..." : "Upload"}
-                  </Button>
-                  <Input
-                    id="org-logo"
-                    placeholder="Or enter logo URL"
-                    value={logoUrl}
-                    onChange={(e) => setLogoUrl(e.target.value)}
-                    disabled={isSaving}
-                    className="flex-1"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                JPG, PNG, GIF or WebP (Max 5MB)
+              <p role="alert" className="text-sm text-destructive">
+                {error}
               </p>
+              <p className="text-xs text-fg-muted">
+                Your draft is still shown. Reloading discards this draft and
+                checks the saved state.
+              </p>
+              <Button type="button" variant="outline" onClick={onReload}>
+                Reload saved organization
+              </Button>
             </div>
-
-            {isEditMode && (
-              <div className="space-y-2">
-                <Label htmlFor="org-plan">计划</Label>
-                <Input
-                  id="org-plan"
-                  disabled
-                  placeholder="Enterprise"
-                  // TODO: 显示当前计划
-                />
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="members" className="space-y-4">
-            {/* TODO: 实现成员管理功能 */}
-            <div className="text-center py-8 text-muted-foreground">
-              成员管理功能开发中...
-            </div>
-          </TabsContent>
-
-          <TabsContent value="settings" className="space-y-4">
-            {/* TODO: 实现组织设置功能 */}
-            <div className="text-center py-8 text-muted-foreground">
-              组织设置功能开发中...
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        <div className="flex justify-end gap-2 pt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button
-            onClick={() => {
-              // TODO: 实现提交逻辑
-              console.log("TODO: 实现提交逻辑");
-              console.log("Logo URL:", logoUrl);
-            }}
-            disabled={isSaving}
-          >
-            {isSaving ? "Saving..." : isEditMode ? "保存" : "创建"}
-          </Button>
-        </div>
+          )}
+          {saving && (
+            <p role="status" className="text-sm">
+              Saving organization…
+            </p>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                saving ||
+                !!error ||
+                !draft.name.trim() ||
+                (!!organization && !draft.displayName.trim())
+              }
+            >
+              {saving
+                ? "Saving…"
+                : organization
+                  ? "Save organization"
+                  : "Create organization"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

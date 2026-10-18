@@ -21,6 +21,7 @@ interface BreadcrumbProps {
 const routeTitleMap: Record<string, string> = {
   "/": "Overview",
   "/projects": "Projects",
+  "/organizations": "Organizations",
   "/build": "Build",
   "/deploy": "Deploy",
   "/observe": "Observe",
@@ -42,6 +43,7 @@ const routeTitleMap: Record<string, string> = {
 // 一级菜单配置（与 AppDock 保持一致）
 const mainMenuItems = [
   { title: "Projects", url: "/projects" },
+  { title: "Organizations", url: "/organizations" },
   { title: "Build", url: "/build" },
   { title: "Deploy", url: "/deploy" },
   { title: "Agents", url: "/agents" },
@@ -67,7 +69,6 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
   const location = useLocation();
   const pathname = location.pathname;
   const [agentName, setAgentName] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const currentAgentIdRef = useRef<string | null>(null);
 
@@ -123,17 +124,7 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
     }
   }, [pathname, agentMatch]);
 
-  // 加载项目名称（如果有项目 API）
-  useEffect(() => {
-    if (projectMatch) {
-      const projectId = projectMatch[1];
-      // TODO: 如果有项目 API，在这里加载项目名称
-      // 暂时使用项目 ID
-      setProjectName(projectId);
-    } else {
-      setProjectName(null);
-    }
-  }, [pathname]);
+  const projectName = projectMatch?.[1] ?? null;
 
   // 生成面包屑项
   const generateBreadcrumbs = (): BreadcrumbItem[] => {
@@ -191,6 +182,11 @@ export function Breadcrumb({ className }: BreadcrumbProps) {
       title: matchedMenu.title,
       url: matchedMenu.url,
     });
+
+    if (/^\/organizations\/[^/]+$/.test(pathname)) {
+      items.push({ title: "Organization settings" });
+      return items;
+    }
 
     // 如果是项目详情页
     if (pathname.match(/^\/projects\/[^/]+$/)) {
