@@ -411,6 +411,90 @@ export function expectedResourceError(message, expected) {
   }
 }
 
+/** Upload only fixed classifications, never console arguments, URLs or identifiers. */
+export function safeConsoleErrorEvidence(entries, requests, expected) {
+  const route = (value) => {
+    try {
+      const path = new URL(value, "http://fixture.invalid").pathname;
+      const patterns = [
+        [/^\/api\/v1\/organization(?:\/[^/]+)?$/, "organization"],
+        [
+          /^\/api\/v1\/organization\/[^/]+\/members(?:\/[^/]+)?$/,
+          "organization-members",
+        ],
+        [
+          /^\/api\/v1\/project\/[^/]+\/settings(?:\/(?:archive|restore))?$/,
+          "project-settings",
+        ],
+        [/^\/api\/v1\/project\/[^/]+\/members(?:\/[^/]+)?$/, "project-members"],
+        [/^\/api\/v1\/pipelines(?:\/.*)?$/, "pipelines"],
+        [/^\/api\/v1\/projects\/[^/]+\/artifacts(?:\/.*)?$/, "artifacts"],
+      ];
+      return (
+        patterns.find(([pattern]) => pattern.test(path))?.[1] ??
+        (path.startsWith("/api/") ? "other-api" : "non-api")
+      );
+    } catch {
+      return "unknown";
+    }
+  };
+  const errors = entries.filter(
+    (entry) =>
+      entry.type === "error" && !expectedResourceError(entry, expected),
+  );
+  return {
+    consoleErrorEvidenceTruncated: errors.length > 16,
+    consoleErrorEvidence: errors.slice(0, 16).map((entry) => {
+      const resource =
+        /^Failed to load resource: the server responded with a status of (\d{3})/.exec(
+          entry.text,
+        );
+      const category = resource
+        ? "http-resource"
+        : /validateDOMNesting|cannot be a (?:child|descendant)|cannot contain a nested/.test(
+              entry.text,
+            )
+          ? "react-dom-nesting"
+          : /unique ["']key["']|same key/.test(entry.text)
+            ? "react-list-key"
+            : /controlled.*uncontrolled|uncontrolled.*controlled/.test(
+                  entry.text,
+                )
+              ? "react-input-control"
+              : /not wrapped in act/.test(entry.text)
+                ? "react-act"
+                : /Failed to load resource/.test(entry.text)
+                  ? "resource-failure"
+                  : "application-console";
+      let path;
+      try {
+        path = new URL(entry.url).pathname;
+      } catch {}
+      const responses = requests.filter(
+        (request) => request.path === path && request.status >= 400,
+      );
+      return {
+        category,
+        stage: acceptanceStages.has(entry.stage) ? entry.stage : "unknown",
+        source: route(entry.url),
+        status: resource ? Number(resource[1]) : null,
+        responseStatuses: [
+          ...new Set(
+            responses
+              .map((response) => response.status)
+              .filter(
+                (status) =>
+                  Number.isInteger(status) && status >= 400 && status <= 599,
+              ),
+          ),
+        ]
+          .sort()
+          .slice(0, 8),
+      };
+    }),
+  };
+}
+
 export async function runBrowserTest(
   kind,
   callback,
@@ -542,7 +626,7 @@ export async function runBrowserTest(
       if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
         diagnostics.artifactDownloadRequestCount++;
     });
-    const onConsole = (message) => consoleCollector.accept(message);
+    const onConsole = (message) => consoleCollector.accept(message, stage);
     page.on("console", onConsole);
     page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
     page.on("requestfailed", (request) => {
@@ -704,6 +788,11 @@ export async function runBrowserTest(
               entry.type === "error" &&
               !expectedResourceError(entry, expectedHttpErrors),
           ).length,
+          ...safeConsoleErrorEvidence(
+            diagnostics.console,
+            diagnostics.requests,
+            expectedHttpErrors,
+          ),
           blockedRequestCount: diagnostics.blockedRequests.length,
           unhandledRouteCount: diagnostics.unhandledRoutes.length,
           apiResponseCount: diagnostics.requests.length,
@@ -766,7 +855,7 @@ export function createConsoleCollector(diagnostics, sensitiveValues) {
   const pending = new Set();
   let sealed = false;
   return {
-    accept(message) {
+    accept(message, stage) {
       if (sealed) {
         diagnostics.lateConsoleEventCount++;
         diagnostics.consoleInspectionFailureCount++;
@@ -774,6 +863,7 @@ export function createConsoleCollector(diagnostics, sensitiveValues) {
       }
       try {
         const entry = {
+          stage,
           type: message.type(),
           text: message.text(),
           url: message.location().url,

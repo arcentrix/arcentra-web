@@ -42,6 +42,7 @@ import {
   preflightStepsFromSummary,
   artifactDownloadEvidence,
   expectedResourceError,
+  safeConsoleErrorEvidence,
   isNativeOptionDisabled,
   loopbackURL,
   safeFailureEvidence,
@@ -2212,4 +2213,51 @@ test("every organization browser stage and failure location is explicitly allowl
     }),
   );
   assert.equal(actualBackendConfig(buildEnv()).organizationJourney, undefined);
+});
+
+test("public console evidence keeps only bounded classifications and never raw values", () => {
+  const secret = "PRIVATE_CANARY";
+  const path = `/api/v1/organization/${secret}`;
+  const entries = [
+    {
+      type: "error",
+      text: `Failed to load resource: the server responded with a status of 409 (${secret})`,
+      url: `http://${secret}.invalid${path}?token=${secret}`,
+      stage: "organization-archive-conflict",
+    },
+    {
+      type: "error",
+      text: `In HTML, <button> cannot be a descendant of <button>. ${secret}`,
+      url: `http://fixture.invalid/src/${secret}.tsx`,
+      stage: secret,
+    },
+  ];
+  const value = safeConsoleErrorEvidence(
+    entries,
+    [{ path, status: 409 }],
+    new Set(),
+  );
+  assert.equal(JSON.stringify(value).includes(secret), false);
+  assert.deepEqual(value.consoleErrorEvidence[0], {
+    category: "http-resource",
+    stage: "organization-archive-conflict",
+    source: "organization",
+    status: 409,
+    responseStatuses: [409],
+  });
+  assert.equal(value.consoleErrorEvidence[1].category, "react-dom-nesting");
+  assert.equal(value.consoleErrorEvidence[1].stage, "unknown");
+  assert.equal(
+    safeConsoleErrorEvidence(entries, [], new Set([`${path}:409`]))
+      .consoleErrorEvidence.length,
+    1,
+  );
+  const bounded = safeConsoleErrorEvidence(
+    Array(40).fill(entries[1]),
+    [],
+    new Set(),
+  );
+  assert.equal(bounded.consoleErrorEvidence.length, 16);
+  assert.equal(bounded.consoleErrorEvidenceTruncated, true);
+  assert.equal(expectedResourceError(entries[1], new Set()), false);
 });
