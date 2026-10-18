@@ -126,7 +126,23 @@ export async function runOrganizationJourney({
   assert.equal(countWrites("/organization"), before);
   await button("Create organization").click();
   const name = `browser-org-${Date.now()}`;
-  await page.getByLabel("Organization name", { exact: true }).fill(name);
+  const organizationName = page.getByLabel("Organization name", {
+    exact: true,
+  });
+  await organizationName.fill("Invalid Name");
+  assert.equal(
+    await organizationName.evaluate((input) => input.checkValidity()),
+    false,
+  );
+  await organizationName.fill(name);
+  assert.equal(
+    await organizationName.evaluate((input) => {
+      const validPattern = new RegExp(`^(?:${input.pattern})$`, "v");
+      return validPattern.test(input.value) && input.checkValidity();
+    }),
+    true,
+  );
+
   await page
     .getByLabel("Display name", { exact: true })
     .fill("Synthetic organization workspace");

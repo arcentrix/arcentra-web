@@ -43,6 +43,7 @@ import {
   artifactDownloadEvidence,
   expectedResourceError,
   safeConsoleErrorEvidence,
+  safeBrowserRuntimeEvidence,
   isNativeOptionDisabled,
   loopbackURL,
   safeFailureEvidence,
@@ -2240,10 +2241,12 @@ test("public console evidence keeps only bounded classifications and never raw v
   assert.equal(JSON.stringify(value).includes(secret), false);
   assert.deepEqual(value.consoleErrorEvidence[0], {
     category: "http-resource",
+    observationPhase: "journey",
     stage: "organization-archive-conflict",
     source: "organization",
     status: 409,
     responseStatuses: [409],
+    networkError: "unclassified",
   });
   assert.equal(value.consoleErrorEvidence[1].category, "react-dom-nesting");
   assert.equal(value.consoleErrorEvidence[1].stage, "unknown");
@@ -2260,4 +2263,131 @@ test("public console evidence keeps only bounded classifications and never raw v
   assert.equal(bounded.consoleErrorEvidence.length, 16);
   assert.equal(bounded.consoleErrorEvidenceTruncated, true);
   assert.equal(expectedResourceError(entries[1], new Set()), false);
+});
+
+test("resource failure detail is a fixed network enum and static asset category", () => {
+  for (const [path, source] of [
+    ["/node_modules/.vite/deps/PRIVATE.js?token=PRIVATE", "vite-dependency"],
+    ["/src/PRIVATE.tsx", "application-module"],
+    ["/@vite/PRIVATE", "vite-client"],
+  ]) {
+    const [entry] = safeConsoleErrorEvidence(
+      [
+        {
+          type: "error",
+          text: "Failed to load resource: net::ERR_CONNECTION_RESET PRIVATE",
+          url: `http://PRIVATE.invalid${path}`,
+          stage: "login",
+        },
+      ],
+      [],
+      new Set(),
+    ).consoleErrorEvidence;
+    assert.equal(entry.source, source);
+    assert.equal(entry.networkError, "ERR_CONNECTION_RESET");
+    assert.equal(JSON.stringify(entry).includes("PRIVATE"), false);
+  }
+  const value = safeConsoleErrorEvidence(
+    [{ type: "error", text: "net::PRIVATE", url: "invalid", stage: "login" }],
+    [],
+    new Set(),
+  );
+  assert.equal(value.consoleErrorEvidence[0].networkError, "unclassified");
+  assert.equal(JSON.stringify(value).includes("PRIVATE"), false);
+});
+
+test("unlisted network error suffixes never match a shorter known enum", () => {
+  for (const token of [
+    "ERR_FAILED_PRIVATE",
+    "ERR_CONNECTION_RESET_EXTRA",
+    "ERR_NOT_LISTED",
+  ]) {
+    const entry = safeConsoleErrorEvidence(
+      [{ type: "error", text: `net::${token}`, url: "invalid" }],
+      [],
+      new Set(),
+    ).consoleErrorEvidence[0];
+    assert.equal(entry.networkError, "unclassified");
+    assert.equal(JSON.stringify(entry).includes(token), false);
+  }
+});
+
+test("static frontend evidence bounds resource and server diagnostics without raw data", () => {
+  const event = {
+    url: "http://PRIVATE.invalid/node_modules/.vite/deps/chunk-ABC12345.js?token=PRIVATE",
+    error: "net::ERR_ABORTED PRIVATE",
+    mime: "text/javascript; PRIVATE",
+    status: 504,
+    stage: "login",
+    atMs: 123.9,
+  };
+  const value = safeBrowserRuntimeEvidence(
+    [event],
+    {
+      managed: true,
+      ready: true,
+      readyAfterMs: 42,
+      observedForMs: 123,
+      exitCode: 1,
+      signal: "PRIVATE",
+    },
+    "PRIVATE Pre-transform error",
+  );
+  assert.equal(JSON.stringify(value).includes("PRIVATE"), false);
+  assert.deepEqual(value.staticResourceEvidence[0], {
+    source: "vite-dependency",
+    observationPhase: "journey",
+    asset: "hashed-chunk.js",
+    mime: "text/javascript",
+    status: 504,
+    networkError: "ERR_ABORTED",
+    stage: "login",
+    atMs: 123,
+  });
+  assert.equal(value.frontendServer.exitCodeBeforeCleanup, 1);
+  assert.deepEqual(value.frontendServer.logFlags, ["Pre-transform error"]);
+  assert.equal(value.frontendServer.signalBeforeCleanup, null);
+  const bounded = safeBrowserRuntimeEvidence(
+    Array(40).fill({
+      ...event,
+      url: "http://PRIVATE.invalid/src/PRIVATE.tsx",
+      atMs: Infinity,
+      status: 999,
+      mime: "PRIVATE",
+    }),
+    {},
+    "",
+  );
+  assert.equal(bounded.staticResourceEvidence.length, 16);
+  assert.equal(bounded.staticResourceEvidenceTruncated, true);
+  assert.equal(bounded.staticResourceEvidence[0].asset, "other");
+  assert.equal(bounded.staticResourceEvidence[0].status, null);
+  assert.equal(bounded.staticResourceEvidence[0].atMs, null);
+  assert.equal(JSON.stringify(bounded).includes("PRIVATE"), false);
+});
+
+test("diagnostics distinguish browser cleanup without forgiving its errors", () => {
+  const entry = {
+    type: "error",
+    text: "Failed to load resource: net::ERR_ABORTED",
+    url: "http://127.0.0.1/src/main.tsx",
+    stage: "journey-complete",
+    observationPhase: "browser-closing",
+  };
+  assert.equal(
+    safeConsoleErrorEvidence([entry], [], new Set()).consoleErrorEvidence[0]
+      .observationPhase,
+    "browser-closing",
+  );
+  assert.equal(expectedResourceError(entry, new Set()), false);
+  const value = safeBrowserRuntimeEvidence(
+    [{ ...entry, error: entry.text }],
+    { managed: false },
+    "",
+  );
+  assert.equal(value.frontendServer.mode, "external-unknown");
+  assert.equal(
+    value.staticResourceEvidence[0].observationPhase,
+    "browser-closing",
+  );
 });

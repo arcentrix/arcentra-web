@@ -107,7 +107,7 @@ export function OrgSettingsDialog({
                 required
                 minLength={2}
                 maxLength={64}
-                pattern="[a-z0-9][a-z0-9_-]{1,63}"
+                pattern={"[a-z0-9][a-z0-9_\\-]{1,63}"}
                 readOnly={!!organization}
                 onChange={(event) => set("name", event.target.value)}
               />

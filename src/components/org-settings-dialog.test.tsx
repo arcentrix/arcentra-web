@@ -128,3 +128,24 @@ it("preserves conflicts without blind resubmission and reports live denial separ
   );
   expect(document.body).not.toHaveTextContent("RAW-CANARY");
 });
+
+it("uses a valid HTML UnicodeSets pattern with the exact organization name bounds", () => {
+  render(<OrgSettingsDialog {...callbacks} />);
+  const input = screen.getByLabelText("Organization name") as HTMLInputElement;
+  // HTML compiles pattern using the v flag, not legacy JavaScript/u semantics.
+  const pattern = new RegExp(`^(?:${input.pattern})$`, "v");
+  for (const name of ["ab", "0x", "sample-org_1", "a".repeat(64)])
+    expect(pattern.test(name)).toBe(true);
+  for (const name of [
+    "",
+    "a",
+    "a".repeat(65),
+    "-org",
+    "_org",
+    "Upper",
+    "has space",
+    "a/b",
+    "éa",
+  ])
+    expect(pattern.test(name)).toBe(false);
+});

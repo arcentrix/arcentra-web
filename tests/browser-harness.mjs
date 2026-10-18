@@ -417,6 +417,10 @@ export function safeConsoleErrorEvidence(entries, requests, expected) {
     try {
       const path = new URL(value, "http://fixture.invalid").pathname;
       const patterns = [
+        [/^\/node_modules\/\.vite\//, "vite-dependency"],
+        [/^\/src\//, "application-module"],
+        [/^\/@vite\//, "vite-client"],
+        [/^\/favicon\.[a-z]+$/, "favicon"],
         [/^\/api\/v1\/organization(?:\/[^/]+)?$/, "organization"],
         [
           /^\/api\/v1\/organization\/[^/]+\/members(?:\/[^/]+)?$/,
@@ -475,9 +479,30 @@ export function safeConsoleErrorEvidence(entries, requests, expected) {
       );
       return {
         category,
+        observationPhase:
+          entry.observationPhase === "browser-closing"
+            ? "browser-closing"
+            : "journey",
         stage: acceptanceStages.has(entry.stage) ? entry.stage : "unknown",
         source: route(entry.url),
         status: resource ? Number(resource[1]) : null,
+        networkError:
+          [
+            "ERR_ABORTED",
+            "ERR_FAILED",
+            "ERR_EMPTY_RESPONSE",
+            "ERR_CONNECTION_RESET",
+            "ERR_CONNECTION_REFUSED",
+            "ERR_CONNECTION_CLOSED",
+            "ERR_TIMED_OUT",
+            "ERR_INCOMPLETE_CHUNKED_ENCODING",
+            "ERR_CONTENT_LENGTH_MISMATCH",
+            "ERR_BLOCKED_BY_CLIENT",
+            "ERR_HTTP_RESPONSE_CODE_FAILURE",
+            "ERR_NETWORK_CHANGED",
+          ].find(
+            (code) => code === /net::(ERR_[A-Z0-9_]+)/.exec(entry.text)?.[1],
+          ) ?? "unclassified",
         responseStatuses: [
           ...new Set(
             responses
@@ -490,6 +515,107 @@ export function safeConsoleErrorEvidence(entries, requests, expected) {
         ]
           .sort()
           .slice(0, 8),
+      };
+    }),
+  };
+}
+
+/** Static-resource diagnostics never return URLs, queries, headers or error text. */
+export function safeBrowserRuntimeEvidence(events, lifecycle, log) {
+  const boundedMs = (value) =>
+    Number.isFinite(value) && value >= 0
+      ? Math.min(600000, Math.floor(value))
+      : null;
+  const allowedMIME = [
+    "text/html",
+    "text/javascript",
+    "application/javascript",
+    "text/css",
+    "application/json",
+    "image/svg+xml",
+    "image/png",
+    "image/x-icon",
+  ];
+  return {
+    frontendServer: {
+      mode:
+        lifecycle.managed === true ? "vite-development" : "external-unknown",
+      managed: lifecycle.managed === true,
+      ready: lifecycle.ready === true,
+      readyAfterMs: boundedMs(lifecycle.readyAfterMs),
+      observedForMs: boundedMs(lifecycle.observedForMs),
+      exitCodeBeforeCleanup:
+        Number.isInteger(lifecycle.exitCode) &&
+        Math.abs(lifecycle.exitCode) <= 255
+          ? lifecycle.exitCode
+          : null,
+      signalBeforeCleanup: ["SIGTERM", "SIGKILL", "SIGINT", "SIGABRT"].includes(
+        lifecycle.signal,
+      )
+        ? lifecycle.signal
+        : null,
+      logFlags: [
+        "Outdated Optimize Dep",
+        "ERR_OUTDATED_OPTIMIZED_DEP",
+        "Pre-transform error",
+        "Internal server error",
+        "ECONNREFUSED",
+        "optimized dependencies changed",
+      ].filter((flag) => log.includes(flag)),
+    },
+    staticResourceEvidenceTruncated: events.length > 16,
+    staticResourceEvidence: events.slice(0, 16).map((event) => {
+      let path = "";
+      try {
+        path = new URL(event.url, "http://fixture.invalid").pathname;
+      } catch {}
+      const source = path.startsWith("/node_modules/.vite/")
+        ? "vite-dependency"
+        : path.startsWith("/src/")
+          ? "application-module"
+          : path.startsWith("/@vite/")
+            ? "vite-client"
+            : "other-static";
+      const basename = path.split("/").at(-1);
+      const knownAsset = [
+        "main.tsx",
+        "index.html",
+        "react.js",
+        "react-dom_client.js",
+        "client",
+        "favicon.ico",
+      ].includes(basename)
+        ? basename
+        : /^chunk-[A-Z0-9]{8}\.js$/.test(basename || "")
+          ? "hashed-chunk.js"
+          : "other";
+      const mime =
+        typeof event.mime === "string"
+          ? event.mime.split(";")[0].trim().toLowerCase()
+          : "";
+      const text = typeof event.error === "string" ? event.error : "";
+      const networkError = safeConsoleErrorEvidence(
+        [{ type: "error", text, url: "", stage: "unknown" }],
+        [],
+        new Set(),
+      ).consoleErrorEvidence[0].networkError;
+      return {
+        source,
+        observationPhase:
+          event.observationPhase === "browser-closing"
+            ? "browser-closing"
+            : "journey",
+        asset: knownAsset,
+        mime: allowedMIME.includes(mime) ? mime : "unknown",
+        status:
+          Number.isInteger(event.status) &&
+          event.status >= 100 &&
+          event.status <= 599
+            ? event.status
+            : null,
+        networkError,
+        stage: acceptanceStages.has(event.stage) ? event.stage : "unknown",
+        atMs: boundedMs(event.atMs),
       };
     }),
   };
@@ -537,6 +663,7 @@ export async function runBrowserTest(
     requests: [],
     artifactDownloadRequestCount: 0,
     failedRequests: [],
+    staticResourceEvents: [],
     blockedRequests: [],
     unhandledRoutes: [],
   };
@@ -551,6 +678,11 @@ export async function runBrowserTest(
   let failure;
   let stage = "setup";
   let sensitiveFormOpen = false;
+  let browserClosing = false;
+  const serverStartedAt = Date.now();
+  let readyAfterMs;
+  let serverReady = false;
+  let runtimeEvidence;
   try {
     if (!process.env.UI_TEST_BASE_URL) {
       server = spawn(
@@ -589,6 +721,8 @@ export async function runBrowserTest(
         });
         if (response.ok) {
           ready = true;
+          serverReady = true;
+          readyAfterMs = Date.now() - serverStartedAt;
           break;
         }
       } catch {}
@@ -626,11 +760,24 @@ export async function runBrowserTest(
       if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
         diagnostics.artifactDownloadRequestCount++;
     });
-    const onConsole = (message) => consoleCollector.accept(message, stage);
+    const onConsole = (message) =>
+      consoleCollector.accept(
+        message,
+        stage,
+        browserClosing ? "browser-closing" : "journey",
+      );
     page.on("console", onConsole);
     page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
     page.on("requestfailed", (request) => {
       const url = new URL(request.url());
+      if (url.origin === base.origin && !url.pathname.startsWith("/api/"))
+        diagnostics.staticResourceEvents.push({
+          url: url.pathname,
+          observationPhase: browserClosing ? "browser-closing" : "journey",
+          error: request.failure()?.errorText,
+          stage,
+          atMs: Date.now() - serverStartedAt,
+        });
       diagnostics.failedRequests.push({
         method: request.method(),
         path: url.pathname,
@@ -639,6 +786,19 @@ export async function runBrowserTest(
     });
     page.on("response", (response) => {
       const url = new URL(response.url());
+      if (
+        url.origin === base.origin &&
+        !url.pathname.startsWith("/api/") &&
+        response.status() >= 400
+      )
+        diagnostics.staticResourceEvents.push({
+          url: url.pathname,
+          observationPhase: browserClosing ? "browser-closing" : "journey",
+          status: response.status(),
+          mime: response.headers()["content-type"],
+          stage,
+          atMs: Date.now() - serverStartedAt,
+        });
       if (url.pathname.startsWith("/api/"))
         diagnostics.requests.push({
           method: response.request().method(),
@@ -675,6 +835,7 @@ export async function runBrowserTest(
         // Keep observing through browser close. A callback return is not an event
         // cutoff: late console calls or failed handle inspection must fail closed.
         await finalizeConsoleObservation(consoleCollector, async () => {
+          browserClosing = true;
           await browser.close();
           browser = undefined;
         });
@@ -746,6 +907,7 @@ export async function runBrowserTest(
         .catch(() => {});
   } finally {
     if (browser) {
+      browserClosing = true;
       try {
         await withBrowserDeadline(
           () => browser.close(),
@@ -757,6 +919,18 @@ export async function runBrowserTest(
         diagnostics.status = "failed";
       }
     }
+    runtimeEvidence = safeBrowserRuntimeEvidence(
+      diagnostics.staticResourceEvents,
+      {
+        managed: !!server,
+        ready: serverReady,
+        readyAfterMs,
+        observedForMs: Date.now() - serverStartedAt,
+        exitCode: server?.exitCode,
+        signal: server?.signalCode,
+      },
+      serverLog,
+    );
     server?.kill("SIGTERM");
     await writeFile(
       `${output}/diagnostics.json`,
@@ -793,6 +967,7 @@ export async function runBrowserTest(
             diagnostics.requests,
             expectedHttpErrors,
           ),
+          ...runtimeEvidence,
           blockedRequestCount: diagnostics.blockedRequests.length,
           unhandledRouteCount: diagnostics.unhandledRoutes.length,
           apiResponseCount: diagnostics.requests.length,
@@ -855,7 +1030,7 @@ export function createConsoleCollector(diagnostics, sensitiveValues) {
   const pending = new Set();
   let sealed = false;
   return {
-    accept(message, stage) {
+    accept(message, stage, observationPhase) {
       if (sealed) {
         diagnostics.lateConsoleEventCount++;
         diagnostics.consoleInspectionFailureCount++;
@@ -864,6 +1039,7 @@ export function createConsoleCollector(diagnostics, sensitiveValues) {
       try {
         const entry = {
           stage,
+          observationPhase,
           type: message.type(),
           text: message.text(),
           url: message.location().url,
