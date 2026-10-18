@@ -1,3 +1,4 @@
+import { runOrganizationJourney } from "./organization-journey.mjs";
 import { runHonestyJourney } from "./ui-honesty-journey.mjs";
 /**
  * Real-browser / real-Control / real-Agent acceptance against disposable local
@@ -39,6 +40,9 @@ const preflight = config.phase === "preflight";
 const storageSetup = config.phase === "storage-setup";
 const firstBuildEvidence = projectBuild
   ? { phase: config.phase, sourceCommit: config.expectedCommit, steps: [] }
+  : undefined;
+const organizationEvidence = config.organizationJourney
+  ? { steps: [] }
   : undefined;
 let successfulBuild;
 await runBrowserTest(
@@ -261,7 +265,7 @@ await runBrowserTest(
       .click();
     await page
       .getByText(
-        "Enter a stable organization scope ID approved by your administrator. Creating a project does not create an organization. Organization and member management are not available yet.",
+        /Enter a stable organization scope ID approved by your administrator/,
         { exact: true },
       )
       .waitFor();
@@ -312,6 +316,28 @@ await runBrowserTest(
       projectId: project.projectId,
       honesty,
     });
+
+    if (config.organizationJourney) {
+      const organizationManagement = await runOrganizationJourney({
+        page,
+        base,
+        output,
+        config,
+        diagnostics,
+        responseFor,
+        envelope,
+        expectHttpError,
+        setStage,
+        evidence: organizationEvidence,
+      });
+      await record("organization-members-settings-via-ui", {
+        organizationManagement,
+      });
+      await page.goto(`${base}${projectPath}/pipelines`);
+      await page
+        .getByRole("button", { name: "New pipeline", exact: true })
+        .waitFor();
+    }
 
     setStage("pipeline-create");
     await page
@@ -801,7 +827,7 @@ await runBrowserTest(
       diagnostics.requests.filter(
         (r) => r.method === "POST" && r.path === "/api/v1/project/",
       ).length,
-      1,
+      config.organizationJourney ? 2 : 1,
     );
     assert.equal(
       diagnostics.requests.filter(
@@ -844,6 +870,7 @@ await runBrowserTest(
           : 300_000,
     sensitiveValues: storageSensitiveValues(config.storageEndpoint),
     firstBuildEvidence,
+    organizationEvidence,
   },
 );
 // The backend may verify/execute its trusted fixture only after the browser

@@ -41,7 +41,7 @@ vi.mock("@/hooks/use-scoped-permission", () => ({
 }));
 
 const help =
-  "Enter a stable organization scope ID approved by your administrator. Creating a project does not create an organization. Organization and member management are not available yet.";
+  "Enter a stable organization scope ID approved by your administrator. Creating a project does not create an organization or membership. Manage real organization records in the Organizations directory .";
 const project: Project = {
   projectId: "project-new",
   orgId: "team-build",
@@ -114,7 +114,7 @@ it("describes the administrator-provided scope without a default or changing the
   expect(scope).toHaveValue("");
   expect(scope).toHaveAccessibleName("Organization ID");
   expect(scope).toHaveAccessibleDescription(help);
-  const description = screen.getByText(help);
+  const description = document.getElementById("project-organization-help")!;
   expect(description.closest("label")).toBeNull();
   expect(useScopedPermission).toHaveBeenCalledWith("org", "");
   expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
@@ -330,4 +330,19 @@ it("hides old picker options during a failed refresh while keeping the manual va
   expect(screen.getByRole("alert")).toHaveTextContent(
     "First-build status unavailable",
   );
+});
+
+it("hides raw directory errors instead of rendering backend payloads", async () => {
+  vi.mocked(listProjects).mockRejectedValueOnce(
+    new Error("PRIVATE-DIRECTORY-CANARY"),
+  );
+  render(
+    <MemoryRouter>
+      <Projects />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Projects unavailable",
+  );
+  expect(document.body).not.toHaveTextContent("PRIVATE-DIRECTORY-CANARY");
 });

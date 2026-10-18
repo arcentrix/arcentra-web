@@ -141,3 +141,48 @@ describe("sensitive API requests", () => {
     expect(clearLocalAuth).not.toHaveBeenCalled();
   });
 });
+
+describe("scoped API error redaction", () => {
+  it.each(["envelope", "transport"] as const)(
+    "suppresses untrusted %s diagnostics while keeping actionable status",
+    async (mode) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      let caught: unknown;
+      try {
+        await get("/organization/synthetic", {
+          silence: true,
+          redactErrors: true,
+          adapter: async (config) => {
+            const response = {
+              config,
+              status: mode === "transport" ? 403 : 200,
+              statusText: "Forbidden",
+              headers: { "x-request-id": "synthetic-trace" },
+              data: {
+                code: 403,
+                errMsg: "RESPONSE-PRIVATE-CANARY",
+                path: "PATH-PRIVATE-CANARY",
+              },
+            };
+            if (mode === "transport")
+              throw Object.assign(new Error("TRANSPORT-CANARY"), {
+                config,
+                response,
+              });
+            return response;
+          },
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toMatchObject({
+        message: "Scoped request failed",
+        requestId: "synthetic-trace",
+      });
+      expect(JSON.stringify(caught)).not.toContain("CANARY");
+      expect(caught).not.toHaveProperty("cause");
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    },
+  );
+});

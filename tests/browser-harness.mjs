@@ -1,3 +1,7 @@
+import {
+  organizationManagementEvidence,
+  organizationManagementStages,
+} from "./organization-journey.mjs";
 /** Shared diagnostics for local-only official Playwright Chromium acceptance. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -7,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 
 const acceptanceStages = new Set([
+  ...organizationManagementStages,
   "setup",
   "login",
   "first-build-preflight-evidence",
@@ -252,6 +257,7 @@ export function safeFailureEvidence(stage, error) {
     "retry-policy-fixture.mjs",
     "storage-journey.mjs",
     "storage-fixture.mjs",
+    "organization-journey.mjs",
   ];
   for (const frame of error.stack.split("\n").slice(1)) {
     if (!/^\s+at /.test(frame)) continue;
@@ -342,7 +348,34 @@ export function actualBackendConfig(env = process.env) {
     phase === "build" || contract.artifactMode === "stdlib-build-v1",
     "Setup phases require the full build contract",
   );
+  const organizationJourney = env.ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY;
+  if (organizationJourney !== undefined)
+    assert.equal(
+      organizationJourney,
+      "1",
+      "Organization journey must be explicitly enabled",
+    );
+  let memberUserId;
+  if (organizationJourney) {
+    assert.equal(
+      phase,
+      "build",
+      "Organization journey requires the build phase",
+    );
+    memberUserId = required("ARCENTRA_ACCEPTANCE_MEMBER_USER_ID");
+    assert.match(
+      memberUserId,
+      /^[a-zA-Z0-9_-]{1,64}$/,
+      "Synthetic existing member ID required",
+    );
+  } else
+    assert.equal(
+      env.ARCENTRA_ACCEPTANCE_MEMBER_USER_ID,
+      undefined,
+      "Member ID requires the organization journey",
+    );
   return {
+    ...(organizationJourney ? { organizationJourney: true, memberUserId } : {}),
     phase,
     expectedCommit: env.ARCENTRA_ACCEPTANCE_COMMIT,
     storageEndpoint:
@@ -380,7 +413,13 @@ export function expectedResourceError(message, expected) {
 export async function runBrowserTest(
   kind,
   callback,
-  { backend, totalTimeoutMs, firstBuildEvidence, sensitiveValues = [] } = {},
+  {
+    backend,
+    totalTimeoutMs,
+    firstBuildEvidence,
+    organizationEvidence,
+    sensitiveValues = [],
+  } = {},
 ) {
   assert.ok(["simulated-transport", "actual-backend"].includes(kind));
   const timeoutMs =
@@ -669,6 +708,7 @@ export async function runBrowserTest(
           apiResponseCount: diagnostics.requests.length,
           ...artifactDownloadEvidence(diagnostics),
           ...firstBuildReadinessEvidence(firstBuildEvidence),
+          ...organizationManagementEvidence(organizationEvidence),
         },
         null,
         2,

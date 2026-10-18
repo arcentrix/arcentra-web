@@ -1914,8 +1914,22 @@ test("honesty fixture keeps member permissions project-scoped and rejects mutati
   assert.deepEqual(
     (await invoke("/project/project-1/members")).result.json.detail,
     {
-      list: [{ projectId: "project-1", userId: "association-user-1" }],
+      list: [
+        {
+          projectId: "project-1",
+          userId: "association-user-1",
+          username: "",
+          displayName: "",
+          roleId: "",
+          version: 1,
+          hasOtherAccess: true,
+          isProtectedOwner: false,
+        },
+      ],
       total: 1,
+      canManageMembers: false,
+      canAssignOwner: false,
+      assignableRoleIds: [],
     },
   );
   await assert.rejects(
@@ -2033,4 +2047,100 @@ test("active honesty fixture leaves in-flight Build reads and normal permissions
     handled: false,
     result: undefined,
   });
+});
+
+test("organization journey summary includes only bounded IDs and verified exact steps", async () => {
+  const { organizationManagementEvidence, organizationManagementSteps } =
+    await import("./organization-journey.mjs");
+  assert.deepEqual(organizationManagementEvidence(undefined), {});
+  const evidence = {
+    orgId: "org-one",
+    projectId: "project-one",
+    steps: [...organizationManagementSteps],
+    token: "PRIVATE-CANARY",
+  };
+  const summary =
+    organizationManagementEvidence(evidence).organizationManagement;
+  assert.deepEqual(Object.keys(summary).sort(), [
+    "completed",
+    "journey",
+    "orgId",
+    "projectId",
+    "steps",
+  ]);
+  assert.equal(summary.completed, true);
+  assert.equal(summary.steps.length, 15);
+  assert.equal(JSON.stringify(summary).includes("CANARY"), false);
+  assert.equal(
+    organizationManagementEvidence({ steps: [] }).organizationManagement
+      .completed,
+    false,
+  );
+  assert.throws(() =>
+    organizationManagementEvidence({ ...evidence, steps: ["fake-success"] }),
+  );
+  assert.throws(() =>
+    organizationManagementEvidence({
+      ...evidence,
+      steps: [...organizationManagementSteps, organizationManagementSteps[0]],
+    }),
+  );
+  assert.throws(() =>
+    organizationManagementEvidence({
+      ...evidence,
+      orgId: "https://private.example/secret",
+    }),
+  );
+});
+
+test("actual organization journey requires explicit build opt-in and an existing bounded synthetic user ID", () => {
+  const env = {
+    ...buildEnv(),
+    ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: "1",
+    ARCENTRA_ACCEPTANCE_MEMBER_USER_ID: "observer-user",
+  };
+  const config = actualBackendConfig(env);
+  assert.equal(config.organizationJourney, true);
+  assert.equal(config.memberUserId, "observer-user");
+  for (const change of [
+    { ARCENTRA_ACCEPTANCE_MEMBER_USER_ID: undefined },
+    { ARCENTRA_ACCEPTANCE_MEMBER_USER_ID: "https://untrusted.example" },
+    { ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: undefined },
+    { ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: "true" },
+    { ARCENTRA_ACCEPTANCE_PHASE: "preflight" },
+  ])
+    assert.throws(() => actualBackendConfig({ ...env, ...change }));
+});
+
+test("every organization browser stage and failure location is explicitly allowlisted", async () => {
+  const { organizationManagementStages } =
+    await import("./organization-journey.mjs");
+  const source = await readFile(
+    new URL("./organization-journey.mjs", import.meta.url),
+    "utf8",
+  );
+  const emitted = [...source.matchAll(/setStage\("([^"]+)"\)/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(emitted.length >= 10);
+  assert.deepEqual(emitted, [...organizationManagementStages]);
+  for (const stage of emitted)
+    assert.equal(
+      safeFailureEvidence(stage, new Error("PRIVATE-CANARY")).stage,
+      stage,
+    );
+  const error = {
+    stack: `Error: PRIVATE-CANARY\n    at test (${fileURLToPath(new URL("./organization-journey.mjs", import.meta.url))}:9:3)`,
+  };
+  assert.deepEqual(safeFailureEvidence(emitted[0], error), {
+    stage: emitted[0],
+    failureSite: { file: "organization-journey.mjs", line: 9, column: 3 },
+  });
+  assert.throws(() =>
+    actualBackendConfig({
+      ...buildEnv(),
+      ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY: "0",
+    }),
+  );
+  assert.equal(actualBackendConfig(buildEnv()).organizationJourney, undefined);
 });

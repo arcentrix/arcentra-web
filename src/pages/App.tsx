@@ -14,6 +14,8 @@ import { AuthCallback } from "./AuthCallback";
 import NotFound from "./NotFound";
 import "react-toastify/dist/ReactToastify.css";
 
+const OrganizationsPage = lazy(() => import("./Organizations"));
+const OrganizationDetailPage = lazy(() => import("./Organizations/Detail"));
 const AccountPage = lazy(() => import("./Account"));
 const ChatPage = lazy(() => import("./Copilot"));
 const InboxPage = lazy(() => import("./Inbox"));
@@ -81,6 +83,22 @@ function App() {
           <Route element={<DefaultLayouts />}>
             <Route element={<AuthGuard />}>
               <Route element={<DockLayout />}>
+                <Route
+                  path="/organizations"
+                  element={
+                    <Lazy>
+                      <OrganizationsPage />
+                    </Lazy>
+                  }
+                />
+                <Route
+                  path="/organizations/:orgId"
+                  element={
+                    <Lazy>
+                      <OrganizationDetailPage />
+                    </Lazy>
+                  }
+                />
                 {/* 静态页：登录后始终可达，不走后端动态菜单 */}
                 <Route
                   path="/account"

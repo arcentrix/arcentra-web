@@ -83,8 +83,12 @@ export function projectDetailRows(project, projectId) {
 const removedClaims =
   /John Doe|Jane Smith|Bob Johnson|Alice Brown|Charlie Wilson|Diana Prince|john@example\.com|jane@example\.com|mark\.weber|ml-inference|STRIPE_SECRET|runner-29|j\.park|API_KEY|DATABASE_URL|SECRET_TOKEN|AWS_ACCESS_KEY|GITHUB_TOKEN|SLACK_WEBHOOK|All caught up|No notifications|No secrets match|0 keys|\b\d+\s+(?:unread|notifications|keys)\b|all envs|undone within 7 days|github\.com\/arcentrix\/project|cluster · running|94\.2%|8m 42s|2\.4h|MTTR|Queue Length|capacity available|Healthy/;
 
-export async function assertHonestContent(scope) {
+export async function assertNoInventedClaims(scope) {
   assert.doesNotMatch(await scope.innerText(), removedClaims);
+}
+
+export async function assertHonestContent(scope) {
+  await assertNoInventedClaims(scope);
   assert.equal(
     await scope
       .getByRole("button", {
@@ -95,7 +99,12 @@ export async function assertHonestContent(scope) {
   );
 }
 
-export async function assertSettingsSnapshot(page, project, projectId) {
+export async function assertSettingsSnapshot(
+  page,
+  project,
+  projectId,
+  settings,
+) {
   await page
     .getByRole("heading", { name: "Project settings", exact: true })
     .waitFor();
@@ -114,59 +123,129 @@ export async function assertSettingsSnapshot(page, project, projectId) {
   );
   await page
     .getByText(
-      "Read-only project details. Editing, archiving, and deleting projects are not connected in this view.",
+      "Review project details, edit supported metadata, or archive and restore this project when your current permissions allow it.",
       { exact: true },
     )
     .waitFor();
   assert.equal(await details.getByRole("textbox").count(), 0);
-  await assertHonestContent(page.locator("body"));
+  assert.equal(settings.projectId, projectId);
+  await page.locator('dl[aria-label="Project metadata"]').waitFor();
+  for (const [name, allowed] of [
+    ["Edit settings", settings.canUpdate],
+    ["Archive project", settings.canArchive],
+    ["Restore project", settings.canRestore],
+  ]) {
+    assert.equal(typeof allowed, "boolean");
+    assert.equal(
+      await page.getByRole("button", { name, exact: true }).count(),
+      allowed ? 1 : 0,
+    );
+  }
+  await assertNoInventedClaims(page.locator("body"));
 }
 
 export async function assertMemberSnapshot(page, snapshot, projectId) {
   const rows = memberRows(snapshot, projectId);
   await page
-    .getByText(`${rows.length} recorded associations`, { exact: true })
+    .getByText(`${rows.length} recorded memberships`, { exact: true })
     .waitFor();
   await page
     .getByText(
-      /These stored associations do not establish a user's current roles or effective permissions/,
+      /Other direct, team, or inherited grants may still provide access/,
     )
     .waitFor();
-  await page
-    .getByText(
-      "Adding, editing, and removing members are unavailable from this page.",
-      { exact: true },
-    )
-    .waitFor();
-  const table = page.getByRole("table", {
-    name: "Project member associations",
-  });
+  assert.equal(typeof snapshot.canManageMembers, "boolean");
+  assert.equal(typeof snapshot.canAssignOwner, "boolean");
+  assert.ok(Array.isArray(snapshot.assignableRoleIds));
+  assert.equal(
+    new Set(snapshot.assignableRoleIds).size,
+    snapshot.assignableRoleIds.length,
+  );
+  for (const role of snapshot.assignableRoleIds)
+    assert.ok(
+      [
+        "project_owner",
+        "project_maintainer",
+        "project_developer",
+        "project_reporter",
+        "project_guest",
+      ].includes(role),
+    );
+  const list = page.getByRole("list", { name: "Project members" });
   if (rows.length) {
-    await table.waitFor();
-    assert.deepEqual(await table.locator("thead th").allTextContents(), [
-      "User ID",
-      "Project ID",
-    ]);
+    await list.waitFor();
+    const expected = snapshot.list.map((member) => {
+      assert.equal(typeof member.username, "string");
+      assert.equal(typeof member.displayName, "string");
+      assert.ok(
+        [
+          "",
+          "project_owner",
+          "project_maintainer",
+          "project_developer",
+          "project_reporter",
+          "project_guest",
+        ].includes(member.roleId),
+      );
+      assert.ok(Number.isSafeInteger(member.version) && member.version >= 1);
+      assert.equal(typeof member.hasOtherAccess, "boolean");
+      assert.equal(typeof member.isProtectedOwner, "boolean");
+      const role = member.roleId
+        ? member.roleId
+            .replace(/^project_/, "")
+            .replace(/^./, (letter) => letter.toUpperCase())
+        : "No managed role";
+      return [
+        member.displayName || member.username || "Member",
+        member.userId,
+        role,
+        ...(member.isProtectedOwner ? ["Protected owner"] : []),
+        ...(member.hasOtherAccess
+          ? ["Other direct or inherited grants may remain"]
+          : []),
+      ];
+    });
     assert.deepEqual(
-      await table
-        .locator("tbody tr")
-        .evaluateAll((elements) =>
-          elements.map((row) =>
-            [...row.querySelectorAll("td")].map((cell) => cell.textContent),
+      await list
+        .locator(":scope > li")
+        .evaluateAll((items) =>
+          items.map((item) =>
+            [...item.querySelectorAll(":scope > div:first-child > p")].map(
+              (p) => p.textContent,
+            ),
           ),
         ),
-      rows,
+      expected,
     );
+    for (const member of snapshot.list)
+      for (const label of [
+        `Edit role for ${member.userId}`,
+        `Remove ${member.userId}`,
+      ])
+        assert.equal(
+          await list.getByRole("button", { name: label, exact: true }).count(),
+          snapshot.canManageMembers &&
+            !member.isProtectedOwner &&
+            (!member.roleId.endsWith("_owner") || snapshot.canAssignOwner) &&
+            (!label.startsWith("Edit role") ||
+              snapshot.assignableRoleIds.length > 0)
+            ? 1
+            : 0,
+        );
   } else {
-    assert.equal(await table.count(), 0);
+    assert.equal(await list.count(), 0);
     await page
       .getByText(
-        "No member associations are recorded for this project. Access may still be granted through role grants.",
+        "No memberships are recorded for this scope. Other grants may still provide access.",
         { exact: true },
       )
       .waitFor();
   }
-  await assertHonestContent(page.locator("body"));
+  assert.equal(
+    await page.getByRole("button", { name: "Add member", exact: true }).count(),
+    snapshot.canManageMembers && snapshot.assignableRoleIds.length > 0 ? 1 : 0,
+  );
+  await assertNoInventedClaims(page.locator("body"));
 }
 
 export async function assertAgentSnapshot(page, snapshot) {
@@ -334,10 +413,18 @@ export async function runHonestyJourney({
   const start = diagnostics.requests.length;
   const projectId = project.projectId;
   const path = `/projects/${encodeURIComponent(projectId)}`;
+  let narrowSettings;
   const detail = await readAfter(
     page,
     `/project/${encodeURIComponent(projectId)}`,
-    () => page.getByRole("tab", { name: "Settings", exact: true }).click(),
+    async () => {
+      narrowSettings = await readAfter(
+        page,
+        `/project/${encodeURIComponent(projectId)}/settings`,
+        () => page.getByRole("tab", { name: "Settings", exact: true }).click(),
+        envelope,
+      );
+    },
     envelope,
   );
   assert.equal(detail.name, project.name);
@@ -346,7 +433,7 @@ export async function runHonestyJourney({
   assert.equal(detail.orgId, project.orgId);
   assert.equal(detail.repoUrl, project.repoUrl);
   assert.equal(detail.defaultBranch, project.defaultBranch);
-  await assertSettingsSnapshot(page, detail, projectId);
+  await assertSettingsSnapshot(page, detail, projectId, narrowSettings);
   await honestyMobileScreenshot(
     page,
     output,

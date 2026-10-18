@@ -15,7 +15,7 @@ import {
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Apis } from "@/api";
-import { get, post } from "@/api/client";
+import { get, post, put, del } from "@/api/client";
 import { ApiError } from "@/lib/api-error";
 import userStore from "@/store/user";
 import Members from "./index";
@@ -25,7 +25,12 @@ const { auth } = vi.hoisted(() => ({
 }));
 vi.mock("@/store/auth", () => ({ default: { useState: () => auth } }));
 vi.mock("@/api", () => ({ Apis: { me: { getEffectiveActions: vi.fn() } } }));
-vi.mock("@/api/client", () => ({ get: vi.fn(), post: vi.fn() }));
+vi.mock("@/api/client", () => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+  del: vi.fn(),
+}));
 
 function setCookieUser(userId: string) {
   userStore.updateState((state) => {
@@ -47,8 +52,22 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const associations = (projectId = "project-a", userId = "server-user") => ({
-  list: [{ projectId, userId }],
+  list: [
+    {
+      projectId,
+      userId,
+      username: "",
+      displayName: "",
+      roleId: "",
+      version: 1,
+      hasOtherAccess: true,
+      isProtectedOwner: false,
+    },
+  ],
   total: 1,
+  canManageMembers: true,
+  canAssignOwner: false,
+  assignableRoleIds: ["project_developer", "project_reporter", "project_guest"],
 });
 function show(initial = "/projects/project-a/members") {
   let navigate!: ReturnType<typeof useNavigate>;
@@ -100,28 +119,26 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("read-only project member associations", () => {
-  it("shows real scoped IDs without inventing identities, roles, or modification controls", async () => {
+describe("scoped project memberships", () => {
+  it("shows only verified scoped identity and managed roles, with capability-gated controls", async () => {
     vi.mocked(get).mockResolvedValue({
+      ...associations("project/a", "user/one"),
       list: [
         {
-          projectId: "project/a",
-          userId: "user/one",
+          ...associations("project/a", "user/one").list[0],
           name: "Unverified user",
           email: "not-trusted@example.test",
           role: "Owner",
         },
       ],
-      total: 1,
     });
     show("/projects/project%2Fa/members");
     expect(await screen.findByText("user/one")).toBeInTheDocument();
-    expect(screen.getByText("project/a")).toBeInTheDocument();
-    expect(screen.getByText("1 recorded associations")).toBeInTheDocument();
+    expect(screen.getByText("1 recorded memberships")).toBeInTheDocument();
+    expect(screen.getByText("No managed role")).toBeInTheDocument();
     expect(
-      screen.getByText(/do not establish a user's current roles/),
+      screen.getByText(/Other direct, team, or inherited grants/),
     ).toBeInTheDocument();
-    expect(screen.getByText("Read only")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Back to project" }),
     ).toHaveAttribute("href", "/projects/project%2Fa");
@@ -132,33 +149,31 @@ describe("read-only project member associations", () => {
     expect(get).toHaveBeenCalledWith("/project/project%2Fa/members", {
       signal: expect.any(AbortSignal),
       silence: true,
+      redactErrors: true,
     });
     expect(get).toHaveBeenCalledTimes(1);
-    expect(Apis.me.getEffectiveActions).toHaveBeenCalledTimes(1);
     expect(post).not.toHaveBeenCalled();
     expect(document.body).not.toHaveTextContent(
       /John Doe|Jane Smith|john@example|Owner|Unverified user|not-trusted@example/,
     );
+    expect(screen.getByRole("button", { name: "Add member" })).toBeEnabled();
     expect(
-      screen.queryByRole("button", { name: /Add member|Edit|Remove/ }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByPlaceholderText("Search members…"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Edit role for user/one" }),
+    ).toBeEnabled();
   });
 
   it("does not read permission or member data before sign-in or without a project", () => {
     auth.initialized = false;
     const view = show();
     expect(
-      screen.getByText("Sign in to view project member associations."),
+      screen.getByText("Sign in to view project members."),
     ).toBeInTheDocument();
     expect(Apis.me.getEffectiveActions).not.toHaveBeenCalled();
     auth.initialized = true;
     view.rerenderSession();
     view.navigate("/members");
     expect(
-      screen.getByText("Choose a project to view member associations."),
+      screen.getByText("Choose a project to view members."),
     ).toBeInTheDocument();
     expect(get).not.toHaveBeenCalled();
   });
@@ -202,20 +217,30 @@ describe("read-only project member associations", () => {
     const pending = deferred<unknown>();
     vi.mocked(get).mockReturnValue(pending.promise as ReturnType<typeof get>);
     show();
+    expect(await screen.findByText("Loading members…")).toBeInTheDocument();
+    expect(screen.queryByText(/recorded memberships$/)).not.toBeInTheDocument();
+    await act(async () =>
+      pending.resolve({
+        list: null,
+        total: 0,
+        canManageMembers: true,
+        canAssignOwner: false,
+        assignableRoleIds: [
+          "project_developer",
+          "project_reporter",
+          "project_guest",
+        ],
+      }),
+    );
     expect(
-      await screen.findByText("Loading member associations…"),
+      await screen.findByText("0 recorded memberships"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/recorded associations$/),
+      screen.getByText(/Other grants may still provide access/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: "Project members" }),
     ).not.toBeInTheDocument();
-    await act(async () => pending.resolve({ list: null, total: 0 }));
-    expect(
-      await screen.findByText("0 recorded associations"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Access may still be granted through role grants/),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it.each([403, 500])(
@@ -234,14 +259,14 @@ describe("read-only project member associations", () => {
       expect(screen.queryByText("server-user")).not.toBeInTheDocument();
       expect(
         await screen.findByText(
-          status === 403
-            ? "Member associations access restricted"
-            : "Member associations unavailable",
+          status === 403 ? "Members access restricted" : "Members unavailable",
         ),
       ).toBeInTheDocument();
-      expect(screen.queryByRole("table")).not.toBeInTheDocument();
       expect(
-        screen.queryByText("1 recorded associations"),
+        screen.queryByRole("list", { name: "Project members" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("1 recorded memberships"),
       ).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "View diagnostics" }));
       expect(screen.getByText("member-trace")).toBeInTheDocument();
@@ -264,12 +289,12 @@ describe("read-only project member associations", () => {
       total: 2,
     });
     show();
-    expect(
-      await screen.findByText("Member associations unavailable"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Members unavailable")).toBeInTheDocument();
     expect(screen.queryByText("server-user")).not.toBeInTheDocument();
     expect(screen.queryByText("private-other-user")).not.toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: "Project members" }),
+    ).not.toBeInTheDocument();
   });
 
   it("revokes displayed data and aborts a pending read when refreshed membership permission is denied", async () => {
@@ -346,7 +371,7 @@ describe("read-only project member associations", () => {
     auth.initialized = false;
     view.rerenderSession();
     expect(
-      screen.getByText("Sign in to view project member associations."),
+      screen.getByText("Sign in to view project members."),
     ).toBeInTheDocument();
   });
 
@@ -396,4 +421,144 @@ describe("read-only project member associations", () => {
       expect(get).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("versioned member changes", () => {
+  it("adds an existing user only once and suppresses Cancel/Close while saving", async () => {
+    const pending = deferred<unknown>();
+    vi.mocked(post).mockReturnValue(pending.promise as ReturnType<typeof post>);
+    show();
+    await screen.findByText("server-user");
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    fireEvent.change(screen.getByLabelText("User ID"), {
+      target: { value: "new-user" },
+    });
+    expect(
+      screen.queryByRole("option", { name: "Owner" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save membership" }));
+    fireEvent.click(screen.getByRole("button", { name: "Saving…" }));
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith(
+      "/project/project-a/members",
+      { userId: "new-user", roleId: "project_guest" },
+      { silence: true, redactErrors: true },
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await act(async () => pending.resolve({}));
+    expect(await screen.findByText("Membership saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("edits roles and removes only the versioned membership, warning about other access", async () => {
+    vi.mocked(put).mockResolvedValue({});
+    vi.mocked(del).mockResolvedValue({});
+    show();
+    await screen.findByText("server-user");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit role for server-user" }),
+    );
+    fireEvent.change(screen.getByLabelText("Role"), {
+      target: { value: "project_reporter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save membership" }));
+    await screen.findByText("Membership saved.");
+    expect(put).toHaveBeenCalledWith(
+      "/project/project-a/members/server-user",
+      { roleId: "project_reporter", version: 1 },
+      { silence: true, redactErrors: true },
+    );
+    await screen.findByText("server-user");
+    fireEvent.click(screen.getByRole("button", { name: "Remove server-user" }));
+    expect(
+      screen.getByText(/Separate grants can continue/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove membership" }));
+    await screen.findByText(
+      "Membership removed. Other grants may still provide access.",
+    );
+    expect(del).toHaveBeenCalledWith("/project/project-a/members/server-user", {
+      data: { version: 1 },
+      silence: true,
+      redactErrors: true,
+    });
+  });
+  it("does not expose edit/remove for protected owners", async () => {
+    vi.mocked(get).mockResolvedValue({
+      ...associations(),
+      list: [
+        {
+          ...associations().list[0],
+          isProtectedOwner: true,
+          roleId: "project_owner",
+        },
+      ],
+    });
+    show();
+    await screen.findByText("Protected owner");
+    expect(
+      screen.queryByRole("button", { name: "Remove server-user" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit role for server-user" }),
+    ).not.toBeInTheDocument();
+  });
+  it("shows a live mutation denial, refreshes access and hides previously loaded member rows", async () => {
+    vi.mocked(post).mockRejectedValue(
+      new ApiError({ status: 403, message: "PRIVATE-CANARY" }),
+    );
+    show();
+    await screen.findByText("server-user");
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    fireEvent.change(screen.getByLabelText("User ID"), {
+      target: { value: "new-user" },
+    });
+    vi.mocked(Apis.me.getEffectiveActions).mockResolvedValue([]);
+    fireEvent.click(screen.getByRole("button", { name: "Save membership" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Access changed",
+    );
+    expect(screen.queryByText("server-user")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("PRIVATE-CANARY");
+  });
+  it("a write completing after route navigation does not reopen or navigate the old scope", async () => {
+    const pending = deferred<unknown>();
+    vi.mocked(post).mockReturnValue(pending.promise as ReturnType<typeof post>);
+    const view = show();
+    await screen.findByText("server-user");
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    fireEvent.change(screen.getByLabelText("User ID"), {
+      target: { value: "new-user" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save membership" }));
+    view.navigate("/projects/project-a");
+    await act(async () => pending.resolve({}));
+    expect(screen.getByText("Project destination")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByText("Membership saved.")).not.toBeInTheDocument();
+  });
+});
+
+it("does not offer changes to an additional owner when owner assignment is denied", async () => {
+  vi.mocked(get).mockResolvedValue({
+    ...associations(),
+    list: [
+      {
+        ...associations().list[0],
+        roleId: "project_owner",
+        isProtectedOwner: false,
+      },
+    ],
+  });
+  show();
+  await screen.findByText("Owner");
+  expect(
+    screen.queryByRole("button", { name: "Edit role for server-user" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Remove server-user" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add member" })).toBeEnabled();
 });

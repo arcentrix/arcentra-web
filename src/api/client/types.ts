@@ -7,6 +7,8 @@ export type RequestConfig = AxiosRequestConfig & {
   silence?: boolean;
   /** Never retain or expose response diagnostics or request bodies for secrets. */
   sensitive?: boolean;
+  /** Suppress untrusted error payloads for scoped resource APIs. */
+  redactErrors?: boolean;
 };
 
 export interface ApiClientResponse<T = any> {

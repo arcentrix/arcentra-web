@@ -1,49 +1,39 @@
-/**
- * 组织相关的类型定义
- */
-
-/**
- * 组织计划类型
- */
-export type OrganizationPlan = "Free" | "Startup" | "Enterprise";
-
-/**
- * 组织信息
- */
+/** Real organization records returned by the scoped directory. */
 export interface Organization {
-  id: string;
+  orgId: string;
   name: string;
-  description?: string;
-  logo?: string;
-  plan: OrganizationPlan;
+  displayName: string;
+  description: string;
+  website: string;
+  email: string;
+  ownerUserId: string;
+  status: number;
+  isEnabled: number;
+  version: number;
   createdAt: string;
   updatedAt: string;
-  memberCount?: number;
+  isMember: boolean;
+  canUpdate: boolean;
+  canManageMembers: boolean;
+  canArchive: boolean;
 }
-
-/**
- * 创建组织的请求参数
- */
 export interface CreateOrganizationRequest {
   name: string;
-  description?: string;
-  logo?: string;
+  displayName: string;
+  description: string;
+  website: string;
+  email: string;
 }
-
-/**
- * 更新组织的请求参数
- */
-export interface UpdateOrganizationRequest {
-  name?: string;
-  description?: string;
-  logo?: string;
-  plan?: OrganizationPlan;
+export interface UpdateOrganizationRequest extends Omit<
+  CreateOrganizationRequest,
+  "name"
+> {
+  version: number;
 }
-
-/**
- * 组织列表响应
- */
 export interface OrganizationListResponse {
-  organizations: Organization[];
+  list: Organization[];
   total: number;
+  page: number;
+  pageSize: number;
+  canCreate: boolean;
 }

@@ -27,6 +27,7 @@ describe("project member association reads", () => {
     expect(get).toHaveBeenCalledWith("/project/project%2Fa/members", {
       signal,
       silence: true,
+      redactErrors: true,
     });
     expect(get).toHaveBeenCalledTimes(1);
     expect(post).not.toHaveBeenCalled();
