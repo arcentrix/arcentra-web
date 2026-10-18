@@ -173,6 +173,19 @@ export function honestyFixture(project) {
           assert.equal(request.method(), "GET");
           return state.settingsDenied ? denied() : ok(settings(item));
         }
+        if (path === `/project/${item.projectId}/secrets`) {
+          assert.equal(request.method(), "GET");
+          return ok({
+            projectId: item.projectId,
+            list: [],
+            total: 0,
+            canCreate: false,
+            canWrite: false,
+            canDisable: false,
+            projectActive: true,
+            encryptionConfigured: true,
+          });
+        }
         if (path === `/project/${item.projectId}/members`) {
           assert.equal(request.method(), "GET");
           state.memberReads++;

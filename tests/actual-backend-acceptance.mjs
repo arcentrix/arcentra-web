@@ -1,3 +1,4 @@
+import { runProjectSecretsJourney } from "./project-secrets-journey.mjs";
 import { runOrganizationJourney } from "./organization-journey.mjs";
 import { runHonestyJourney } from "./ui-honesty-journey.mjs";
 /**
@@ -42,6 +43,9 @@ const firstBuildEvidence = projectBuild
   ? { phase: config.phase, sourceCommit: config.expectedCommit, steps: [] }
   : undefined;
 const organizationEvidence = config.organizationJourney
+  ? { steps: [] }
+  : undefined;
+const projectSecretEvidence = config.projectSecretsJourney
   ? { steps: [] }
   : undefined;
 let successfulBuild;
@@ -339,6 +343,27 @@ await runBrowserTest(
         .waitFor();
     }
 
+    if (config.projectSecretsJourney) {
+      const projectSecrets = await runProjectSecretsJourney({
+        page,
+        base,
+        output,
+        project,
+        config,
+        diagnostics,
+        responseFor,
+        envelope,
+        setStage,
+        setSensitiveFormOpen,
+        evidence: projectSecretEvidence,
+      });
+      await record("project-secrets-via-ui", { projectSecrets });
+      await page.goto(`${base}${projectPath}/pipelines`);
+      await page
+        .getByRole("button", { name: "New pipeline", exact: true })
+        .waitFor();
+    }
+
     setStage("pipeline-create");
     await page
       .getByRole("button", { name: "New pipeline", exact: true })
@@ -488,22 +513,35 @@ await runBrowserTest(
       setStage("persisted-run-logs");
       const logs = page.getByLabel("Execution logs", { exact: true });
       const requiredLogs = !projectBuild
-        ? ["arcentra-real-stack-acceptance"]
+        ? [["persisted-run-log-baseline", "arcentra-real-stack-acceptance"]]
         : success
           ? [
-              "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
-              "ACTUAL_PROJECT_TEST",
-              "ACTUAL_PROJECT_BUILD",
-              "ACTUAL_PROJECT_BEHAVIOR",
-              buildContract.stdout.trim(),
+              [
+                "persisted-run-log-toolchain",
+                "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
+              ],
+              ["persisted-run-log-test", "ACTUAL_PROJECT_TEST"],
+              ["persisted-run-log-build", "ACTUAL_PROJECT_BUILD"],
+              ["persisted-run-log-behavior", "ACTUAL_PROJECT_BEHAVIOR"],
+              ["persisted-run-log-stdout", buildContract.stdout.trim()],
             ]
           : [
-              "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
-              "ACTUAL_PROJECT_TEST",
-              "undefined: acceptanceCompileError",
+              [
+                "persisted-run-log-toolchain",
+                "ACTUAL_PROJECT_TOOLCHAIN go1.25.6",
+              ],
+              ["persisted-run-log-test", "ACTUAL_PROJECT_TEST"],
+              [
+                "persisted-run-log-compile-error",
+                "undefined: acceptanceCompileError",
+              ],
             ];
-      for (const marker of requiredLogs)
+      for (const [stage, marker] of requiredLogs) {
+        // Only a fixed category reaches failure diagnostics, never log content.
+        // Keep the actual rendered-text assertion strict.
+        setStage(stage);
         await logs.filter({ hasText: marker }).waitFor({ timeout: 45_000 });
+      }
       setStage("initial-checkout");
       await page
         .getByText("Agent-reported initial checkout", { exact: true })
@@ -868,9 +906,15 @@ await runBrowserTest(
         : projectBuild
           ? 600_000
           : 300_000,
-    sensitiveValues: storageSensitiveValues(config.storageEndpoint),
+    sensitiveValues: [
+      ...storageSensitiveValues(config.storageEndpoint),
+      ...(config.projectSecretsJourney
+        ? [config.secretInitialValue, config.secretRotatedValue]
+        : []),
+    ],
     firstBuildEvidence,
     organizationEvidence,
+    projectSecretEvidence,
   },
 );
 // The backend may verify/execute its trusted fixture only after the browser

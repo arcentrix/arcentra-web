@@ -138,6 +138,7 @@ export interface PipelineSpec {
   pipelineFilePath: string;
 }
 export interface RunLog {
+  /** Step-wide Write-chunk position across streams, not a text line. Legacy rows may omit it. */
   lineNumber?: number;
   stream?: string;
   timestamp: string | number;

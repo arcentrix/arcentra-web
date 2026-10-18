@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Copy, RefreshCw, Square, Terminal } from "lucide-react";
 import {
@@ -14,6 +14,9 @@ import { RunDeployment } from "./run-deployment";
 import { RunApprovals } from "./run-approvals";
 import { useApiResource } from "@/hooks/use-api-resource";
 import { useScopedPermission } from "@/hooks/use-scoped-permission";
+import authStore from "@/store/auth";
+import userStore from "@/store/user";
+import { formatRunLogOutput } from "./run-log-output";
 import { Panel, PanelHeader } from "@/components/blueprint";
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/inline-error-state";
@@ -29,7 +32,6 @@ import {
   RunStatusBadge,
   formatDuration,
   formatRunTime,
-  formatLogTime,
   errorMessage,
 } from "./run-status";
 
@@ -96,17 +98,45 @@ function InitialCheckout({ job }: { job: JobRun }) {
   );
 }
 
-export function RunDetail({
-  pipelineId,
-  runId,
-  projectId,
-  onChanged,
-}: {
+interface RunDetailProps {
   pipelineId: string;
   runId: string;
   projectId: string;
   onChanged: () => void;
-}) {
+}
+
+export function RunDetail(props: RunDetailProps) {
+  const auth = authStore.useState();
+  const { userinfo } = userStore.useState();
+  // Match the existing cookie/token session invalidation pattern. Credentials
+  // never enter React keys, output, or diagnostics.
+  const identity = `${auth.initialized}:${auth.accessToken}:${userinfo?.userId ?? ""}`;
+  const session = useRef({ identity, revision: 0 });
+  if (session.current.identity !== identity) {
+    session.current = { identity, revision: session.current.revision + 1 };
+  }
+  if (!auth.initialized || !(auth.accessToken || userinfo?.userId)) {
+    return <p role="status">Sign in to view execution details.</p>;
+  }
+  return (
+    <RunDetailContent
+      key={JSON.stringify([
+        props.projectId,
+        props.pipelineId,
+        props.runId,
+        session.current.revision,
+      ])}
+      {...props}
+    />
+  );
+}
+
+function RunDetailContent({
+  pipelineId,
+  runId,
+  projectId,
+  onChanged,
+}: RunDetailProps) {
   const permission = useScopedPermission("project", projectId);
   const [terminal, setTerminal] = useState(false);
   const [logsSettled, setLogsSettled] = useState(false);
@@ -149,7 +179,7 @@ export function RunDetail({
   const [confirmStop, setConfirmStop] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const pending = useRef(false);
   const refresh = () => {
     resource.refresh();
@@ -173,16 +203,22 @@ export function RunDetail({
       setStopping(false);
     }
   };
-  const logText = (logs.data?.entries ?? [])
-    .map(
-      (entry) =>
-        `${entry.timestamp ? `[${formatLogTime(entry.timestamp)}] ` : ""}${entry.level ? `${entry.level.toUpperCase()} ` : ""}${entry.message}`,
-    )
-    .join("\n");
+  const logOutput = useMemo(
+    () =>
+      formatRunLogOutput(
+        logs.error ? undefined : logs.data,
+        jobs.error ? undefined : jobs.data,
+        { fromLine, stepId: logStep },
+      ),
+    [logs.data, logs.error, jobs.data, jobs.error, fromLine, logStep],
+  );
+  const logText = logOutput.text;
+  const canCopy = !!logs.data && !!logText && !logs.error && !jobs.error;
   const copyLogs = async () => {
+    if (!canCopy) return;
     try {
       await navigator.clipboard.writeText(logText);
-      setCopied(true);
+      setCopied(logText);
     } catch {
       setActionError("Could not copy logs. Select and copy the text instead.");
     }
@@ -446,10 +482,10 @@ export function RunDetail({
             variant="ghost"
             size="sm"
             onClick={() => void copyLogs()}
-            disabled={!logText}
+            disabled={!canCopy}
           >
             <Copy className="size-3.5" />
-            {copied ? "Copied" : "Copy"}
+            {copied === logText && canCopy ? "Copied" : "Copy"}
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
@@ -462,7 +498,7 @@ export function RunDetail({
             onChange={(event) => {
               setLogStep(event.target.value);
               setLogCursors([0]);
-              setCopied(false);
+              setCopied(null);
             }}
             className="min-w-0 max-w-full rounded-md border bg-background px-2 py-1 text-xs"
           >
@@ -492,14 +528,11 @@ export function RunDetail({
                 disabled={
                   logs.loading ||
                   !logs.data?.truncated ||
-                  !logs.data.entries.length
+                  logOutput.nextLine === undefined
                 }
                 onClick={() => {
-                  const lines = (logs.data?.entries ?? []).map(
-                    (entry) => entry.lineNumber ?? -1,
-                  );
-                  const next = Math.max(...lines) + 1;
-                  if (next > fromLine)
+                  const next = logOutput.nextLine;
+                  if (next !== undefined && next > fromLine)
                     setLogCursors((cursors) => [...cursors, next]);
                 }}
               >
@@ -525,13 +558,6 @@ export function RunDetail({
               {logText ||
                 (logs.loading ? "Loading logs…" : "No output received yet.")}
             </pre>
-            {logs.data?.truncated && (
-              <p className="border-t p-3 text-xs text-muted-foreground">
-                {logStep
-                  ? "More output is available. Use Next output to continue."
-                  : "Showing the first 1,000 log lines. Select a step to browse additional output."}
-              </p>
-            )}
           </>
         )}
       </Panel>
