@@ -253,6 +253,7 @@ export function safeFailureEvidence(stage, error) {
     "ui-fixture-smoke.mjs",
     "browser-harness.mjs",
     "artifact-controls.mjs",
+    "command-bar-controls.mjs",
     "stdlib-build-contract.mjs",
     "retry-policy-fixture.mjs",
     "storage-journey.mjs",

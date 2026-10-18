@@ -65,6 +65,75 @@ import {
   applyArtifactRunFilter,
   assertControlReachable,
 } from "./artifact-controls.mjs";
+import { assertCommandBarActions } from "./command-bar-controls.mjs";
+
+test("command bar checks all five exact actions and their pointer clickability", async () => {
+  for (const theme of ["light", "dark"]) {
+    const names = [
+      "Organizations",
+      "Open command palette",
+      `Switch to ${theme} theme`,
+      "Inbox",
+      "Create new",
+    ];
+    const checked = [];
+    const header = {
+      getByRole(role, options) {
+        assert.equal(role, "button");
+        if (!options)
+          return {
+            evaluateAll: async (callback) =>
+              callback(names.map((name) => ({ getAttribute: () => name }))),
+          };
+        assert.equal(options.exact, true);
+        assert.ok(names.includes(options.name));
+        return {
+          scrollIntoViewIfNeeded: async () => {},
+          evaluate: async () => ({
+            label: options.name,
+            insideViewport: true,
+            overlapsLauncher: false,
+            pointerHits: true,
+          }),
+          click: async (clickOptions) => {
+            assert.deepEqual(clickOptions, { trial: true });
+            checked.push(options.name);
+          },
+        };
+      },
+    };
+    const page = {
+      getByRole(role) {
+        assert.equal(role, "banner");
+        return header;
+      },
+    };
+    await assertCommandBarActions(page);
+    assert.deepEqual(checked, names);
+    for (const invalidNames of [
+      names.slice(1),
+      [...names, "Organizations"],
+      names.map((name) => (name === "Organizations" ? "Unknown" : name)),
+      names.map((name) => (name === "Organizations" ? null : name)),
+      names.map((name) =>
+        name.startsWith("Switch to") ? "Switch theme" : name,
+      ),
+    ]) {
+      const original = [...names];
+      names.splice(0, names.length, ...invalidNames);
+      await assert.rejects(
+        assertCommandBarActions(page),
+        /Every command-bar action must be present exactly once/,
+      );
+      names.splice(0, names.length, ...original);
+    }
+    assert.equal(
+      checked.length,
+      5,
+      "Invalid inventories must fail before clicking",
+    );
+  }
+});
 
 test("native option disabled checks inspect a labeled option, not its enabled select", () => {
   const dom = new JSDOM(`<label>Scope<select>
