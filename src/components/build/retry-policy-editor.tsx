@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { RetryPolicy } from "@/api/pipeline/types";
+import { parseDefinition } from "./visual-ci-draft";
 
 type Job = Record<string, unknown>;
 
@@ -72,7 +73,7 @@ export function setJobRetry(
   index: number,
   retry?: RetryPolicy,
 ): string {
-  const spec: unknown = JSON.parse(text);
+  const spec = parseDefinition(text);
   if (
     !isObject(spec) ||
     !Array.isArray(spec.jobs) ||
@@ -112,14 +113,16 @@ export function RetryPolicyEditor({
 }) {
   let jobs: (Job | null)[] = [];
   let offlineContainer = false;
+  let draftError = "";
   try {
-    const spec: unknown = JSON.parse(value);
+    const spec = parseDefinition(value);
     offlineContainer = isOfflineContainer(spec);
     if (isObject(spec) && Array.isArray(spec.jobs))
       jobs = spec.jobs.map((job) => (isObject(job) ? job : null));
-  } catch {
-    /* JSON editor reports validation errors. */
+  } catch (error) {
+    draftError = error instanceof Error ? error.message : "Invalid definition.";
   }
+  const locked = disabled || !!draftError;
   const [index, setIndex] = useState(0);
   const [mode, setMode] = useState<RetryPolicy["mode"] | "off" | "unsupported">(
     "off",
@@ -160,7 +163,7 @@ export function RetryPolicyEditor({
   }, [current, index]);
   const apply = () => {
     setError("");
-    if (disabled) return;
+    if (locked) return;
     if (scopeError || mode === "unsupported") {
       setError(scopeError);
       return;
@@ -214,7 +217,7 @@ export function RetryPolicyEditor({
             Job
             <select
               aria-label="Retry job"
-              disabled={disabled || !jobs.length}
+              disabled={locked || !jobs.length}
               value={index}
               onChange={(event) => setIndex(Number(event.target.value))}
               className="mt-1 h-9 w-full rounded-md border bg-background px-2"
@@ -230,7 +233,7 @@ export function RetryPolicyEditor({
             Scope
             <select
               aria-label="Retry scope"
-              disabled={disabled}
+              disabled={locked}
               value={mode}
               onChange={(event) => {
                 setMode(event.target.value as typeof mode);
@@ -275,7 +278,7 @@ export function RetryPolicyEditor({
                   min={2}
                   max={5}
                   value={max}
-                  disabled={disabled}
+                  disabled={locked}
                   onChange={(event) => setMax(Number(event.target.value))}
                 />
               </label>
@@ -284,7 +287,7 @@ export function RetryPolicyEditor({
                 <Input
                   aria-label="Retry delay"
                   value={delay}
-                  disabled={disabled}
+                  disabled={locked}
                   onChange={(event) => setDelay(event.target.value)}
                 />
               </label>
@@ -294,7 +297,7 @@ export function RetryPolicyEditor({
                   aria-label="Retry exit codes"
                   placeholder="e.g. 9, 75"
                   value={codes}
-                  disabled={disabled}
+                  disabled={locked}
                   onChange={(event) => setCodes(event.target.value)}
                 />
               </label>
@@ -303,7 +306,7 @@ export function RetryPolicyEditor({
               <input
                 type="checkbox"
                 checked={idempotent}
-                disabled={disabled}
+                disabled={locked}
                 onChange={(event) => setIdempotent(event.target.checked)}
               />
               {offlineContainer && mode === "whole_job"
@@ -314,16 +317,16 @@ export function RetryPolicyEditor({
             </label>
           </>
         )}
-        {(scopeError || error) && (
+        {(draftError || scopeError || error) && (
           <p role="alert" className="text-destructive">
-            {scopeError || error}
+            {draftError || scopeError || error}
           </p>
         )}
         <Button
           type="button"
           size="sm"
           variant="outline"
-          disabled={disabled || !jobs[index] || !!scopeError}
+          disabled={locked || !jobs[index] || !!scopeError}
           onClick={apply}
         >
           Apply retry policy to draft
