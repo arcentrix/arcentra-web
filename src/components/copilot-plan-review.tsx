@@ -30,11 +30,13 @@ export function CopilotPlanReview({
   turns,
   onFailure,
   disabled,
+  onRetryAction,
 }: {
   conversation: CopilotConversation;
   turns: CopilotTurn[];
   onFailure: () => void;
   disabled: boolean;
+  onRetryAction?: (plan: CopilotPlan) => void;
 }) {
   const [plans, setPlans] = useState<CopilotPlan[]>([]);
   const [nextAfter, setNextAfter] = useState(0);
@@ -593,6 +595,18 @@ export function CopilotPlanReview({
                 Refresh proposal
               </Button>
             </div>
+            {onRetryAction &&
+              editable &&
+              plan.state === "reviewed" &&
+              plan.kind === "retry_approval_review" && (
+                <Button
+                  variant="outline"
+                  disabled={disabled || busy}
+                  onClick={() => onRetryAction(plan)}
+                >
+                  Review separate bound retry action
+                </Button>
+              )}
             {payload && plan.kind !== "code_patch" && (
               <a
                 className="block text-sm underline underline-offset-4"

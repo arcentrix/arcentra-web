@@ -45,8 +45,8 @@ and plan payloads are not copied into the 30-day question/answer history.
 The fixed proposal kinds are code patches, new-run review, existing retry approval
 review and deployment review. All say **Not executed**. Proposal review records a
 version/digest-bound human review only. Proposal cancellation does not cancel a
-pipeline, retry approval or deployment. There are no execute, approve, apply,
-retry or deploy buttons in Copilot.
+pipeline, retry approval or deployment. Those history plans themselves remain inert. An independently gated bound retry
+approval action is described below; review is never execution consent.
 
 Code patches use one explicitly selected earlier evidence file. The server must
 re-read and verify the exact base; the browser never applies a patch. Artifact
@@ -83,3 +83,36 @@ unrun gate, not a simulated success. Run the real fixture in its supported hoste
 workflow; never weaken production transport restrictions or browser sandboxing
 for tests. The backend independently proves encryption, owner/live-scope
 isolation, retention, one-attempt dispatch and zero execution side effects.
+
+## Explicit bound retry approval actions
+
+Disabled unless the server explicitly reports both `retryExecutionEnabled: true`
+and `retryExecutionAvailable: true`. Only the authenticated owner's eligible,
+reviewed `retry_approval_review` plan can prepare a separate detached intent.
+Other proposal kinds remain inert. The server revalidates current independent
+candidate eligibility and all frozen bindings; model text cannot prepare or confirm.
+
+Preparation requires its own acknowledgement and records no approval. The copied
+intent survives deletion of its source conversation until its deadline. The
+project-level action list is separate from history, uses bounded pages of 20, and
+allows inspection and cancellation of a still-prepared intent after source deletion.
+There is no browser persistence. Scope/account changes and dismissal clear the UI.
+
+Confirmation requires a fresh explicit checkbox bound to the exact intent version
+and digest. It submits a permanent approval vote which may start the existing
+waiting job and use its complete bounded retry budget. It is not manual
+terminal-failure resume. The entire frozen retry evidence is visible as escaped
+text. Submitted votes cannot be withdrawn. Cancelling a prepared intent does not
+cancel a job or undo a vote. Existing job cancellation separately requires current
+permission, grants no new permission, and cannot promise rollback.
+
+Vote, quorum, job status, generation and observed runtime admission are displayed
+separately. An approved vote does not prove command execution or an actual retry.
+All failed or uncertain action results clear consent and evidence, offer only
+read-only inspection/reload, and never automatically resubmit confirmation or
+cancellation. Version conflicts require fresh inspection and new consent. Reads,
+reloads, focus and polling never submit votes; focus invalidates displayed evidence
+and aborts/fences pending requests. An interrupted mutation remains unconfirmed
+until explicit durable inspection, even if its pre-focus response arrives later.
+A submitted success requires a durable decision ID, submission timestamp, and
+the exact next intent version.
