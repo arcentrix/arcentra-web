@@ -26,6 +26,8 @@ import {
   sendCopilotTurn,
 } from "@/api/copilot/history";
 import { CopilotHistory } from "./copilot-history";
+import { CopilotExecutionActions } from "./copilot-execution-actions";
+import type { RetryActionCandidate } from "./copilot-execution-actions";
 import { CopilotPlanReview } from "./copilot-plan-review";
 import { useCopilotHistory } from "./use-copilot-history";
 
@@ -104,6 +106,7 @@ export function CopilotConsole() {
 }
 
 function ScopedCopilotConsole() {
+  const [retryCandidate, setRetryCandidate] = useState<RetryActionCandidate>();
   const [projectId, setProjectId] = useState("");
   const [runId, setRunId] = useState("");
   const [status, setStatus] = useState<CopilotStatus | null>(null);
@@ -191,6 +194,7 @@ function ScopedCopilotConsole() {
     setMode("ephemeral");
     setQuestion("");
     setUncertainRequest(null);
+    setRetryCandidate(undefined);
     setProjectId(nextProject);
     setRunId(nextRun);
     setStatus(null);
@@ -704,10 +708,36 @@ function ScopedCopilotConsole() {
             key={`${history.conversation.conversationId}:${history.revision}`}
             conversation={history.conversation}
             turns={history.turns}
+            onRetryAction={
+              status?.retryExecutionEnabled === true &&
+              status?.retryExecutionAvailable === true
+                ? (plan) =>
+                    setRetryCandidate({
+                      conversationId: history.conversation!.conversationId,
+                      plan,
+                    })
+                : undefined
+            }
             onFailure={history.fail}
             disabled={!!busy || history.busy}
           />
         )}
+      <CopilotExecutionActions
+        onFailure={history.fail}
+        key={`${projectId}:${runId}`}
+        projectId={projectId}
+        enabled={
+          status?.retryExecutionEnabled === true &&
+          status?.retryExecutionAvailable === true
+        }
+        candidate={
+          retryCandidate?.conversationId ===
+          history.conversation?.conversationId
+            ? retryCandidate
+            : undefined
+        }
+        disabled={!!busy || history.busy}
+      />
       {mode === "private" && !history.conversation && (
         <p role="status" className="text-sm">
           Choose or create a private conversation before previewing. This mode

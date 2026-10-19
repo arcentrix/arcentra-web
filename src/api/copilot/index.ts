@@ -15,6 +15,8 @@ export interface CopilotStatus {
   sourceContextEnabled?: boolean;
   maxSourceFiles?: number;
   maxSourceFileBytes?: number;
+  retryExecutionEnabled?: boolean;
+  retryExecutionAvailable?: boolean;
   historyEnabled?: boolean;
   historyAvailable?: boolean;
   historyRetentionDays?: number;
