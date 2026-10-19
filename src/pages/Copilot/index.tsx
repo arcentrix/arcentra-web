@@ -1,9 +1,10 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { CopilotConsole } from "@/components/copilot-console";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 
 export default function Copilot() {
+  const location = useLocation();
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-8">
       <PageHeader
@@ -19,7 +20,7 @@ export default function Copilot() {
           <Link to="/agents">View Agents</Link>
         </Button>
       </nav>
-      <CopilotConsole />
+      <CopilotConsole key={location.key} />
     </section>
   );
 }

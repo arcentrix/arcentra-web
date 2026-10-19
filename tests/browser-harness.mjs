@@ -1,3 +1,4 @@
+import { copilotHistoryStages } from "./copilot-history-journey.mjs";
 import { personalInboxStages } from "./personal-inbox-journey.mjs";
 import {
   visualCIConfig,
@@ -24,6 +25,7 @@ import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 const acceptanceStages = new Set([
   ...visualCIStages,
   ...personalInboxStages,
+  ...copilotHistoryStages,
   ...organizationManagementStages,
   ...projectSecretStages,
   "setup",
@@ -287,6 +289,8 @@ export function safeFailureEvidence(stage, error) {
   const files = [
     "actual-backend-acceptance.mjs",
     "actual-inbox-acceptance.mjs",
+    "actual-copilot-history-acceptance.mjs",
+    "copilot-history-journey.mjs",
     "inbox-auth-guard.mjs",
     "personal-inbox-journey.mjs",
     "ui-fixture-smoke.mjs",
