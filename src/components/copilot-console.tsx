@@ -998,6 +998,7 @@ function ScopedCopilotConsole() {
           <label className="block space-y-1 text-sm">
             Question
             <textarea
+              aria-label="Question"
               className={`${inputStyle} min-h-24`}
               autoComplete="off"
               spellCheck={false}

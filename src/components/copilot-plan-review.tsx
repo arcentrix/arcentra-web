@@ -313,6 +313,7 @@ export function CopilotPlanReview({
             <label className="block space-y-1 text-sm">
               Proposed unified diff
               <textarea
+                aria-label="Proposed unified diff"
                 className={`${inputStyle} min-h-32 font-mono`}
                 autoComplete="off"
                 spellCheck={false}

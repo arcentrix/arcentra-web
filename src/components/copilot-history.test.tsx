@@ -233,6 +233,93 @@ describe("private Copilot history", () => {
       screen.getByLabelText("Include turn 1 in next preview"),
     ).not.toBeChecked();
   });
+  it("keeps a stable explicit question label while editing a populated history-only follow-up", async () => {
+    let sequence = 0;
+    vi.mocked(api.sendCopilotTurn).mockImplementation(
+      async (_p, _c, input) => ({
+        ...turn(++sequence),
+        requestId: input.requestId,
+        question: input.question,
+        contentAvailableUntil: new Date(Date.now() + 86400000).toISOString(),
+      }),
+    );
+    render(<CopilotConsole />);
+    await load();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Create private conversation · 30 days",
+      }),
+    );
+    await screen.findByLabelText("Fixed conversation scope");
+    fireEvent.click(screen.getByLabelText(/Compile/));
+    await preview();
+    fireEvent.click(screen.getByLabelText(/Send this question/));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Analyze selected context" }),
+    );
+    await screen.findByRole("article", { name: "Saved turn 1" });
+    const question = screen.getByRole("textbox", {
+      name: "Question",
+    });
+    expect(question).toHaveValue("");
+    const followUp = "Using only the checked earlier pair, what next?";
+    fireEvent.change(question, { target: { value: followUp } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview redacted context" }),
+    );
+    await screen.findByRole("region", { name: "Redacted context preview" });
+    expect(api.previewCopilotHistory).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      expect.objectContaining({ historyTurnIds: [] }),
+      expect.any(AbortSignal),
+    );
+    fireEvent.click(screen.getByLabelText("Include turn 1 in next preview"));
+    fireEvent.click(screen.getByLabelText(/Compile/));
+    // React writes the controlled value into the textarea's text node. An
+    // explicit label keeps exact browser label locators stable despite that.
+    expect(question.textContent).toBe(followUp);
+    expect(question).toHaveAttribute("aria-label", "Question");
+    expect(question).toBeEnabled();
+    const editedFollowUp = "Explain only the next diagnostic check.";
+    fireEvent.change(screen.getByLabelText("Question", { exact: true }), {
+      target: { value: editedFollowUp },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview redacted context" }),
+    );
+    await screen.findByRole("region", { name: "Redacted context preview" });
+    expect(api.previewCopilotHistory).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      expect.objectContaining({
+        question: editedFollowUp,
+        historyTurnIds: ["turn-1"],
+        context: { stepRunIds: [], artifactIds: [], fromLine: 0 },
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(screen.getByLabelText(/Send this question/)).not.toBeChecked();
+    fireEvent.click(screen.getByLabelText(/Send this question/));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Analyze selected context" }),
+    );
+    await screen.findByRole("article", { name: "Saved turn 2" });
+    expect(api.sendCopilotTurn).toHaveBeenCalledTimes(2);
+    expect(api.sendCopilotTurn).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      expect.objectContaining({
+        question: editedFollowUp,
+        historyTurnIds: ["turn-1"],
+        context: { stepRunIds: [], artifactIds: [], fromLine: 0 },
+        shareSelectedContext: true,
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(screen.getByRole("article", { name: "Saved turn 1" })).toBeVisible();
+    expect(analyzeCopilot).not.toHaveBeenCalled();
+  });
   it("clears current private bodies when a successful refreshed list filters out a revoked pipeline", async () => {
     render(<CopilotConsole />);
     await open();
@@ -721,6 +808,12 @@ describe("typed review-only plans", () => {
     fireEvent.change(screen.getByLabelText("Previously selected patch base"), {
       target: { value: "0" },
     });
+    const diff = screen.getByLabelText("Proposed unified diff");
+    const initialPatch =
+      "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new";
+    fireEvent.change(diff, { target: { value: initialPatch } });
+    expect(diff.textContent).toBe(initialPatch);
+    expect(diff).toHaveAttribute("aria-label", "Proposed unified diff");
     fireEvent.change(screen.getByLabelText("Proposed unified diff"), {
       target: { value: plan.payload!.codePatch!.patch },
     });
