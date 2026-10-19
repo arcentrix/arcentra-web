@@ -665,6 +665,9 @@ it.each(providerCases)(
   async ({ provider, stream, repository, label, kind }) => {
     const scope = { provider, stream, repository } as PollingStatus["scope"];
     await ready({ ...initial, scope });
+    expect(screen.getByText(/Disabled by default/)).toHaveTextContent(
+      `supported ${kind} changes observed after that baseline`,
+    );
     expect(
       screen.getByRole("button", { name: `${label} ${kind} polling` }),
     ).toBeInTheDocument();

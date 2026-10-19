@@ -340,9 +340,8 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
           <p className="text-muted-foreground">
             Disabled by default. First save a non-executing baseline, then
             separately authorize named existing pipelines for supported{" "}
-            {requestKind}
-            changes observed after that baseline, including changes observed
-            between baseline and enable.
+            {requestKind} changes observed after that baseline, including
+            changes observed between baseline and enable.
           </p>
           <div
             className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
