@@ -17,6 +17,11 @@ import {
 /** Shared diagnostics for local-only official Playwright Chromium acceptance. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import {
+  remainingManagedBrowserBudget,
+  spawnManagedFrontend,
+  stopManagedFrontend,
+} from "./managed-frontend.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -608,6 +613,7 @@ export function safeBrowserRuntimeEvidence(events, lifecycle, log) {
         lifecycle.managed === true ? "vite-development" : "external-unknown",
       managed: lifecycle.managed === true,
       ready: lifecycle.ready === true,
+      listeningWitness: lifecycle.listeningWitness === true,
       readyAfterMs: boundedMs(lifecycle.readyAfterMs),
       observedForMs: boundedMs(lifecycle.observedForMs),
       exitCodeBeforeCleanup:
@@ -698,9 +704,18 @@ export async function runBrowserTest(
     projectSecretEvidence,
     visualEvidence,
     sensitiveValues = [],
+    requireManagedFrontend = false,
   } = {},
 ) {
   assert.ok(["simulated-transport", "actual-backend"].includes(kind));
+  assert.equal(typeof requireManagedFrontend, "boolean");
+  if (requireManagedFrontend) {
+    assert.equal(kind, "actual-backend");
+    assert.ok(
+      !Object.hasOwn(process.env, "UI_TEST_BASE_URL"),
+      "Strict frontend provenance forbids an external UI origin",
+    );
+  }
   const timeoutMs =
     totalTimeoutMs ?? (kind === "actual-backend" ? 300_000 : 180_000);
   assert.ok(
@@ -738,6 +753,7 @@ export async function runBrowserTest(
   const expectedHttpErrors = new Set();
   const consoleCollector = createConsoleCollector(diagnostics, sensitiveValues);
   let server;
+  let managedFrontend;
   let serverError;
   let serverLog = "";
   let browser;
@@ -753,47 +769,69 @@ export async function runBrowserTest(
   let runtimeEvidence;
   try {
     if (!process.env.UI_TEST_BASE_URL) {
-      server = spawn(
-        process.execPath,
-        [
-          "node_modules/vite/bin/vite.js",
-          "--host",
-          base.hostname,
-          "--port",
-          base.port,
-          "--strictPort",
-        ],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
+      if (requireManagedFrontend) {
+        const managed = spawnManagedFrontend({
+          host: base.hostname,
+          port: Number(base.port),
+          timeoutMs: Math.min(30_000, timeoutMs),
           env: {
             ...process.env,
             VITE_API_CLIENT_URL: "/api/v1",
             VITE_API_URL: backend || "http://127.0.0.1:1",
           },
-        },
-      );
+        });
+        server = managed.child;
+        managedFrontend = managed.observation;
+      } else
+        server = spawn(
+          process.execPath,
+          [
+            "node_modules/vite/bin/vite.js",
+            "--host",
+            base.hostname,
+            "--port",
+            base.port,
+            "--strictPort",
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            env: {
+              ...process.env,
+              VITE_API_CLIENT_URL: "/api/v1",
+              VITE_API_URL: backend || "http://127.0.0.1:1",
+            },
+          },
+        );
       server.on("error", (error) => (serverError = error));
       const log = (data) => (serverLog = `${serverLog}${data}`.slice(-100_000));
       server.stdout.on("data", log);
       server.stderr.on("data", log);
     }
+    if (managedFrontend) await managedFrontend.ready;
     let ready = false;
     for (let i = 0; i < 150; i++) {
+      managedFrontend?.assertAlive();
       if (serverError) throw serverError;
       if (server && server.exitCode !== null)
         throw new Error(`Vite exited (${server.exitCode}): ${serverLog}`);
       try {
-        const response = await fetch(base, {
+        const request = fetch(base, {
           redirect: "error",
           signal: AbortSignal.timeout(1_000),
         });
+        const response = await (managedFrontend
+          ? Promise.race([request, managedFrontend.failed])
+          : request);
+        managedFrontend?.assertAlive();
         if (response.ok) {
           ready = true;
           serverReady = true;
           readyAfterMs = Date.now() - serverStartedAt;
           break;
         }
-      } catch {}
+      } catch {
+        managedFrontend?.assertAlive();
+      }
       await delay(200);
     }
     assert.ok(ready, "Local Vite server did not become ready");
@@ -874,6 +912,10 @@ export async function runBrowserTest(
           status: response.status(),
         });
     });
+    managedFrontend?.assertAlive();
+    const observationTimeoutMs = requireManagedFrontend
+      ? remainingManagedBrowserBudget(timeoutMs, serverStartedAt)
+      : timeoutMs;
     const test = callback({
       page,
       context,
@@ -899,7 +941,10 @@ export async function runBrowserTest(
     });
     await withBrowserDeadline(
       async () => {
-        await test;
+        await (managedFrontend
+          ? Promise.race([test, managedFrontend.failed])
+          : test);
+        managedFrontend?.assertAlive();
         // Keep observing through browser close. A callback return is not an event
         // cutoff: late console calls or failed handle inspection must fail closed.
         await finalizeConsoleObservation(consoleCollector, async () => {
@@ -909,7 +954,7 @@ export async function runBrowserTest(
         });
         page.off("console", onConsole);
       },
-      timeoutMs,
+      observationTimeoutMs,
       `${kind} browser test exceeded its total timeout`,
     );
     assert.equal(
@@ -951,6 +996,7 @@ export async function runBrowserTest(
       true,
       "No synthetic credential may appear in browser diagnostics",
     );
+    managedFrontend?.assertAlive();
     diagnostics.status = "passed";
   } catch (error) {
     failure = error;
@@ -992,6 +1038,7 @@ export async function runBrowserTest(
       {
         managed: !!server,
         ready: serverReady,
+        listeningWitness: managedFrontend?.witnessed === true,
         readyAfterMs,
         observedForMs: Date.now() - serverStartedAt,
         exitCode: server?.exitCode,
@@ -999,7 +1046,16 @@ export async function runBrowserTest(
       },
       serverLog,
     );
-    server?.kill("SIGTERM");
+    if (managedFrontend) {
+      try {
+        await stopManagedFrontend(server, managedFrontend);
+      } catch {
+        failure ??= new Error(
+          "Owned managed frontend cleanup did not complete",
+        );
+        diagnostics.status = "failed";
+      }
+    } else server?.kill("SIGTERM");
     await writeFile(
       `${output}/diagnostics.json`,
       `${redactDiagnosticText(JSON.stringify(diagnostics, null, 2), sensitiveValues)}\n`,
