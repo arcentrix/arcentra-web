@@ -456,7 +456,6 @@ export async function runCopilotHistoryJourney({
     setStage("copilot-history-mobile");
     await page.setViewportSize({ width: 390, height: 844 });
     await assertControlReachable(
-      page,
       page.getByRole("button", {
         name: "Refresh private history",
         exact: true,

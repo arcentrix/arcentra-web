@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import {
   copilotHistoryStages,
   copilotTurnReceipt,
+  runCopilotHistoryJourney,
   validateCopilotHistoryContract,
 } from "./copilot-history-journey.mjs";
 const contract = {
@@ -100,4 +101,328 @@ test("real entrypoint does not fall back to mocked routes, browser storage seedi
   assert.match(journey, /SYNTHETIC_HISTORY_REPLY_2/);
   assert.match(journey, /Reload and restart must remain read-only/);
   assert.ok(copilotHistoryStages.includes("copilot-history-resume"));
+});
+
+// Unit-only interface doubles exercise every create/resume branch of the real
+// journey. They are not used by the real entrypoint or as browser/API evidence.
+test("create and resume invoke the real mobile helper with a Locator and preserve full journey contracts", async () => {
+  const base = "http://127.0.0.1:4173";
+  const prefix = "/api/v1/projects/project/copilot/conversations";
+  const conversation = { ...contract, conversationId: "conversation" };
+  const turns = [];
+  const listeners = new Set();
+  const waiters = [];
+  const stages = [];
+  const reachability = [];
+  let question = "";
+  let historyTurnIds = [];
+  let consent = false;
+  let preview;
+  let plan;
+  let selectedTurn;
+  let selectedKind;
+  const response = (method, suffix, detail, input) => {
+    const request = {
+      method: () => method,
+      url: () => `${base}${prefix}${suffix}`,
+      postDataJSON: () => input,
+    };
+    return {
+      request: () => request,
+      url: request.url,
+      status: () => 200,
+      headerValue: async (name) => {
+        assert.equal(name, "cache-control");
+        return "no-store";
+      },
+      json: async () => ({ code: 200, detail }),
+    };
+  };
+  const emit = (method, suffix, detail, input) => {
+    const value = response(method, suffix, detail, input);
+    for (const listener of listeners) listener(value.request());
+    const index = waiters.findIndex((waiter) => waiter.predicate(value));
+    assert.notEqual(
+      index,
+      -1,
+      "Every emitted response needs its exact watcher",
+    );
+    waiters.splice(index, 1)[0].resolve(value);
+  };
+  const nameText = (name) => (name instanceof RegExp ? name.source : name);
+  const locator = (role, name, parent) => {
+    assert.equal(typeof nameText(name), "string");
+    const control = {
+      async fill(value) {
+        assert.equal(role, "label");
+        assert.equal(typeof value, "string");
+        if (name === "Question") {
+          question = value;
+          consent = false;
+        } else assert.ok(["Project ID", "Run ID"].includes(name));
+      },
+      async selectOption(value) {
+        assert.equal(role, "label");
+        assert.equal(typeof value, "string");
+        if (name === "Saved turn for proposal") selectedTurn = value;
+        else {
+          assert.equal(name, "Proposal kind");
+          selectedKind = value;
+        }
+      },
+      async check() {
+        assert.equal(role, "label");
+        if (name instanceof RegExp) {
+          if (name.source.includes("Send this question")) consent = true;
+          else {
+            assert.equal(parent, "Plan plan");
+            assert.ok(name.test("I understand this records review only"));
+          }
+        } else if (name !== contract.stepId) {
+          const match = /^Include turn (\d+) in next preview$/.exec(name);
+          assert.ok(match);
+          historyTurnIds = [turns[Number(match[1]) - 1].turnId];
+          consent = false;
+        }
+      },
+      async uncheck() {
+        assert.equal(name, contract.stepId);
+        consent = false;
+      },
+      async isChecked() {
+        return name instanceof RegExp ? consent : false;
+      },
+      async isDisabled() {
+        assert.equal(name, "Analyze selected context");
+        return !consent;
+      },
+      async waitFor() {
+        if (role === "article" && name.startsWith("Saved turn "))
+          assert.ok(
+            turns.some((turn) => name === `Saved turn ${turn.sequence}`),
+          );
+        if (role === "text") {
+          assert.equal(parent, "Plan plan");
+          assert.equal(name, "Not executed");
+          assert.equal(plan.state, "reviewed");
+        }
+      },
+      async innerText() {
+        if (name === "Private conversation history")
+          return "Retained for 30 days";
+        if (parent === "Redacted context preview") return preview.text;
+        const turn = turns.find(
+          (turn) => (parent || name) === `Saved turn ${turn.sequence}`,
+        );
+        assert.ok(turn);
+        return role === "selector"
+          ? turn.text
+          : `${turn.question}\n${turn.text}`;
+      },
+      async count() {
+        assert.equal(role, "selector");
+        assert.ok(
+          ["a, img, script, iframe", "script, img, iframe"].includes(name),
+        );
+        return 0;
+      },
+      getByLabel: (child) => locator("label", child, name),
+      getByRole: (childRole, options) => locator(childRole, options.name, name),
+      getByText: (child, options) => {
+        assert.deepEqual(options, { exact: true });
+        return locator("text", child, name);
+      },
+      locator: (selector) => locator("selector", selector, name),
+      async scrollIntoViewIfNeeded() {
+        assert.equal(name, "Refresh private history");
+        reachability.push("scroll");
+      },
+      async evaluate(callback) {
+        assert.equal(name, "Refresh private history");
+        reachability.push("evaluate");
+        return callback(element);
+      },
+      async click(options) {
+        assert.equal(role, "button");
+        if (options) {
+          assert.equal(name, "Refresh private history");
+          assert.deepEqual(options, { trial: true });
+          reachability.push("trial-click");
+          return;
+        }
+        switch (name) {
+          case "Load context choices":
+            return;
+          case "Create private conversation · 30 days":
+            return emit("POST", "", conversation, {
+              acknowledgeRetention: true,
+            });
+          case "Load private conversations":
+            return emit("GET", "", { conversations: [conversation] });
+          case "Open private conversation conversation":
+            historyTurnIds = [];
+            consent = false;
+            return emit("GET", "/conversation", { conversation, turns });
+          case "Preview redacted context":
+            preview = {
+              text: `Question: ${question}\n${historyTurnIds.map((id) => turns.find((turn) => turn.turnId === id).text).join("\n")}`,
+              digest: `preview-${turns.length}`,
+              historyTurnIds: [...historyTurnIds],
+              historyBytes: historyTurnIds.length * 64,
+            };
+            consent = false;
+            return emit("POST", "/conversation/preview", preview, {
+              historyTurnIds: [...historyTurnIds],
+            });
+          case "Analyze selected context": {
+            assert.equal(consent, true);
+            const sequence = turns.length + 1;
+            const turn = {
+              turnId: `turn-${sequence}`,
+              requestId: `request-${sequence}`,
+              sequence,
+              question,
+              text: `SYNTHETIC_HISTORY_REPLY_${sequence}`,
+              state: "completed",
+              contentAvailable: true,
+              expiresAt: "2099-01-01T00:00:00Z",
+            };
+            turns.push(turn);
+            emit("POST", "/conversation/turns", turn, {
+              requestId: turn.requestId,
+              contextDigest: preview.digest,
+              historyTurnIds: [...historyTurnIds],
+              shareSelectedContext: true,
+            });
+            historyTurnIds = [];
+            consent = false;
+            return;
+          }
+          case "Create review-only proposal":
+            assert.equal(selectedTurn, "turn-1");
+            assert.equal(selectedKind, "new_run_review");
+            plan = {
+              planId: "plan",
+              turnId: selectedTurn,
+              kind: selectedKind,
+              state: "proposed",
+              version: 1,
+              planDigest: "plan-digest",
+              expiresAt: "2099-01-01T00:00:00Z",
+              executionEnabled: false,
+              executionStatus: "Not executed",
+              eligible: true,
+            };
+            return emit("POST", "/conversation/plans", plan);
+          case "Record review · Not executed": {
+            assert.equal(parent, "Plan plan");
+            const input = {
+              expectedVersion: plan.version,
+              planDigest: plan.planDigest,
+              acknowledgeNotExecuted: true,
+            };
+            plan = { ...plan, state: "reviewed", version: 2 };
+            return emit("POST", "/conversation/plans/plan/review", plan, input);
+          }
+          case "Load saved plans":
+            return emit("GET", "/conversation/plans", { plans: [plan] });
+          default:
+            assert.fail(`Unexpected journey button: ${name}`);
+        }
+      },
+    };
+    return control;
+  };
+  // Page deliberately has no Locator-only scrollIntoViewIfNeeded method.
+  const page = {
+    async goto(url) {
+      assert.equal(url, `${base}/workspace/Copilot/chat`);
+      historyTurnIds = [];
+      consent = false;
+    },
+    getByRole: (role, options) => locator(role, options.name),
+    getByLabel: (name) => locator("label", name),
+    waitForResponse(predicate, options) {
+      assert.equal(typeof predicate, "function");
+      assert.deepEqual(options, { timeout: 60000 });
+      return new Promise((resolve) => waiters.push({ predicate, resolve }));
+    },
+    on(event, listener) {
+      assert.equal(event, "request");
+      listeners.add(listener);
+    },
+    off(event, listener) {
+      assert.equal(event, "request");
+      assert.equal(listeners.delete(listener), true);
+    },
+    async setViewportSize(size) {
+      assert.deepEqual(size, { width: 390, height: 844 });
+    },
+    async evaluate(callback) {
+      return callback();
+    },
+  };
+  const element = {
+    getBoundingClientRect: () => ({
+      left: 10,
+      top: 10,
+      right: 210,
+      bottom: 50,
+      width: 200,
+      height: 40,
+    }),
+    getAttribute: () => "Refresh private history",
+    contains: (target) => target === element,
+  };
+  const globals = ["document", "window", "innerWidth", "innerHeight"].map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)],
+  );
+  try {
+    globalThis.innerWidth = 390;
+    globalThis.innerHeight = 844;
+    globalThis.window = { innerWidth: 390 };
+    globalThis.document = {
+      documentElement: { scrollWidth: 390 },
+      querySelector: () => null,
+      elementFromPoint: () => element,
+    };
+    const input = {
+      page,
+      base,
+      profileResponse: response("GET", "/profile", {
+        userId: contract.actorId,
+      }),
+      setStage: (stage) => {
+        assert.ok(copilotHistoryStages.includes(stage));
+        stages.push(stage);
+      },
+    };
+    const created = await runCopilotHistoryJourney({ ...input, contract });
+    assert.equal(created.sendCount, 2);
+    assert.deepEqual(created.historySelections, [[], ["turn-1"]]);
+    assert.equal(created.uncheckedHistoryExcluded, true);
+    const resumed = await runCopilotHistoryJourney({
+      ...input,
+      contract: { ...contract, phase: "resume", previous: created },
+    });
+    assert.equal(resumed.sendCount, 0);
+    assert.deepEqual(resumed.turns, created.turns);
+    assert.deepEqual(resumed.plan, created.plan);
+    assert.deepEqual(reachability, [
+      "scroll",
+      "evaluate",
+      "trial-click",
+      "scroll",
+      "evaluate",
+      "trial-click",
+    ]);
+    assert.equal(waiters.length, 0);
+    assert.equal(listeners.size, 0);
+    for (const stage of copilotHistoryStages) assert.ok(stages.includes(stage));
+  } finally {
+    for (const [key, descriptor] of globals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
 });
