@@ -204,3 +204,81 @@ it("rejects a mismatched page rather than silently presenting the wrong candidat
     "Polling information is unavailable.",
   );
 });
+
+it.each([
+  ["gitlab", "merge_requests", "https://gitlab.example/team/subgroup/repo"],
+  ["github", "pull_requests", "https://github.com/team/repo"],
+  ["gitea", "pull_requests", "https://gitea.example:8443/team/repo"],
+  ["gitlab", "merge_requests", "https://gitlab.example:443/team/repo"],
+  ["gitea", "pull_requests", "https://gitea.example:443/team/repo"],
+])("accepts supported canonical %s scope", (provider, stream, repository) => {
+  expect(
+    parsePollingStatus({ ...status, scope: { provider, stream, repository } })
+      .scope,
+  ).toEqual({ provider, stream, repository });
+});
+it.each([
+  ["github", "merge_requests", "https://github.com/team/repo"],
+  ["gitea", "merge_requests", "https://gitea.example/team/repo"],
+  ["gitlab", "pull_requests", "https://gitlab.example/team/repo"],
+  ["gitee", "pull_requests", "https://gitee.com/team/repo"],
+  ["bitbucket", "pull_requests", "https://bitbucket.org/team/repo"],
+  ["github", "pull_requests", "https://enterprise.example/team/repo"],
+  ["github", "pull_requests", "https://github.com.evil.example/team/repo"],
+  ["github", "pull_requests", "https://github.com:8443/team/repo"],
+  ["github", "pull_requests", "https://github.com:443/team/repo"],
+  ["github", "pull_requests", "https://github.com/team/repo/extra"],
+  ["github", "pull_requests", "https://github.com/team"],
+  ...["gitlab", "github", "gitea"].flatMap((provider) =>
+    [
+      `http://${provider}.com/team/repo`,
+      `https://secret@${provider}.com/team/repo`,
+      `https://${provider}.com/team/repo?token=secret`,
+      `https://${provider}.com/team/repo#secret`,
+      `https://${provider}.com/team/repo/`,
+      `https://${provider}.com/team/../repo`,
+      `https://${provider}.com/team%2Frepo`,
+      `https://${provider}.com/team/repo?`,
+      `https://${provider}.com/team/repo#`,
+    ].map((repository) => [
+      provider,
+      provider === "gitlab" ? "merge_requests" : "pull_requests",
+      repository,
+    ]),
+  ),
+])(
+  "rejects mismatched or unsafe scope %s %s %s",
+  (provider, stream, repository) => {
+    expect(() =>
+      parsePollingStatus({
+        ...status,
+        scope: { provider, stream, repository },
+      }),
+    ).toThrow();
+  },
+);
+
+it.each(["gitlab", "gitea"])(
+  "allows only the exact server-preserved :443 form for %s",
+  (provider) => {
+    const stream = provider === "gitlab" ? "merge_requests" : "pull_requests";
+    for (const repository of [
+      `https://${provider}.example:0443/team/repo`,
+      `https://${provider.toUpperCase()}.example:443/team/repo`,
+      `https://${provider}.example:443/team/../repo`,
+      `https://${provider}.example:443/team/./repo`,
+      `https://secret@${provider}.example:443/team/repo`,
+      `https://${provider}.example:443/team/repo?`,
+      `https://${provider}.example:443/team/repo#`,
+      `https://${provider}.example:443/team%2Frepo`,
+      `https://${provider}.example:443/team/repo/`,
+      ` https://${provider}.example:443/team/repo`,
+    ])
+      expect(() =>
+        parsePollingStatus({
+          ...status,
+          scope: { provider, stream, repository },
+        }),
+      ).toThrow();
+  },
+);

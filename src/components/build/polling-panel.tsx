@@ -47,6 +47,8 @@ function time(value?: string) {
 }
 function reason(value: string): string {
   const labels: Record<string, string> = {
+    requires_existing_enabled_supported_pr_project:
+      "Requires an existing enabled GitLab MR, GitHub.com PR or Gitea PR project. Check its existing server-side provider, repository, credentials and trigger settings. Gitee and Bitbucket polling are not supported.",
     requires_existing_enabled_gitlab_mr_project:
       "Requires an existing enabled GitLab project configured for merge-request polling. Check its existing server-side provider, repository, credentials and MR trigger settings.",
     pipeline_repository_ref_or_state_not_eligible:
@@ -276,7 +278,7 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
         action === "baseline"
           ? "Baseline saved. No runs were created. Review it and select pipelines before separately enabling polling."
           : action === "enable"
-            ? "Polling enabled for the explicitly selected pipelines. This does not confirm any build or MR-code validation."
+            ? "Polling enabled for the explicitly selected pipelines. This does not confirm any build or validation of the observed request code."
             : "Polling disabled. No new polling admissions are authorized; already accepted runs are not cancelled.",
       );
       await load(1);
@@ -299,6 +301,16 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
     !candidateError &&
     status.capabilities.canEnable &&
     !!status.baselineId;
+  const provider = status?.scope?.provider;
+  const providerName =
+    provider === "gitlab"
+      ? "GitLab"
+      : provider === "github"
+        ? "GitHub.com"
+        : provider === "gitea"
+          ? "Gitea"
+          : "";
+  const requestKind = provider === "gitlab" ? "MR" : provider ? "PR" : "PR/MR";
   return (
     <Panel>
       <Collapsible defaultOpen>
@@ -306,7 +318,9 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
           <CollapsibleTrigger asChild>
             <Button variant="ghost" className="group h-auto gap-2 px-0">
               <ChevronDown className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
-              GitLab MR polling
+              {providerName
+                ? `${providerName} ${requestKind} polling`
+                : "Repository PR/MR polling"}
             </Button>
           </CollapsibleTrigger>
           <Button
@@ -325,7 +339,8 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
         <CollapsibleContent className="space-y-4 border-t p-4 text-sm">
           <p className="text-muted-foreground">
             Disabled by default. First save a non-executing baseline, then
-            separately authorize named existing pipelines for supported MR
+            separately authorize named existing pipelines for supported{" "}
+            {requestKind}
             changes observed after that baseline, including changes observed
             between baseline and enable.
           </p>
@@ -334,31 +349,34 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
             aria-label="Polling source provenance"
           >
             <p className="font-medium">
-              An MR observation is not proof that MR code was tested.
+              An {requestKind} observation is not proof that {requestKind} code
+              was tested.
             </p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>
-                Saved observation: GitLab's reported MR source/merge revision is
-                trigger metadata.
+                Saved observation: {providerName || "the provider"}'s reported{" "}
+                {requestKind} head revision is trigger metadata.
               </li>
               <li>
                 Configured definition: each selected pipeline loads its
                 configured branch and path; its definition SHA may differ from
-                the observed MR SHA.
+                the observed {requestKind} SHA.
               </li>
               <li>
                 Actual Agent checkout: inspect each job's reported initial
                 checkout SHA in run details. Missing evidence stays unknown; a
-                configured branch or successful run is not MR-code validation.
+                configured branch or successful run is not {requestKind}-code
+                validation.
               </li>
             </ul>
           </div>
           <p className="text-xs text-muted-foreground">
-            Snapshot observations can miss intermediate changes. Existing
+            Snapshot observations can miss intermediate changes. Bounded
+            two-snapshot comparison is not a lossless event stream. Existing
             baseline revisions will not run, and historical event replay is not
             provided. Webhooks are a separate trigger path; duplicate prevention
             across webhooks and polling is not guaranteed. Event/ref matching
-            uses the MR target branch.
+            uses the {requestKind} target branch.
           </p>
           {loading && (
             <p role="status">
@@ -500,8 +518,9 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
                     <p className="text-xs text-muted-foreground">
                       Eligibility checks configuration and current permissions
                       only. It does not prove the definition is available or
-                      matches an MR event/ref. New pipelines are never selected
-                      automatically. Up to 100 may be explicitly selected.
+                      matches a {requestKind} event/ref. New pipelines are never
+                      selected automatically. Up to 100 may be explicitly
+                      selected.
                     </p>
                   </div>
                   {candidates.items.length === 0 && (
@@ -681,9 +700,9 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
               </DialogTitle>
               <DialogDescription>
                 {review.action === "baseline"
-                  ? "Read the existing configured GitLab repository and save the supported MR snapshot. This creates no runs and does not enable polling."
+                  ? `Read the existing configured ${providerName} repository and save the supported ${requestKind} snapshot. This creates no runs and does not enable polling.`
                   : review.action === "enable"
-                    ? "Run only these selected pipelines for supported MR changes observed after the reviewed baseline, using their configured definitions. Existing baseline revisions will not run."
+                    ? `Run only these selected pipelines for supported ${requestKind} changes observed after the reviewed baseline, using their configured definitions. Existing baseline revisions will not run; no historical event replay is provided.`
                     : "Disable this polling authorization. Runs already accepted are not cancelled; existing evidence remains available."}
               </DialogDescription>
             </DialogHeader>
@@ -728,8 +747,9 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
                 </ul>
                 <p>
                   Future commits to these configured definition branches may be
-                  used. The observed MR SHA, definition SHA and Agent checkout
-                  SHA may differ. Enabling does not prove MR code is tested.
+                  used. The observed {requestKind} head SHA, definition SHA and
+                  Agent checkout SHA may differ. Enabling does not prove{" "}
+                  {requestKind} code is tested.
                 </p>
                 <p>
                   Your current project and each pipeline's permissions remain

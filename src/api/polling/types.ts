@@ -11,7 +11,13 @@ export interface PollingStatus {
   baselineCompletedAt?: string;
   baselineObservationCount?: number;
   authorizerId?: string;
-  scope?: { provider: "gitlab"; repository: string; stream: "merge_requests" };
+  scope?:
+    | { provider: "gitlab"; repository: string; stream: "merge_requests" }
+    | {
+        provider: "github" | "gitea";
+        repository: string;
+        stream: "pull_requests";
+      };
   selectedPipelines: PollingPipeline[];
   blocker: string;
   capabilities: {
