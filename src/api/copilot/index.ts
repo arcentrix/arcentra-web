@@ -15,6 +15,11 @@ export interface CopilotStatus {
   sourceContextEnabled?: boolean;
   maxSourceFiles?: number;
   maxSourceFileBytes?: number;
+  historyEnabled?: boolean;
+  historyAvailable?: boolean;
+  historyRetentionDays?: number;
+  historyMaxSelectedTurns?: number;
+  historyMaxBytes?: number;
   maxContextBytes: number;
   maxQuestionBytes: number;
 }
@@ -82,7 +87,11 @@ export interface CopilotResult {
 const base = (projectId: string) =>
   `/projects/${encodeURIComponent(projectId)}/copilot`;
 export const getCopilotStatus = (projectId: string, signal?: AbortSignal) =>
-  get<CopilotStatus>(`${base(projectId)}/status`, { signal, silence: true });
+  get<CopilotStatus>(`${base(projectId)}/status`, {
+    signal,
+    silence: true,
+    redactErrors: true,
+  });
 export const getCopilotSources = (
   projectId: string,
   runId: string,
@@ -90,7 +99,7 @@ export const getCopilotSources = (
 ) =>
   get<CopilotSources>(
     `${base(projectId)}/runs/${encodeURIComponent(runId)}/context`,
-    { signal, silence: true },
+    { signal, silence: true, redactErrors: true },
   );
 export const analyzeCopilot = (
   projectId: string,
@@ -100,13 +109,14 @@ export const analyzeCopilot = (
   post<CopilotResult>(`${base(projectId)}/analysis`, input, {
     signal,
     silence: true,
+    redactErrors: true,
     timeout: 55000,
   });
 export const cancelCopilot = (projectId: string, requestId: string) =>
   post<{ cancelRequested: boolean }>(
     `${base(projectId)}/analysis/${encodeURIComponent(requestId)}/cancel`,
     {},
-    { silence: true, timeout: 10000 },
+    { silence: true, redactErrors: true, timeout: 10000 },
   );
 
 export interface CopilotPreview {
@@ -123,5 +133,6 @@ export const previewCopilot = (
   post<CopilotPreview>(`${base(projectId)}/preview`, input, {
     signal,
     silence: true,
+    redactErrors: true,
     timeout: 20000,
   });

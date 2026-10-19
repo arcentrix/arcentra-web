@@ -85,6 +85,7 @@ function ScopedRunApprovals({ scope }: { scope: ApprovalScope }) {
         {approvals?.map((approval) => (
           <article
             key={approval.approvalId}
+            id={`approval-${approval.approvalId}`}
             className="space-y-2 rounded border p-3"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">

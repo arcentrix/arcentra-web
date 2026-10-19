@@ -16,6 +16,18 @@ import type {
 import { sourcePathError } from "@/api/copilot/source-selection";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/blueprint";
+import authStore from "@/store/auth";
+import userStore from "@/store/user";
+import {
+  cancelCopilotTurn,
+  getCopilotRequest,
+  historySelectionError,
+  previewCopilotHistory,
+  sendCopilotTurn,
+} from "@/api/copilot/history";
+import { CopilotHistory } from "./copilot-history";
+import { CopilotPlanReview } from "./copilot-plan-review";
+import { useCopilotHistory } from "./use-copilot-history";
 
 const inputStyle = "w-full rounded-md border bg-background px-3 py-2 text-sm";
 const errorMessage = (error: unknown) =>
@@ -24,7 +36,18 @@ type ActiveRequest = {
   controller: AbortController;
   projectId: string;
   requestId?: string;
+  conversationId?: string;
 };
+function cancelActive(pending: ActiveRequest) {
+  if (!pending.requestId) return Promise.resolve();
+  return pending.conversationId
+    ? cancelCopilotTurn(
+        pending.projectId,
+        pending.conversationId,
+        pending.requestId,
+      )
+    : cancelCopilot(pending.projectId, pending.requestId);
+}
 
 function EvidenceList({ evidence }: { evidence: CopilotResult["evidence"] }) {
   return (
@@ -72,6 +95,15 @@ function EvidenceList({ evidence }: { evidence: CopilotResult["evidence"] }) {
 }
 
 export function CopilotConsole() {
+  const { accessToken } = authStore.useState();
+  const { userinfo } = userStore.useState();
+  // A different authenticated identity never inherits drafts, private content or consent.
+  return (
+    <ScopedCopilotConsole key={`${userinfo?.userId ?? ""}:${accessToken}`} />
+  );
+}
+
+function ScopedCopilotConsole() {
   const [projectId, setProjectId] = useState("");
   const [runId, setRunId] = useState("");
   const [status, setStatus] = useState<CopilotStatus | null>(null);
@@ -94,6 +126,39 @@ export function CopilotConsole() {
   const [preview, setPreview] = useState<CopilotPreview | null>(null);
   const active = useRef<ActiveRequest | null>(null);
   const version = useRef(0);
+  const [mode, setMode] = useState<"ephemeral" | "private">("ephemeral");
+  const [uncertainRequest, setUncertainRequest] = useState<{
+    projectId: string;
+    conversationId: string;
+    requestId: string;
+  } | null>(null);
+  const history = useCopilotHistory(
+    projectId,
+    invalidateContext,
+    (conversation) => {
+      setMode("private");
+      if (runId !== conversation.runId) {
+        setRunId(conversation.runId);
+        setSources(null);
+        setSteps([]);
+        setArtifacts([]);
+        setSourceFiles([]);
+        setSourceJobId("");
+        setSourcePath("");
+        setQuestion("");
+      }
+    },
+    () => {
+      setQuestion("");
+      setSources(null);
+      setSteps([]);
+      setArtifacts([]);
+      setSourceFiles([]);
+      setSourceJobId("");
+      setSourcePath("");
+    },
+    !!busy,
+  );
 
   useEffect(
     () => () => {
@@ -101,10 +166,7 @@ export function CopilotConsole() {
       const pending = active.current;
       active.current = null;
       pending?.controller.abort();
-      if (pending?.requestId)
-        void cancelCopilot(pending.projectId, pending.requestId).catch(
-          () => undefined,
-        );
+      if (pending?.requestId) void cancelActive(pending).catch(() => undefined);
     },
     [],
   );
@@ -114,10 +176,7 @@ export function CopilotConsole() {
     const pending = active.current;
     active.current = null;
     pending?.controller.abort();
-    if (pending?.requestId)
-      void cancelCopilot(pending.projectId, pending.requestId).catch(
-        () => undefined,
-      );
+    if (pending?.requestId) void cancelActive(pending).catch(() => undefined);
     setConsent(false);
     setPreview(null);
     setResult(null);
@@ -128,6 +187,10 @@ export function CopilotConsole() {
 
   function resetScope(nextProject: string, nextRun: string) {
     invalidateContext();
+    history.clear();
+    setMode("ephemeral");
+    setQuestion("");
+    setUncertainRequest(null);
     setProjectId(nextProject);
     setRunId(nextRun);
     setStatus(null);
@@ -140,7 +203,8 @@ export function CopilotConsole() {
   }
 
   async function loadContext() {
-    if (active.current || !projectId.trim() || !runId.trim()) return;
+    if (active.current || history.busy || !projectId.trim() || !runId.trim())
+      return;
     const generation = ++version.current;
     const controller = new AbortController();
     active.current = { controller, projectId: projectId.trim() };
@@ -163,6 +227,11 @@ export function CopilotConsole() {
         controller.signal,
       );
       if (generation !== version.current) return;
+      if (
+        configured.historyAvailable !== true ||
+        configured.historyEnabled !== true
+      )
+        history.clear();
       setStatus(configured);
       setModelIndex(0);
       if (configured.configured) {
@@ -175,7 +244,14 @@ export function CopilotConsole() {
         setSources(context);
       }
     } catch (err) {
-      if (generation === version.current) setError(errorMessage(err));
+      if (generation === version.current) {
+        history.fail();
+        setError(
+          mode === "private"
+            ? "Private request failed. Refresh to revalidate; nothing was resent."
+            : errorMessage(err),
+        );
+      }
     } finally {
       if (generation === version.current) {
         active.current = null;
@@ -188,14 +264,19 @@ export function CopilotConsole() {
     const model = status?.models[modelIndex];
     if (
       active.current ||
+      history.busy ||
+      (mode === "private" && !history.conversation) ||
       !model ||
-      (!steps.length && !artifacts.length && !sourceFiles.length) ||
+      (!steps.length &&
+        !artifacts.length &&
+        !sourceFiles.length &&
+        !(mode === "private" && history.selectedIds.length)) ||
       !question.trim()
     )
       return;
     if (
       new TextEncoder().encode(question).length >
-      (status?.maxQuestionBytes ?? 4096)
+      Math.min(status?.maxQuestionBytes ?? 4096, 4096)
     ) {
       setError("The question is too long. Use at most 4096 UTF-8 bytes.");
       return;
@@ -210,32 +291,67 @@ export function CopilotConsole() {
     setResult(null);
     setConsent(false);
     try {
-      const value = await previewCopilot(
-        projectId.trim(),
-        {
-          requestId: crypto.randomUUID(),
-          runId: runId.trim(),
-          providerId: model.providerId,
-          model: model.model,
-          question: question.trim(),
-          context: {
-            stepRunIds: [...steps],
-            artifactIds: [...artifacts],
-            ...(sourceFiles.length > 0 && {
-              sourceFiles: sourceFiles.map(({ jobRunId, path }) => ({
-                jobRunId,
-                path,
-              })),
-            }),
-            fromLine,
-          },
-          shareSelectedContext: false,
+      if (mode === "private" && !history.conversation)
+        throw new Error("Choose a private conversation first.");
+      const historyError =
+        mode === "private"
+          ? historySelectionError(history.turns, history.selectedIds)
+          : null;
+      if (historyError) {
+        setError(historyError);
+        return;
+      }
+      const input = {
+        requestId: crypto.randomUUID(),
+        runId: runId.trim(),
+        providerId: model.providerId,
+        model: model.model,
+        question: question.trim(),
+        context: {
+          stepRunIds: [...steps],
+          artifactIds: [...artifacts],
+          ...(sourceFiles.length > 0 && {
+            sourceFiles: sourceFiles.map(({ jobRunId, path }) => ({
+              jobRunId,
+              path,
+            })),
+          }),
+          fromLine,
         },
-        controller.signal,
-      );
-      if (generation === version.current) setPreview(value);
+        shareSelectedContext: false,
+      };
+      const value =
+        mode === "private" && history.conversation
+          ? await previewCopilotHistory(
+              projectId.trim(),
+              history.conversation.conversationId,
+              { ...input, historyTurnIds: [...history.selectedIds] },
+              controller.signal,
+            )
+          : await previewCopilot(projectId.trim(), input, controller.signal);
+      if (generation === version.current) {
+        if (
+          mode === "private" &&
+          (!("historyTurnIds" in value) ||
+            JSON.stringify(value.historyTurnIds) !==
+              JSON.stringify(history.selectedIds) ||
+            !("historyBytes" in value) ||
+            typeof value.historyBytes !== "number" ||
+            value.historyBytes > 8192 ||
+            value.historyBytes < 0)
+        )
+          throw new Error("History preview mismatch");
+        setPreview(value);
+      }
     } catch (err) {
-      if (generation === version.current) setError(errorMessage(err));
+      if (generation === version.current) {
+        if (mode === "private") history.fail();
+        setError(
+          mode === "private"
+            ? "Private request failed. Refresh to revalidate; nothing was resent."
+            : errorMessage(err),
+        );
+      }
     } finally {
       if (generation === version.current) {
         active.current = null;
@@ -248,25 +364,50 @@ export function CopilotConsole() {
     const model = status?.models[modelIndex];
     if (
       active.current ||
+      history.busy ||
+      (mode === "private" && !history.conversation) ||
       !model ||
       !consent ||
       !preview ||
-      (!steps.length && !artifacts.length && !sourceFiles.length) ||
+      (!steps.length &&
+        !artifacts.length &&
+        !sourceFiles.length &&
+        !(mode === "private" && history.selectedIds.length)) ||
       !question.trim()
     )
       return;
     if (
       new TextEncoder().encode(question).length >
-      (status?.maxQuestionBytes ?? 4096)
+      Math.min(status?.maxQuestionBytes ?? 4096, 4096)
     ) {
       setError("The question is too long. Use at most 4096 UTF-8 bytes.");
       return;
+    }
+    if (mode === "private") {
+      const selectionError = historySelectionError(
+        history.turns,
+        history.selectedIds,
+      );
+      if (selectionError) {
+        invalidateContext();
+        setError(selectionError);
+        return;
+      }
     }
     const generation = ++version.current;
     const controller = new AbortController();
     const requestId = crypto.randomUUID();
     const scope = projectId.trim();
-    active.current = { controller, projectId: scope, requestId };
+    const conversationId =
+      mode === "private" ? history.conversation?.conversationId : undefined;
+    if (mode === "private" && !conversationId) return;
+    active.current = {
+      controller,
+      projectId: scope,
+      requestId,
+      conversationId,
+    };
+    setUncertainRequest(null);
     setBusy("analysis");
     setError("");
     setNotice("");
@@ -274,36 +415,61 @@ export function CopilotConsole() {
     setConsent(false);
     setPreview(null);
     try {
-      const answer = await analyzeCopilot(
-        scope,
-        {
-          requestId,
-          runId: runId.trim(),
-          providerId: model.providerId,
-          model: model.model,
-          question: question.trim(),
-          context: {
-            stepRunIds: [...steps],
-            artifactIds: [...artifacts],
-            ...(sourceFiles.length > 0 && {
-              sourceFiles: sourceFiles.map(({ jobRunId, path }) => ({
-                jobRunId,
-                path,
-              })),
-            }),
-            fromLine,
-          },
-          shareSelectedContext: true,
-          contextDigest: preview.digest,
+      const input = {
+        requestId,
+        runId: runId.trim(),
+        providerId: model.providerId,
+        model: model.model,
+        question: question.trim(),
+        context: {
+          stepRunIds: [...steps],
+          artifactIds: [...artifacts],
+          ...(sourceFiles.length > 0 && {
+            sourceFiles: sourceFiles.map(({ jobRunId, path }) => ({
+              jobRunId,
+              path,
+            })),
+          }),
+          fromLine,
         },
-        controller.signal,
-      );
+        shareSelectedContext: true,
+        contextDigest: preview.digest,
+      };
+      const answer = conversationId
+        ? await sendCopilotTurn(
+            scope,
+            conversationId,
+            { ...input, historyTurnIds: [...history.selectedIds] },
+            controller.signal,
+          )
+        : await analyzeCopilot(scope, input, controller.signal);
       if (generation !== version.current) return;
       if (answer.requestId !== requestId)
         throw new Error("The response did not match this request.");
-      setResult(answer);
+      if ("state" in answer) {
+        history.receive(answer);
+        setQuestion("");
+        setNotice(
+          "Saved turn status: " + answer.state + ". No automatic resend.",
+        );
+      } else setResult(answer);
     } catch (err) {
-      if (generation === version.current) setError(errorMessage(err));
+      if (generation === version.current) {
+        if (mode === "private") {
+          history.fail();
+          if (conversationId)
+            setUncertainRequest({
+              projectId: scope,
+              conversationId,
+              requestId,
+            });
+        }
+        setError(
+          mode === "private"
+            ? "The saved request could not be confirmed. The provider may have received it. Check its saved status before making a new attempt; nothing will be resent automatically."
+            : errorMessage(err),
+        );
+      }
     } finally {
       if (generation === version.current) {
         active.current = null;
@@ -325,16 +491,79 @@ export function CopilotConsole() {
     setNotice("Stopped waiting for this request.");
     if (pending.requestId) {
       try {
-        await cancelCopilot(pending.projectId, pending.requestId);
+        const cancelled = await cancelActive(pending);
+        if (
+          generation === version.current &&
+          pending.conversationId &&
+          cancelled &&
+          "state" in cancelled
+        )
+          history.receive(cancelled);
         if (generation === version.current)
           setNotice(
             "Cancellation requested. Data already sent cannot be recalled; the provider may still charge for work started.",
           );
       } catch {
-        if (generation === version.current)
+        if (generation === version.current) {
+          if (pending.conversationId && pending.requestId) {
+            history.fail();
+            setUncertainRequest({
+              projectId: pending.projectId,
+              conversationId: pending.conversationId,
+              requestId: pending.requestId,
+            });
+          }
           setNotice(
-            "Stopped waiting. Server cancellation could not be confirmed; the request has a 45-second server time limit.",
+            "Stopped waiting. Server cancellation could not be confirmed; the provider may have received this request. Check saved status; nothing will be resent.",
           );
+        }
+      }
+    }
+  }
+  async function checkSavedRequest() {
+    const request = uncertainRequest;
+    if (!request || active.current) return;
+    const generation = ++version.current;
+    const controller = new AbortController();
+    active.current = { controller, projectId: request.projectId };
+    setBusy("loading");
+    setError("");
+    try {
+      const turn = await getCopilotRequest(
+        request.projectId,
+        request.conversationId,
+        request.requestId,
+        controller.signal,
+      );
+      if (generation !== version.current) return;
+      if (turn.requestId !== request.requestId)
+        throw new Error("Request mismatch");
+      setNotice(
+        "Saved request status: " + turn.state + ". No automatic resend.",
+      );
+      active.current = null;
+      setBusy(null);
+      await history.open(request.conversationId);
+      if (
+        [
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "outcome_unknown",
+          "withheld",
+        ].includes(turn.state)
+      )
+        setUncertainRequest(null);
+    } catch {
+      if (generation === version.current) {
+        history.fail();
+        setError("Saved status is unavailable. Nothing has been resent.");
+      }
+    } finally {
+      if (generation === version.current) {
+        active.current = null;
+        setBusy(null);
       }
     }
   }
@@ -355,7 +584,12 @@ export function CopilotConsole() {
   const selectedJob = sourceJobs.find((job) => job.jobRunId === sourceJobId);
   const sourceEnabled = status?.sourceContextEnabled === true;
   const maxSourceFiles = Math.max(0, Math.min(status?.maxSourceFiles ?? 0, 3));
-  const hasSelection = steps.length + artifacts.length + sourceFiles.length > 0;
+  const hasSelection =
+    steps.length +
+      artifacts.length +
+      sourceFiles.length +
+      (mode === "private" ? history.selectedIds.length : 0) >
+    0;
 
   function addSourceFile() {
     if (
@@ -386,7 +620,7 @@ export function CopilotConsole() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge tone="muted">Read-only analysis</StatusBadge>
         {status && (
@@ -397,9 +631,10 @@ export function CopilotConsole() {
       </div>
       <p className="text-sm text-muted-foreground">
         Ask about explicitly selected run logs, registered text-code artifacts,
-        and repository files when enabled for this project. Repository browsing
-        and conversation history are unavailable. Suggestions never execute
-        retries or deployments.
+        and repository files when enabled for this project. Ephemeral analysis
+        is not saved. Private history requires explicit creation when available.
+        Suggestions and reviewed plans never change code, approve, retry or
+        deploy.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
@@ -442,6 +677,59 @@ export function CopilotConsole() {
           </Button>
         )}
       </div>
+      {status && (
+        <CopilotHistory
+          history={history}
+          status={status}
+          runId={runId}
+          mode={mode}
+          onPrivate={() => {
+            invalidateContext();
+            setMode("private");
+          }}
+          disabled={!!busy}
+          onEphemeral={() => {
+            invalidateContext();
+            history.clear();
+            setQuestion("");
+            setUncertainRequest(null);
+            setMode("ephemeral");
+          }}
+        />
+      )}
+      {mode === "private" &&
+        history.conversation &&
+        status?.historyAvailable && (
+          <CopilotPlanReview
+            key={`${history.conversation.conversationId}:${history.revision}`}
+            conversation={history.conversation}
+            turns={history.turns}
+            onFailure={history.fail}
+            disabled={!!busy || history.busy}
+          />
+        )}
+      {mode === "private" && !history.conversation && (
+        <p role="status" className="text-sm">
+          Choose or create a private conversation before previewing. This mode
+          will never fall back to ephemeral analysis.
+        </p>
+      )}
+      {uncertainRequest && (
+        <div role="status" className="space-y-2 rounded-md border p-3 text-sm">
+          <p>
+            Saved request outcome is unconfirmed. Checking status only reads the
+            durable record.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!!busy || history.busy}
+            onClick={() => void checkSavedRequest()}
+          >
+            Check saved request status
+          </Button>
+        </div>
+      )}
       {status && !status.configured && (
         <p role="status" className="rounded-md border p-3 text-sm">
           No approved provider is configured for this project. An administrator
@@ -455,6 +743,7 @@ export function CopilotConsole() {
           <label className="block space-y-1 text-sm">
             Configured model
             <select
+              aria-label="Configured model"
               className={inputStyle}
               value={modelIndex}
               onChange={(event) => {
@@ -589,6 +878,7 @@ export function CopilotConsole() {
                 <label className="block space-y-1 text-sm">
                   Source job
                   <select
+                    aria-label="Source job"
                     className={inputStyle}
                     value={sourceJobId}
                     onChange={(event) => {
@@ -710,7 +1000,10 @@ export function CopilotConsole() {
           <label className="block space-y-1 text-sm">
             Question
             <textarea
+              aria-label="Question"
               className={`${inputStyle} min-h-24`}
+              autoComplete="off"
+              spellCheck={false}
               value={question}
               maxLength={4096}
               onChange={(event) => {
@@ -723,7 +1016,14 @@ export function CopilotConsole() {
           <Button
             type="button"
             variant="outline"
-            disabled={!!busy || !model || !question.trim() || !hasSelection}
+            disabled={
+              !!busy ||
+              history.busy ||
+              !model ||
+              !question.trim() ||
+              !hasSelection ||
+              (mode === "private" && !history.conversation)
+            }
             onClick={() => void previewContext()}
           >
             {busy === "preview"
@@ -761,8 +1061,11 @@ export function CopilotConsole() {
               onChange={(event) => setConsent(event.target.checked)}
             />
             <span>
-              Send this question and selected context to{" "}
-              {model?.providerId ?? "the configured provider"} for this
+              Send this question, selected context
+              {mode === "private"
+                ? ", and only the checked historical pairs"
+                : ""}{" "}
+              to {model?.providerId ?? "the configured provider"} for this
               analysis. Known secrets are redacted, but review your data policy
               before sharing. Context is capped at{" "}
               {Math.floor(status.maxContextBytes / 1024)} KiB.
@@ -772,6 +1075,8 @@ export function CopilotConsole() {
             type="button"
             disabled={
               !!busy ||
+              history.busy ||
+              (mode === "private" && !history.conversation) ||
               !consent ||
               !preview ||
               !question.trim() ||

@@ -17,12 +17,12 @@ describe("Copilot authenticated API contracts", () => {
     expect(get).toHaveBeenNthCalledWith(
       1,
       "/projects/project%2Fa/copilot/status",
-      { signal, silence: true },
+      { signal, silence: true, redactErrors: true },
     );
     expect(get).toHaveBeenNthCalledWith(
       2,
       "/projects/project%2Fa/copilot/runs/run%2Fb/context",
-      { signal, silence: true },
+      { signal, silence: true, redactErrors: true },
     );
   });
   it("sends exact explicit selections and preview digest; cancellation has an independent request", () => {
@@ -44,19 +44,19 @@ describe("Copilot authenticated API contracts", () => {
       1,
       "/projects/p/copilot/preview",
       { ...input, shareSelectedContext: false },
-      { signal, silence: true, timeout: 20000 },
+      { signal, silence: true, redactErrors: true, timeout: 20000 },
     );
     expect(post).toHaveBeenNthCalledWith(
       2,
       "/projects/p/copilot/analysis",
       input,
-      { signal, silence: true, timeout: 55000 },
+      { signal, silence: true, redactErrors: true, timeout: 55000 },
     );
     expect(post).toHaveBeenNthCalledWith(
       3,
       "/projects/p/copilot/analysis/request/cancel",
       {},
-      { silence: true, timeout: 10000 },
+      { silence: true, redactErrors: true, timeout: 10000 },
     );
   });
   it("supports source-only context using job identity and path through the authenticated client", () => {
@@ -81,6 +81,7 @@ describe("Copilot authenticated API contracts", () => {
       {
         signal: undefined,
         silence: true,
+        redactErrors: true,
         timeout: 20000,
       },
     );
