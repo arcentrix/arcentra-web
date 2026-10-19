@@ -14,7 +14,7 @@ export interface PollingStatus {
   scope?:
     | { provider: "gitlab"; repository: string; stream: "merge_requests" }
     | {
-        provider: "github" | "gitea";
+        provider: "github" | "gitea" | "gitee" | "bitbucket";
         repository: string;
         stream: "pull_requests";
       };

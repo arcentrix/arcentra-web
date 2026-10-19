@@ -48,7 +48,7 @@ function time(value?: string) {
 function reason(value: string): string {
   const labels: Record<string, string> = {
     requires_existing_enabled_supported_pr_project:
-      "Requires an existing enabled GitLab MR, GitHub.com PR or Gitea PR project. Check its existing server-side provider, repository, credentials and trigger settings. Gitee and Bitbucket polling are not supported.",
+      "Requires an existing enabled GitLab MR, GitHub.com, Gitea, Gitee.com or Bitbucket Cloud PR project. Check its existing server-side provider, repository, credentials and trigger settings. Self-hosted Gitee and Bitbucket Server are not supported.",
     requires_existing_enabled_gitlab_mr_project:
       "Requires an existing enabled GitLab project configured for merge-request polling. Check its existing server-side provider, repository, credentials and MR trigger settings.",
     pipeline_repository_ref_or_state_not_eligible:
@@ -309,7 +309,11 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
         ? "GitHub.com"
         : provider === "gitea"
           ? "Gitea"
-          : "";
+          : provider === "gitee"
+            ? "Gitee.com"
+            : provider === "bitbucket"
+              ? "Bitbucket Cloud"
+              : "";
   const requestKind = provider === "gitlab" ? "MR" : provider ? "PR" : "PR/MR";
   return (
     <Panel>
@@ -351,6 +355,20 @@ function ProjectPollingPanel({ projectId }: { projectId: string }) {
               An {requestKind} observation is not proof that {requestKind} code
               was tested.
             </p>
+            {provider === "gitee" && (
+              <p className="mt-2">
+                Gitee merged observations include provider state and time; no
+                merge-result SHA is supplied. Private Git definition
+                authentication must be configured and verified separately.
+              </p>
+            )}
+            {provider === "bitbucket" && (
+              <p className="mt-2">
+                Bitbucket merged observations include provider state and
+                merge-result SHA; merge time is unavailable. Update time is an
+                observation cutoff, not proof of when merging occurred.
+              </p>
+            )}
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>
                 Saved observation: {providerName || "the provider"}'s reported{" "}

@@ -789,7 +789,7 @@ await runBrowserTest(
       output,
       expectHttpError,
     });
-    for (const provider of ["github", "gitea"]) {
+    for (const provider of ["github", "gitea", "gitee", "bitbucket"]) {
       polling = pollingFixture(provider);
       await page.reload();
       await assertProjectPipelines();

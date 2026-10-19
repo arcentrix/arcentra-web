@@ -79,15 +79,19 @@ export function parsePollingStatus(value: unknown): PollingStatus {
       /[?#]/.test(repository) ||
       !/^\/(?:[^/]+\/)+[^/]+$/.test(url.pathname) ||
       /[\\%\s]/.test(repository) ||
-      (provider === "github" &&
-        (url.origin !== "https://github.com" ||
+      (["github", "gitee", "bitbucket"].includes(String(provider)) &&
+        (url.origin !==
+          `https://${provider === "bitbucket" ? "bitbucket.org" : `${provider}.com`}` ||
           !/^\/[^/]+\/[^/]+$/.test(url.pathname)))
     )
       throw invalid();
     if (provider === "gitlab" && stream === "merge_requests")
       scope = { provider, repository, stream };
     else if (
-      (provider === "github" || provider === "gitea") &&
+      (provider === "github" ||
+        provider === "gitea" ||
+        provider === "gitee" ||
+        provider === "bitbucket") &&
       stream === "pull_requests"
     )
       scope = { provider, repository, stream };
