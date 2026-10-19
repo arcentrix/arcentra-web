@@ -62,17 +62,36 @@ export function parsePollingStatus(value: unknown): PollingStatus {
     const raw = object(row.scope);
     const repository = string(raw.repository);
     const url = new URL(repository);
+    const { provider, stream } = raw;
+    // The server preserves an explicit default HTTPS port for configured
+    // GitLab/Gitea origins. WHATWG URL omits it; permit only that exact form,
+    // never broader URL normalization or explicit ports for GitHub.com.
+    const preservedDefaultPort =
+      (provider === "gitlab" || provider === "gitea") &&
+      repository === `https://${url.hostname}:443${url.pathname}`;
     if (
-      raw.provider !== "gitlab" ||
-      raw.stream !== "merge_requests" ||
-      !["http:", "https:"].includes(url.protocol) ||
+      url.protocol !== "https:" ||
+      (url.href !== repository && !preservedDefaultPort) ||
       url.username ||
       url.password ||
       url.search ||
-      url.hash
+      url.hash ||
+      /[?#]/.test(repository) ||
+      !/^\/(?:[^/]+\/)+[^/]+$/.test(url.pathname) ||
+      /[\\%\s]/.test(repository) ||
+      (provider === "github" &&
+        (url.origin !== "https://github.com" ||
+          !/^\/[^/]+\/[^/]+$/.test(url.pathname)))
     )
       throw invalid();
-    scope = { provider: "gitlab", repository, stream: "merge_requests" };
+    if (provider === "gitlab" && stream === "merge_requests")
+      scope = { provider, repository, stream };
+    else if (
+      (provider === "github" || provider === "gitea") &&
+      stream === "pull_requests"
+    )
+      scope = { provider, repository, stream };
+    else throw invalid();
   }
   return {
     supported: boolean(row.supported),

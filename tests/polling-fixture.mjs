@@ -1,7 +1,14 @@
 /** Synthetic transport assertions only: never evidence of provider reads or execution. */
 import assert from "node:assert/strict";
 
-export function pollingFixture() {
+export function pollingFixture(provider = "gitlab") {
+  assert.ok(["gitlab", "github", "gitea"].includes(provider));
+  const providerName = {
+    gitlab: "GitLab",
+    github: "GitHub.com",
+    gitea: "Gitea",
+  }[provider];
+  const requestKind = provider === "gitlab" ? "MR" : "PR";
   const initial = {
     supported: true,
     state: "disabled",
@@ -9,9 +16,12 @@ export function pollingFixture() {
     selectedPipelines: [],
     blocker: "",
     scope: {
-      provider: "gitlab",
-      repository: "https://gitlab.example/team/api",
-      stream: "merge_requests",
+      provider,
+      repository:
+        provider === "github"
+          ? "https://github.com/team/api"
+          : `https://${provider}.example/team/api`,
+      stream: provider === "gitlab" ? "merge_requests" : "pull_requests",
     },
     capabilities: { canBaseline: true, canEnable: false, canDisable: false },
   };
@@ -29,6 +39,9 @@ export function pollingFixture() {
   }));
   return {
     writes,
+    provider,
+    providerName,
+    requestKind,
     get status() {
       return status;
     },
@@ -40,7 +53,7 @@ export function pollingFixture() {
       const url = new URL(request.url());
       const path = url.pathname;
       const root = "/api/v1/project/project-1/polling";
-      if (!path.startsWith(root)) return false;
+      if (path !== root && !path.startsWith(`${root}/`)) return false;
       const ok = (detail) => route.fulfill({ json: { code: 200, detail } });
       if (request.method() === "GET" && path === root) {
         await ok(status);
@@ -49,6 +62,11 @@ export function pollingFixture() {
       if (request.method() === "GET" && path === `${root}/candidates`) {
         const pageNum = Number(url.searchParams.get("pageNum"));
         assert.equal(url.searchParams.get("pageSize"), "25");
+        assert.deepEqual([...url.searchParams.keys()].sort(), [
+          "pageNum",
+          "pageSize",
+        ]);
+        assert.ok(Number.isInteger(pageNum) && pageNum >= 1 && pageNum <= 5);
         await ok({
           items: candidates.slice((pageNum - 1) * 25, pageNum * 25),
           total: candidates.length,
@@ -75,6 +93,7 @@ export function pollingFixture() {
         return true;
       }
       if (action === "baseline") {
+        assert.equal(status.capabilities.canBaseline, true);
         assert.deepEqual(Object.keys(body).sort(), [
           "acknowledgeDiscard",
           "expectedRevision",
@@ -94,6 +113,8 @@ export function pollingFixture() {
           },
         };
       } else if (action === "enable") {
+        assert.equal(status.state, "baselined");
+        assert.equal(status.capabilities.canEnable, true);
         assert.deepEqual(Object.keys(body).sort(), [
           "baselineId",
           "expectedRevision",
@@ -119,6 +140,7 @@ export function pollingFixture() {
           nextRetryAt: "2026-10-16T12:03:00Z",
         };
       } else if (action === "disable") {
+        assert.equal(status.capabilities.canDisable, true);
         assert.deepEqual(Object.keys(body), ["expectedRevision"]);
         status = {
           ...status,
@@ -142,6 +164,21 @@ export async function assertPollingSetup({
   const originalViewport = page.viewportSize();
   const refresh = page.getByRole("button", { name: "Refresh polling status" });
   await refresh.waitFor();
+  await page
+    .getByRole("button", {
+      name: `${fixture.providerName} ${fixture.requestKind} polling`,
+      exact: true,
+    })
+    .waitFor();
+  assert.match(
+    await page.getByLabel("Polling source provenance").innerText(),
+    new RegExp(
+      `An ${fixture.requestKind} observation is not proof that ${fixture.requestKind} code was tested`,
+    ),
+  );
+  await page
+    .getByText(/Bounded two-snapshot comparison is not a lossless event stream/)
+    .waitFor();
   await page
     .getByRole("button", { name: "Review baseline", exact: true })
     .waitFor();
@@ -218,7 +255,7 @@ export async function assertPollingSetup({
     false,
   );
   await page.screenshot({
-    path: `${output}/polling-enable-review-mobile.png`,
+    path: `${output}/polling-${fixture.provider}-enable-review-mobile.png`,
     fullPage: true,
   });
   await page.getByRole("button", { name: "Enable these pipelines" }).click();
@@ -270,7 +307,7 @@ export async function assertPollingSetup({
     "Conflict refresh must not replay a mutation",
   );
   await page.screenshot({
-    path: `${output}/polling-disabled-mobile.png`,
+    path: `${output}/polling-${fixture.provider}-disabled-mobile.png`,
     fullPage: true,
   });
   if (originalViewport) await page.setViewportSize(originalViewport);

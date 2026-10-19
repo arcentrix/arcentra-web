@@ -132,7 +132,7 @@ await runBrowserTest(
       },
       agent: { access: "visible", enabledRecentlySeen: false },
     };
-    const polling = pollingFixture();
+    let polling = pollingFixture();
     const storage = storageFixture();
     const honesty = honestyFixture(project);
     const secrets = projectSecretsFixture(project.projectId);
@@ -789,6 +789,17 @@ await runBrowserTest(
       output,
       expectHttpError,
     });
+    for (const provider of ["github", "gitea"]) {
+      polling = pollingFixture(provider);
+      await page.reload();
+      await assertProjectPipelines();
+      await assertPollingSetup({
+        page,
+        fixture: polling,
+        output,
+        expectHttpError,
+      });
+    }
     await page.goBack();
     await assertProjectOverview();
     await page.goForward();

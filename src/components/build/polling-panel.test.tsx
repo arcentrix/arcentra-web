@@ -636,3 +636,136 @@ it("drops draft choices after access denial or an actual repository scope change
   await screen.findByText("https://gitlab.example/team/other");
   expect(screen.getByRole("checkbox")).not.toBeChecked();
 });
+
+const providerCases = [
+  {
+    provider: "gitlab",
+    stream: "merge_requests",
+    repository: "https://gitlab.example/team/repo",
+    label: "GitLab",
+    kind: "MR",
+  },
+  {
+    provider: "github",
+    stream: "pull_requests",
+    repository: "https://github.com/team/repo",
+    label: "GitHub.com",
+    kind: "PR",
+  },
+  {
+    provider: "gitea",
+    stream: "pull_requests",
+    repository: "https://gitea.example/team/repo",
+    label: "Gitea",
+    kind: "PR",
+  },
+] as const;
+it.each(providerCases)(
+  "uses reviewed $provider scope through baseline, enable and disable",
+  async ({ provider, stream, repository, label, kind }) => {
+    const scope = { provider, stream, repository } as PollingStatus["scope"];
+    await ready({ ...initial, scope });
+    expect(screen.getByText(/Disabled by default/)).toHaveTextContent(
+      `supported ${kind} changes observed after that baseline`,
+    );
+    expect(
+      screen.getByRole("button", { name: `${label} ${kind} polling` }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Polling source provenance"),
+    ).toHaveTextContent(
+      `An ${kind} observation is not proof that ${kind} code was tested`,
+    );
+    expect(
+      screen.getByText(/Snapshot observations can miss/),
+    ).toHaveTextContent(
+      "Bounded two-snapshot comparison is not a lossless event stream",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Review baseline" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `configured ${label} repository`,
+    );
+    vi.mocked(baselinePolling).mockResolvedValue({ ...baselined, scope });
+    vi.mocked(getPollingStatus).mockResolvedValue({ ...baselined, scope });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save baseline without runs" }),
+    );
+    await waitFor(() => expect(screen.getByRole("checkbox")).toBeEnabled());
+    expect(enablePolling).not.toHaveBeenCalled();
+    reviewEnable();
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `observed ${kind} head SHA, definition SHA and Agent checkout SHA may differ`,
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "no historical event replay",
+    );
+    vi.mocked(enablePolling).mockResolvedValue({ ...enabled, scope });
+    vi.mocked(getPollingStatus).mockResolvedValue({ ...enabled, scope });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enable these pipelines" }),
+    );
+    await screen.findByText("Enabled", { exact: true });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review disable polling" }),
+    );
+    vi.mocked(disablePolling).mockResolvedValue({
+      ...initial,
+      scope,
+      revision: 3,
+    });
+    vi.mocked(getPollingStatus).mockResolvedValue({
+      ...initial,
+      scope,
+      revision: 3,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Disable polling" }));
+    await screen.findByText("Disabled", { exact: true });
+    expect(baselinePolling).toHaveBeenCalledOnce();
+    expect(enablePolling).toHaveBeenCalledOnce();
+    expect(disablePolling).toHaveBeenCalledOnce();
+  },
+);
+it.each(providerCases)(
+  "clears $provider status and drafts after current permission loss",
+  async ({ provider, stream, repository }) => {
+    await ready({
+      ...baselined,
+      scope: { provider, stream, repository } as PollingStatus["scope"],
+    });
+    choose();
+    vi.mocked(getPollingStatus).mockRejectedValue(
+      new ApiError({ status: 403, message: "secret" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh polling status" }),
+    );
+    await screen.findByRole("alert");
+    expect(screen.queryByLabelText("Polling snapshot")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Review enable polling" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("secret")).not.toBeInTheDocument();
+  },
+);
+it.each(["gitee", "bitbucket", "generic"])(
+  "leaves unsupported $0 projects read-only",
+  async (projectId) => {
+    vi.mocked(getPollingStatus).mockResolvedValue({
+      ...initial,
+      supported: false,
+      scope: undefined,
+      blocker: "requires_existing_enabled_supported_pr_project",
+      capabilities: { canBaseline: false, canEnable: false, canDisable: false },
+    });
+    render(<PollingPanel projectId={projectId} />);
+    await screen.findByText(
+      /Requires an existing enabled GitLab MR, GitHub.com PR or Gitea PR project/,
+    );
+    expect(getPollingCandidates).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Review baseline" }),
+    ).not.toBeInTheDocument();
+  },
+);
