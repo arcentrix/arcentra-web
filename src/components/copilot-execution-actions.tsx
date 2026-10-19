@@ -41,7 +41,8 @@ export function CopilotExecutionActions({
   const generation = useRef(0);
   const pendingMutation = useRef<{ id: string } | null>(null);
   useEffect(() => {
-    generation.current++;
+    const generationRef = generation;
+    generationRef.current++;
     active.current?.abort();
     active.current = null;
     pendingMutation.current = null;
@@ -54,7 +55,7 @@ export function CopilotExecutionActions({
     setError("");
     setNextAfter(0);
     return () => {
-      generation.current++;
+      generationRef.current++;
       active.current?.abort();
       active.current = null;
       pendingMutation.current = null;
