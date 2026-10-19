@@ -2,11 +2,15 @@
 import assert from "node:assert/strict";
 
 export function pollingFixture(provider = "gitlab") {
-  assert.ok(["gitlab", "github", "gitea"].includes(provider));
+  assert.ok(
+    ["gitlab", "github", "gitea", "gitee", "bitbucket"].includes(provider),
+  );
   const providerName = {
     gitlab: "GitLab",
     github: "GitHub.com",
     gitea: "Gitea",
+    gitee: "Gitee.com",
+    bitbucket: "Bitbucket Cloud",
   }[provider];
   const requestKind = provider === "gitlab" ? "MR" : "PR";
   const initial = {
@@ -18,9 +22,11 @@ export function pollingFixture(provider = "gitlab") {
     scope: {
       provider,
       repository:
-        provider === "github"
-          ? "https://github.com/team/api"
-          : `https://${provider}.example/team/api`,
+        provider === "github" || provider === "gitee"
+          ? `https://${provider}.com/team/api`
+          : provider === "bitbucket"
+            ? "https://bitbucket.org/team/api"
+            : `https://${provider}.example/team/api`,
       stream: provider === "gitlab" ? "merge_requests" : "pull_requests",
     },
     capabilities: { canBaseline: true, canEnable: false, canDisable: false },
@@ -176,6 +182,18 @@ export async function assertPollingSetup({
       `An ${fixture.requestKind} observation is not proof that ${fixture.requestKind} code was tested`,
     ),
   );
+  if (fixture.provider === "gitee") {
+    assert.match(
+      await page.getByLabel("Polling source provenance").innerText(),
+      /no merge-result SHA is supplied/,
+    );
+  }
+  if (fixture.provider === "bitbucket") {
+    assert.match(
+      await page.getByLabel("Polling source provenance").innerText(),
+      /merge time is unavailable/,
+    );
+  }
   await page
     .getByText(/Bounded two-snapshot comparison is not a lossless event stream/)
     .waitFor();

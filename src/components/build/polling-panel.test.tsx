@@ -659,6 +659,20 @@ const providerCases = [
     label: "Gitea",
     kind: "PR",
   },
+  {
+    provider: "gitee",
+    stream: "pull_requests",
+    repository: "https://gitee.com/team/repo",
+    label: "Gitee.com",
+    kind: "PR",
+  },
+  {
+    provider: "bitbucket",
+    stream: "pull_requests",
+    repository: "https://bitbucket.org/team/repo",
+    label: "Bitbucket Cloud",
+    kind: "PR",
+  },
 ] as const;
 it.each(providerCases)(
   "uses reviewed $provider scope through baseline, enable and disable",
@@ -760,7 +774,7 @@ it.each(["gitee", "bitbucket", "generic"])(
     });
     render(<PollingPanel projectId={projectId} />);
     await screen.findByText(
-      /Requires an existing enabled GitLab MR, GitHub.com PR or Gitea PR project/,
+      /Requires an existing enabled GitLab MR, GitHub.com, Gitea, Gitee.com or Bitbucket Cloud PR project/,
     );
     expect(getPollingCandidates).not.toHaveBeenCalled();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
