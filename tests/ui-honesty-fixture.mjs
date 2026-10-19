@@ -240,6 +240,7 @@ export async function assertHonestyFixtureUI({
   assert.equal(
     (
       await runHonestyJourney({
+        personalInbox: true,
         page,
         base,
         output,

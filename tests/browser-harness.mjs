@@ -1,3 +1,4 @@
+import { personalInboxStages } from "./personal-inbox-journey.mjs";
 import {
   visualCIConfig,
   visualCIEvidence,
@@ -22,6 +23,7 @@ import { artifactContractConfig } from "./stdlib-build-contract.mjs";
 
 const acceptanceStages = new Set([
   ...visualCIStages,
+  ...personalInboxStages,
   ...organizationManagementStages,
   ...projectSecretStages,
   "setup",
@@ -284,6 +286,9 @@ export function safeFailureEvidence(stage, error) {
   if (typeof error?.stack !== "string") return result;
   const files = [
     "actual-backend-acceptance.mjs",
+    "actual-inbox-acceptance.mjs",
+    "inbox-auth-guard.mjs",
+    "personal-inbox-journey.mjs",
     "ui-fixture-smoke.mjs",
     "browser-harness.mjs",
     "artifact-controls.mjs",

@@ -307,6 +307,7 @@ await runBrowserTest(
       .getByRole("heading", { name: projectName, exact: true })
       .waitFor();
     const honesty = await runHonestyJourney({
+      personalInbox: true,
       page,
       base,
       output,
