@@ -167,6 +167,104 @@ async function preview() {
   await screen.findByRole("region", { name: "Redacted context preview" });
 }
 describe("private Copilot history", () => {
+  it("keeps exact explicit labels stable for every populated Copilot select", async () => {
+    vi.mocked(getCopilotStatus).mockResolvedValue({
+      ...status,
+      sourceContextEnabled: true,
+      maxSourceFiles: 3,
+    });
+    vi.mocked(getCopilotSources).mockResolvedValue({
+      steps: [{ stepRunId: "step", name: "Compile", status: 5 }],
+      artifacts: [],
+      warnings: [],
+      sourceJobs: ["job-1", "job-2"].map((jobRunId) => ({
+        jobRunId,
+        name: jobRunId,
+        status: 5,
+        available: true,
+        reason: "",
+        provenanceState: "reported" as const,
+      })),
+    });
+    render(<CopilotConsole />);
+    await open();
+    fireEvent.change(screen.getByLabelText("Saved turn for proposal"), {
+      target: { value: "turn-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Proposal kind"), {
+      target: { value: "code_patch" },
+    });
+    const choices = [
+      ["Configured model", ["1", "0"]],
+      ["Source job", ["job-1", "job-2"]],
+      ["Saved turn for proposal", ["turn-2", "turn-1"]],
+      ["Proposal kind", ["deployment_review", "code_patch"]],
+      ["Previously selected patch base", ["0", "", "0"]],
+    ] as const;
+    for (const [name, values] of choices) {
+      let select = screen.getByRole("combobox", { name });
+      // Playwright's exact label engine includes all nested option text unless
+      // the control has an explicit label. Testing Library alone omits it.
+      expect(select.closest("label")?.textContent?.trim()).not.toBe(name);
+      expect(select).toHaveAttribute("aria-label", name);
+      for (const value of values) {
+        fireEvent.change(screen.getByLabelText(name, { exact: true }), {
+          target: { value },
+        });
+        select = screen.getByLabelText(name, { exact: true });
+        expect(select).toHaveValue(value);
+        expect(select).toHaveAttribute("aria-label", name);
+      }
+    }
+    expect(api.sendCopilotTurn).not.toHaveBeenCalled();
+    expect(plans.createCopilotPlan).not.toHaveBeenCalled();
+    for (const path of ["src/first.go", "src/second.go"]) {
+      fireEvent.change(screen.getByLabelText("Repository-relative path"), {
+        target: { value: path },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add source file" }));
+    }
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove src/first.go from job-2" }),
+    );
+    fireEvent.click(screen.getByLabelText("Include turn 1 in next preview"));
+    await preview();
+    expect(api.previewCopilotHistory).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      expect.objectContaining({
+        historyTurnIds: ["turn-1"],
+        context: {
+          stepRunIds: [],
+          artifactIds: [],
+          fromLine: 0,
+          sourceFiles: [{ jobRunId: "job-2", path: "src/second.go" }],
+        },
+      }),
+      expect.any(AbortSignal),
+    );
+    fireEvent.click(screen.getByLabelText(/Send this question/));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Analyze selected context" }),
+    );
+    await screen.findByRole("article", { name: "Saved turn 3" });
+    expect(api.sendCopilotTurn).toHaveBeenCalledWith(
+      "project",
+      "conversation",
+      expect.objectContaining({
+        historyTurnIds: ["turn-1"],
+        context: {
+          stepRunIds: [],
+          artifactIds: [],
+          fromLine: 0,
+          sourceFiles: [{ jobRunId: "job-2", path: "src/second.go" }],
+        },
+        shareSelectedContext: true,
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(analyzeCopilot).not.toHaveBeenCalled();
+  });
   it("has no automatic create/send and requires visible retention acknowledgement", async () => {
     render(<CopilotConsole />);
     await load();
@@ -183,6 +281,154 @@ describe("private Copilot history", () => {
       expect.objectContaining({ runId: "run", acknowledgeRetention: true }),
       expect.any(AbortSignal),
     );
+    expect(api.sendCopilotTurn).not.toHaveBeenCalled();
+    expect(analyzeCopilot).not.toHaveBeenCalled();
+  });
+  it("pages conversations, repeats open and refresh, and keeps or deletes only after explicit choices", async () => {
+    const other = { ...conversation, conversationId: "other-conversation" };
+    vi.mocked(api.listCopilotConversations)
+      .mockResolvedValueOnce({
+        conversations: [conversation],
+        nextCursor: "next",
+      })
+      .mockResolvedValueOnce({ conversations: [other] });
+    render(<CopilotConsole />);
+    await load();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load private conversations" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "More conversations" }),
+    );
+    await screen.findByRole("button", {
+      name: "Open private conversation other-conversation",
+    });
+    expect(api.listCopilotConversations).toHaveBeenLastCalledWith(
+      "project",
+      "next",
+      expect.any(AbortSignal),
+    );
+    const openCurrent = async () => {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Open private conversation conversation",
+        }),
+      );
+      await screen.findByRole("article", { name: "Saved turn 1" });
+    };
+    await openCurrent();
+    for (let count = 2; count <= 3; count++) {
+      fireEvent.click(screen.getByLabelText("Include turn 1 in next preview"));
+      await preview();
+      fireEvent.click(screen.getByLabelText(/Send this question/));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Refresh private history" }),
+      );
+      await screen.findByRole("article", { name: "Saved turn 1" });
+      expect(api.getCopilotConversation).toHaveBeenCalledTimes(count);
+      expect(
+        screen.getByLabelText("Include turn 1 in next preview"),
+      ).not.toBeChecked();
+      expect(screen.getByLabelText(/Send this question/)).not.toBeChecked();
+      expect(
+        screen.queryByRole("region", { name: "Redacted context preview" }),
+      ).not.toBeInTheDocument();
+    }
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use ephemeral analysis" }),
+    );
+    expect(
+      screen.queryByRole("article", { name: "Saved turn 1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Question")).toHaveValue("");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load private conversations" }),
+    );
+    await screen.findByRole("button", {
+      name: "Open private conversation conversation",
+    });
+    await openCurrent();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete conversation" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Keep conversation" }));
+    expect(api.deleteCopilotConversation).not.toHaveBeenCalled();
+    expect(screen.getByRole("article", { name: "Saved turn 1" })).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete conversation" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete saved conversation" }),
+    );
+    expect(
+      screen.queryByRole("article", { name: "Saved turn 1" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.deleteCopilotConversation).toHaveBeenCalledOnce(),
+    );
+    expect(api.deleteCopilotConversation).toHaveBeenCalledWith(
+      "project",
+      "conversation",
+      1,
+      expect.any(AbortSignal),
+    );
+    expect(api.sendCopilotTurn).not.toHaveBeenCalled();
+    expect(analyzeCopilot).not.toHaveBeenCalled();
+  });
+  it("repeats saved-status reads and requests cancellation without resending a dispatching turn", async () => {
+    let saved: CopilotTurn = {
+      ...turn(1),
+      state: "dispatching",
+      contentAvailable: false,
+    };
+    vi.mocked(api.getCopilotConversation).mockImplementation(async () => ({
+      conversation,
+      turns: [saved],
+    }));
+    vi.mocked(api.getCopilotRequest).mockImplementation(async () => saved);
+    vi.mocked(api.cancelCopilotTurn).mockImplementation(async () => {
+      saved = { ...saved, state: "cancelled", version: 2 };
+      return saved;
+    });
+    render(<CopilotConsole />);
+    await open();
+    for (let count = 1; count <= 2; count++) {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Check turn 1 saved status" }),
+      );
+      await waitFor(() =>
+        expect(api.getCopilotRequest).toHaveBeenCalledTimes(count),
+      );
+    }
+    expect(api.getCopilotRequest).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      "request-1",
+      expect.any(AbortSignal),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Request cancellation for turn 1" }),
+    );
+    await screen.findByText(
+      "Cancelled. Data already transmitted cannot be recalled.",
+    );
+    expect(api.cancelCopilotTurn).toHaveBeenCalledWith(
+      "project",
+      "conversation",
+      "request-1",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Request cancellation for turn 1" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh private history" }),
+    );
+    await screen.findByText(
+      "Cancelled. Data already transmitted cannot be recalled.",
+    );
+    expect(
+      screen.getByLabelText("Include turn 1 in next preview"),
+    ).toBeDisabled();
     expect(api.sendCopilotTurn).not.toHaveBeenCalled();
     expect(analyzeCopilot).not.toHaveBeenCalled();
   });
@@ -790,6 +1036,282 @@ describe("typed review-only plans", () => {
       },
     },
   };
+  it("pages and reloads saved proposals without duplicating articles or reviewing anything", async () => {
+    const other = { ...plan, planId: "other-plan" };
+    vi.mocked(plans.listCopilotPlans)
+      .mockResolvedValueOnce({ plans: [plan], nextAfter: 20 })
+      .mockResolvedValueOnce({ plans: [other] })
+      .mockResolvedValueOnce({ plans: [other] });
+    render(<CopilotConsole />);
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Load saved plans" }));
+    await screen.findByRole("article", { name: "Plan plan" });
+    fireEvent.click(screen.getByRole("button", { name: "More saved plans" }));
+    await screen.findByRole("article", { name: "Plan other-plan" });
+    expect(plans.listCopilotPlans).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      20,
+      expect.any(AbortSignal),
+    );
+    expect(screen.getAllByRole("article", { name: /^Plan / })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Load saved plans" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("article", { name: "Plan plan" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByRole("article", { name: /^Plan / })).toHaveLength(1);
+    expect(plans.listCopilotPlans).toHaveBeenLastCalledWith(
+      "project",
+      "conversation",
+      0,
+      expect.any(AbortSignal),
+    );
+    expect(plans.createCopilotPlan).not.toHaveBeenCalled();
+    expect(plans.reviewCopilotPlan).not.toHaveBeenCalled();
+    expect(plans.cancelCopilotPlan).not.toHaveBeenCalled();
+  });
+  it.each([
+    "new_run_review",
+    "code_patch_artifact",
+    "code_patch_source",
+    "retry_approval_review",
+    "deployment_review",
+  ] as const)(
+    "repeats populated %s controls and scopes refresh, review, and cancel to the intended proposal",
+    async (scenario) => {
+      const kind: plans.CopilotPlanKind =
+        scenario === "code_patch_artifact" || scenario === "code_patch_source"
+          ? "code_patch"
+          : scenario;
+      const source = {
+        kind: "source-file",
+        id: "source",
+        name: "src/main.go",
+        bytes: 20,
+        truncated: false,
+        jobRunId: "job",
+        path: "src/main.go",
+      };
+      vi.mocked(api.getCopilotConversation).mockResolvedValue({
+        conversation,
+        turns: [
+          { ...turn(1), evidence: [...turn(1).evidence, source] },
+          turn(2),
+        ],
+      });
+      const other = { ...plan, planId: "other-plan" };
+      vi.mocked(plans.listCopilotPlans).mockResolvedValue({ plans: [other] });
+      let stored = plan;
+      const expected: Record<string, unknown> = { kind, turnId: "turn-1" };
+      const payload: plans.CopilotPlanPayload = {
+        schemaVersion: 1,
+        kind,
+        label: "Review only; not executed",
+      };
+      vi.mocked(plans.createCopilotPlan).mockImplementation(
+        async (_project, _conversation, input) => {
+          stored = { ...plan, kind, requestId: input.requestId, payload };
+          return stored;
+        },
+      );
+      vi.mocked(plans.getCopilotPlan).mockImplementation(async () => stored);
+      vi.mocked(plans.reviewCopilotPlan).mockImplementation(async () => {
+        stored = { ...stored, state: "reviewed", version: stored.version + 1 };
+        return stored;
+      });
+      vi.mocked(plans.cancelCopilotPlan).mockImplementation(async () => {
+        stored = { ...stored, state: "cancelled", version: stored.version + 1 };
+        return stored;
+      });
+      render(<CopilotConsole />);
+      await open();
+      fireEvent.click(screen.getByRole("button", { name: "Load saved plans" }));
+      const otherArticle = await screen.findByRole("article", {
+        name: "Plan other-plan",
+      });
+      for (const value of ["turn-2", "turn-1"])
+        fireEvent.change(screen.getByLabelText("Saved turn for proposal"), {
+          target: { value },
+        });
+      for (const value of ["deployment_review", "code_patch", kind])
+        fireEvent.change(screen.getByLabelText("Proposal kind"), {
+          target: { value },
+        });
+      const edit = (name: string, value: string) => {
+        fireEvent.change(screen.getByLabelText(name, { exact: true }), {
+          target: { value: "draft-value" },
+        });
+        fireEvent.change(screen.getByLabelText(name, { exact: true }), {
+          target: { value },
+        });
+        expect(screen.getByLabelText(name, { exact: true })).toHaveValue(value);
+      };
+      if (kind === "code_patch") {
+        const sourcePatch = scenario === "code_patch_source";
+        for (const value of ["1", "0", sourcePatch ? "1" : "0"])
+          fireEvent.change(
+            screen.getByLabelText("Previously selected patch base"),
+            {
+              target: { value },
+            },
+          );
+        const path = sourcePatch ? "src/main.go" : "main.go";
+        const patch = `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new`;
+        edit("Proposed unified diff", patch);
+        expected.codePatch = sourcePatch
+          ? { sourceFile: { jobRunId: "job", path: "src/main.go" }, patch }
+          : { artifactId: "artifact", patch };
+        payload.codePatch = {
+          ...plan.payload!.codePatch!,
+          patch,
+          ...(sourcePatch && {
+            artifactId: undefined,
+            jobRunId: "job",
+            path: "src/main.go",
+            snapshotOnly: false,
+          }),
+        };
+      } else if (kind === "new_run_review") {
+        payload.newRun = { pipelineId: "pipeline", diagnosticRunId: "run" };
+      } else if (kind === "retry_approval_review") {
+        edit("Existing retry approval ID", "approval");
+        expected.retryApproval = { approvalId: "approval" };
+        payload.retryApproval = {
+          approvalId: "approval",
+          jobRunId: "job",
+          bindingKind: "exact",
+          evidenceDigest: "evidence",
+          policyId: "policy",
+          deadline: null,
+        };
+      } else {
+        edit("Existing environment ID", "environment");
+        edit("Registered release artifact ID", "release-artifact");
+        edit("Existing release ID (optional)", "release");
+        expected.deployment = {
+          environmentId: "environment",
+          artifactId: "release-artifact",
+          releaseId: "release",
+        };
+        payload.deployment = {
+          environmentId: "environment",
+          artifactId: "release-artifact",
+          releaseId: "release",
+          artifactDigest: "artifact-digest",
+          targetFingerprint: "target",
+          namespace: "namespace",
+          workload: "workload",
+          container: "container",
+          imageDigest: "image-digest",
+          approvalRequired: false,
+        };
+      }
+      fireEvent.click(
+        screen.getByRole("button", { name: "Create review-only proposal" }),
+      );
+      const article = await screen.findByRole("article", { name: "Plan plan" });
+      expect(plans.createCopilotPlan).toHaveBeenCalledWith(
+        "project",
+        "conversation",
+        { ...expected, requestId: expect.any(String) },
+        expect.any(AbortSignal),
+      );
+      const review = () =>
+        within(article).getByRole("button", {
+          name: "Record review · Not executed",
+        });
+      expect(review()).toBeDisabled();
+      for (let count = 1; count <= 2; count++) {
+        fireEvent.click(
+          within(article).getByLabelText(
+            /I understand this records review only/,
+          ),
+        );
+        expect(review()).toBeEnabled();
+        fireEvent.click(
+          within(article).getByRole("button", { name: "Refresh proposal" }),
+        );
+        await waitFor(() =>
+          expect(plans.getCopilotPlan).toHaveBeenCalledTimes(count),
+        );
+        expect(review()).toBeDisabled();
+        expect(
+          within(article).getByLabelText(
+            /I understand this records review only/,
+          ),
+        ).not.toBeChecked();
+      }
+      expect(plans.getCopilotPlan).toHaveBeenLastCalledWith(
+        "project",
+        "conversation",
+        "plan",
+        expect.any(AbortSignal),
+      );
+      fireEvent.click(
+        within(article).getByLabelText(/I understand this records review only/),
+      );
+      fireEvent.click(review());
+      await waitFor(() =>
+        expect(plans.reviewCopilotPlan).toHaveBeenCalledOnce(),
+      );
+      expect(plans.reviewCopilotPlan).toHaveBeenCalledWith(
+        "project",
+        "conversation",
+        expect.objectContaining({
+          planId: "plan",
+          version: 1,
+          planDigest: "digest",
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(review()).toBeDisabled();
+      fireEvent.click(
+        within(article).getByRole("button", { name: "Cancel proposal only" }),
+      );
+      await waitFor(() =>
+        expect(plans.cancelCopilotPlan).toHaveBeenCalledOnce(),
+      );
+      expect(plans.cancelCopilotPlan).toHaveBeenCalledWith(
+        "project",
+        "conversation",
+        expect.objectContaining({
+          planId: "plan",
+          version: 2,
+          state: "reviewed",
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(
+        within(article).getByRole("button", { name: "Cancel proposal only" }),
+      ).toBeDisabled();
+      expect(
+        within(otherArticle).getByRole("button", {
+          name: "Cancel proposal only",
+        }),
+      ).toBeEnabled();
+      expect(
+        within(otherArticle).getByLabelText(
+          /I understand this records review only/,
+        ),
+      ).not.toBeChecked();
+      expect(
+        within(article).getByText("Not executed", { exact: true }),
+      ).toBeVisible();
+      expect(api.sendCopilotTurn).not.toHaveBeenCalled();
+      expect(analyzeCopilot).not.toHaveBeenCalled();
+      fireEvent.change(screen.getByLabelText("Run ID"), {
+        target: { value: "other-run" },
+      });
+      expect(
+        screen.queryByRole("region", { name: "Review-only action plans" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("article", { name: "Saved turn 1" }),
+      ).not.toBeInTheDocument();
+    },
+  );
   it("renders injected model/diff content inert and requires digest-bound explicit review", async () => {
     vi.mocked(plans.createCopilotPlan).mockResolvedValue(plan);
     vi.mocked(plans.reviewCopilotPlan).mockResolvedValue({

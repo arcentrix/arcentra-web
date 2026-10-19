@@ -743,6 +743,7 @@ function ScopedCopilotConsole() {
           <label className="block space-y-1 text-sm">
             Configured model
             <select
+              aria-label="Configured model"
               className={inputStyle}
               value={modelIndex}
               onChange={(event) => {
@@ -877,6 +878,7 @@ function ScopedCopilotConsole() {
                 <label className="block space-y-1 text-sm">
                   Source job
                   <select
+                    aria-label="Source job"
                     className={inputStyle}
                     value={sourceJobId}
                     onChange={(event) => {

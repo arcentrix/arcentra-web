@@ -237,6 +237,7 @@ export function CopilotPlanReview({
         <label className="block space-y-1 text-sm">
           Saved turn for proposal
           <select
+            aria-label="Saved turn for proposal"
             className={inputStyle}
             value={turnId}
             onChange={(event) => {
@@ -264,6 +265,7 @@ export function CopilotPlanReview({
         <label className="block space-y-1 text-sm">
           Proposal kind
           <select
+            aria-label="Proposal kind"
             className={inputStyle}
             value={kind}
             onChange={(event) => {
@@ -290,6 +292,7 @@ export function CopilotPlanReview({
             <label className="block space-y-1 text-sm">
               Previously selected patch base
               <select
+                aria-label="Previously selected patch base"
                 className={inputStyle}
                 value={sourceIndex}
                 onChange={(event) => {
