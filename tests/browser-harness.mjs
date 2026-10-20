@@ -482,6 +482,79 @@ export function expectedResourceError(message, expected) {
   }
 }
 
+/** Bound request correlation independently of the existing public diagnostics. */
+export function createHttpErrorObservation() {
+  const requests = [];
+  const byRequest = new WeakMap();
+  let overflow = false;
+  return {
+    requests,
+    request(request) {
+      if (requests.length >= 4096) {
+        overflow = true;
+        return;
+      }
+      const observation = {
+        url: request.url(),
+        method: request.method(),
+        statuses: [],
+        failed: false,
+      };
+      requests.push(observation);
+      byRequest.set(request, observation);
+    },
+    response(response) {
+      const observation = byRequest.get(response.request());
+      if (!observation) return;
+      if (observation.statuses.length) overflow = true;
+      else observation.statuses.push(response.status());
+    },
+    failed(request) {
+      const observation = byRequest.get(request);
+      if (observation) observation.failed = true;
+    },
+    assertClean() {
+      assert.equal(
+        overflow,
+        false,
+        "HTTP error correlation exceeded its bounded observation",
+      );
+    },
+  };
+}
+
+/** A one-off failure must correlate to one real request and one native console event. */
+export function assertSingleExpectedHttpError(expected, requests, entries) {
+  const path = new URL(expected.url).pathname;
+  const matching = (url) => {
+    try {
+      return new URL(url).pathname === path;
+    } catch {
+      return false;
+    }
+  };
+  assert.deepEqual(
+    requests.filter((request) => matching(request.url)),
+    [
+      {
+        url: expected.url,
+        method: expected.method,
+        statuses: [expected.status],
+        failed: false,
+      },
+    ],
+    "Expected error must come from exactly one completed, exact request",
+  );
+  const errors = entries.filter(
+    (entry) => entry.type === "error" && matching(entry.url),
+  );
+  assert.equal(errors.length, 1, "Expected exactly one native resource error");
+  assert.equal(errors[0].url, expected.url);
+  assert.equal(errors[0].observationPhase, "journey");
+  assert.equal(errors[0].text, expected.text);
+  return `${path}:${expected.status}`;
+}
+
 /** Upload only fixed classifications, never console arguments, URLs or identifiers. */
 export function safeConsoleErrorEvidence(entries, requests, expected) {
   const route = (value) => {
@@ -751,6 +824,8 @@ export async function runBrowserTest(
     unhandledRoutes: [],
   };
   const expectedHttpErrors = new Set();
+  const singleHttpErrors = [];
+  const httpObservation = createHttpErrorObservation();
   const consoleCollector = createConsoleCollector(diagnostics, sensitiveValues);
   let server;
   let managedFrontend;
@@ -863,6 +938,9 @@ export async function runBrowserTest(
     });
     page = await context.newPage();
     page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.origin === base.origin && url.pathname.startsWith("/api/"))
+        httpObservation.request(request);
       if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
         diagnostics.artifactDownloadRequestCount++;
     });
@@ -875,6 +953,7 @@ export async function runBrowserTest(
     page.on("console", onConsole);
     page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
     page.on("requestfailed", (request) => {
+      httpObservation.failed(request);
       const url = new URL(request.url());
       if (url.origin === base.origin && !url.pathname.startsWith("/api/"))
         diagnostics.staticResourceEvents.push({
@@ -891,6 +970,7 @@ export async function runBrowserTest(
       });
     });
     page.on("response", (response) => {
+      httpObservation.response(response);
       const url = new URL(response.url());
       if (
         url.origin === base.origin &&
@@ -938,6 +1018,12 @@ export async function runBrowserTest(
       },
       expectHttpError: (path, status) =>
         expectedHttpErrors.add(`${path}:${status}`),
+      expectHttpErrorOnce: (path, status, method, text) => {
+        const url = new URL(path, base);
+        assert.equal(url.origin, base.origin);
+        assert.equal(url.pathname, path);
+        singleHttpErrors.push({ url: url.href, status, method, text });
+      },
     });
     await withBrowserDeadline(
       async () => {
@@ -957,6 +1043,19 @@ export async function runBrowserTest(
       observationTimeoutMs,
       `${kind} browser test exceeded its total timeout`,
     );
+    // Validate only after close and final console drain, so duplicate or late
+    // same-route failures cannot inherit a one-off allowance.
+    httpObservation.assertClean();
+    // Do not suppress diagnostics unless final correlation passed. A duplicate,
+    // malformed or late error remains unexpected in the failure summary.
+    for (const expected of singleHttpErrors)
+      expectedHttpErrors.add(
+        assertSingleExpectedHttpError(
+          expected,
+          httpObservation.requests,
+          diagnostics.console,
+        ),
+      );
     assert.equal(
       diagnostics.pageErrors.length,
       0,

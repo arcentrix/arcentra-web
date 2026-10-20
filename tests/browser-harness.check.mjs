@@ -43,6 +43,8 @@ import {
   preflightStepsFromSummary,
   artifactDownloadEvidence,
   expectedResourceError,
+  assertSingleExpectedHttpError,
+  createHttpErrorObservation,
   safeConsoleErrorEvidence,
   safeBrowserRuntimeEvidence,
   isNativeOptionDisabled,
@@ -2712,5 +2714,142 @@ test("initial project inventory admits only the configured visual fixture and no
         ARCENTRA_ACCEPTANCE_VISUAL_CI: "{}",
       }),
     /genuine build contract/,
+  );
+});
+
+const oneOffProbe = () => {
+  const url =
+    "http://127.0.0.1:5174/api/v1/projects/project/copilot/rerun-intents/availability";
+  const text =
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)";
+  return {
+    expected: { url, method: "GET", status: 503, text },
+    requests: [{ url, method: "GET", statuses: [503], failed: false }],
+    entries: [{ url, type: "error", text, observationPhase: "journey" }],
+  };
+};
+test("one-off HTTP allowance requires one exact completed request and native error", () => {
+  const { expected, requests, entries } = oneOffProbe();
+  assertSingleExpectedHttpError(expected, requests, entries);
+});
+for (const [name, mutate] of [
+  ["missing request", (v) => v.requests.splice(0)],
+  ["duplicate request", (v) => v.requests.push({ ...v.requests[0] })],
+  ["mutation instead of GET", (v) => (v.requests[0].method = "POST")],
+  ["uncompleted response", (v) => v.requests[0].statuses.splice(0)],
+  ["different HTTP status", (v) => (v.requests[0].statuses[0] = 500)],
+  ["duplicate response", (v) => v.requests[0].statuses.push(503)],
+  ["failed transport", (v) => (v.requests[0].failed = true)],
+  ["query drift", (v) => (v.requests[0].url += "?unexpected=true")],
+  [
+    "origin drift",
+    (v) =>
+      (v.requests[0].url = v.requests[0].url.replace("127.0.0.1", "localhost")),
+  ],
+  ["missing console event", (v) => v.entries.splice(0)],
+  ["duplicate console event", (v) => v.entries.push({ ...v.entries[0] })],
+  ["different error text", (v) => (v.entries[0].text = "Application crashed")],
+  [
+    "different console status",
+    (v) => (v.entries[0].text = v.entries[0].text.replace("503", "500")),
+  ],
+  ["console query drift", (v) => (v.entries[0].url += "?unexpected=true")],
+  [
+    "console origin drift",
+    (v) =>
+      (v.entries[0].url = v.entries[0].url.replace("127.0.0.1", "localhost")),
+  ],
+  ["console source drift", (v) => (v.entries[0].url += "/confirm")],
+  [
+    "browser-closing error",
+    (v) => (v.entries[0].observationPhase = "browser-closing"),
+  ],
+])
+  test(`one-off HTTP allowance rejects ${name}`, () => {
+    const value = oneOffProbe();
+    mutate(value);
+    assert.throws(() =>
+      assertSingleExpectedHttpError(
+        value.expected,
+        value.requests,
+        value.entries,
+      ),
+    );
+  });
+test("disabled capability allowance leaves other API and application errors unexpected", () => {
+  const { expected, entries } = oneOffProbe();
+  const allowed = new Set([`${new URL(expected.url).pathname}:503`]);
+  assert.equal(expectedResourceError(entries[0], allowed), true);
+  for (const entry of [
+    {
+      ...entries[0],
+      url: expected.url.replace(
+        "rerun-intents/availability",
+        "execution-intents/intent/confirm",
+      ),
+    },
+    {
+      ...entries[0],
+      url: expected.url.replace("project/copilot", "other-project/copilot"),
+    },
+    { ...entries[0], text: entries[0].text.replace("503", "500") },
+    { ...entries[0], text: "Application crashed" },
+  ])
+    assert.equal(expectedResourceError(entry, allowed), false);
+});
+
+const httpProbeRequest = () => ({
+  url: () => oneOffProbe().expected.url,
+  method: () => "GET",
+});
+test("bounded HTTP observer correlates response and failed transport by request identity", () => {
+  const observer = createHttpErrorObservation();
+  const request = httpProbeRequest();
+  observer.request(request);
+  observer.response({ request: () => httpProbeRequest(), status: () => 500 });
+  assert.deepEqual(observer.requests[0].statuses, []);
+  observer.response({ request: () => request, status: () => 503 });
+  observer.assertClean();
+  const { expected, entries } = oneOffProbe();
+  assertSingleExpectedHttpError(expected, observer.requests, entries);
+  observer.failed(request);
+  assert.throws(() =>
+    assertSingleExpectedHttpError(expected, observer.requests, entries),
+  );
+});
+test("bounded HTTP observer rejects overflow without retaining extra requests", () => {
+  const observer = createHttpErrorObservation();
+  for (let i = 0; i < 4096; i++) observer.request(httpProbeRequest());
+  observer.assertClean();
+  observer.request(httpProbeRequest());
+  assert.equal(observer.requests.length, 4096);
+  assert.throws(() => observer.assertClean(), /bounded observation/);
+});
+test("bounded HTTP observer rejects duplicate responses without retaining extra statuses", () => {
+  const observer = createHttpErrorObservation();
+  const request = httpProbeRequest();
+  observer.request(request);
+  const response = { request: () => request, status: () => 503 };
+  observer.response(response);
+  observer.assertClean();
+  for (let i = 0; i < 10; i++) observer.response(response);
+  assert.deepEqual(observer.requests[0].statuses, [503]);
+  assert.throws(() => observer.assertClean(), /bounded observation/);
+});
+
+test("rejected one-off correlation never suppresses the unexpected console counter", () => {
+  const { expected, requests, entries } = oneOffProbe();
+  entries.push({ ...entries[0] });
+  const allowed = new Set();
+  assert.throws(() =>
+    allowed.add(assertSingleExpectedHttpError(expected, requests, entries)),
+  );
+  assert.equal(allowed.size, 0);
+  assert.equal(
+    entries.filter(
+      (entry) =>
+        entry.type === "error" && !expectedResourceError(entry, allowed),
+    ).length,
+    2,
   );
 });

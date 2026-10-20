@@ -71,6 +71,10 @@ There is no API response fulfillment, token injection or fallback to simulated t
 
 The job uses only disposable synthetic data. Tracing is disabled, and uploads are restricted to screenshots plus the allowlisted count/status summary. Raw browser diagnostics and Vite output remain local to the runner. Do not point this harness at real accounts or production services. Build/artifact success does not establish Kubernetes, approval, OAuth, or model-provider readiness. Those need their own explicit dependency/target acceptance.
 
+### Existing retry-approval confirmation lane
+
+The older actual-browser retry-vote fixture intentionally leaves the separate terminal whole-job new-execution capability disabled. Loading Copilot context still performs its read-only availability probe. This journey requires that exact same-origin GET to return the production default-off 503 envelope with `private, no-store`, and requires the new-execution controls to remain absent. Only its single native Chromium resource error is expected, correlated after browser close and console drain to exactly one request and one 503 response with no failed transport. Duplicate or late errors, altered envelopes, other endpoints and failed approval confirmations remain failures. The permanent approval POST must still succeed once, reach the exact durable decision and observe generation-two runtime success. This is not response-loss coverage; the independent terminal-rerun journey retains its real response-loss and reload-recovery requirements.
+
 ## Verification limits
 
 A syntax check, the Node harness unit checks, or jsdom component tests do not establish browser acceptance. Browser jobs must actually run successfully on an environment permitting Chromium sockets. No local browser attempt is made in a restricted executor where that route was denied. CI results for the exact candidate commit must be reviewed before reporting browser or actual-backend acceptance as passed.
