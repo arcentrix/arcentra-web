@@ -61,7 +61,7 @@ export function assertExecutionBrowserIdentity(value, contract, state) {
   }
 }
 
-/** The older retry-vote fixture leaves independent terminal execution disabled. */
+/** Read-only legacy fixtures leave independent terminal execution disabled. */
 export async function assertDisabledTerminalRerunProbe(
   response,
   base,
@@ -69,7 +69,10 @@ export async function assertDisabledTerminalRerunProbe(
 ) {
   const path = `/api/v1/projects/${projectId}/copilot/rerun-intents/availability`;
   assert.equal(response.url(), new URL(path, base).href);
+  assert.equal(response.request().url(), response.url());
   assert.equal(response.request().method(), "GET");
+  assert.equal(response.request().isNavigationRequest(), false);
+  assert.ok(["xhr", "fetch"].includes(response.request().resourceType()));
   assert.equal(response.status(), 503);
   assert.equal(
     await response.headerValue("cache-control"),

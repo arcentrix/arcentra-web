@@ -1,5 +1,6 @@
 /** Real UI/API history journey. This module never intercepts, seeds or substitutes responses. */
 import assert from "node:assert/strict";
+import { assertDisabledTerminalRerunProbe } from "./copilot-execution-journey.mjs";
 import { createHash } from "node:crypto";
 import { assertControlReachable } from "./artifact-controls.mjs";
 export const copilotHistoryStages = Object.freeze([
@@ -116,6 +117,7 @@ export async function runCopilotHistoryJourney({
   contract,
   profileResponse,
   setStage,
+  expectDisabledTerminalRerunResponse,
 }) {
   const fixture = validateCopilotHistoryContract(contract);
   const envelope = async (response) => {
@@ -166,9 +168,36 @@ export async function runCopilotHistoryJourney({
       .getByLabel("Project ID", { exact: true })
       .fill(fixture.projectId);
     await page.getByLabel("Run ID", { exact: true }).fill(fixture.runId);
+    // Only the actual default-off history fixture supplies this callback.
+    // Watch before the click and inspect the real response before any allowance.
+    const disabledProbe = expectDisabledTerminalRerunResponse
+      ? page.waitForResponse(
+          (response) =>
+            response.request().method() === "GET" &&
+            new URL(response.url()).pathname ===
+              `/api/v1/projects/${fixture.projectId}/copilot/rerun-intents/availability`,
+          { timeout: 60000 },
+        )
+      : undefined;
+    disabledProbe?.catch(() => {});
     await page
       .getByRole("button", { name: "Load context choices", exact: true })
       .click();
+    if (disabledProbe) {
+      const response = await disabledProbe;
+      await assertDisabledTerminalRerunProbe(response, base, fixture.projectId);
+      assert.equal(
+        await page
+          .getByRole("region", {
+            name: "Whole-job new executions",
+            exact: true,
+          })
+          .count(),
+        0,
+        "The read-only history fixture must not expose terminal execution controls",
+      );
+      expectDisabledTerminalRerunResponse(response);
+    }
     await page
       .getByRole("button", { name: "Load private conversations", exact: true })
       .waitFor();

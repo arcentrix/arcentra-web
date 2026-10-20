@@ -489,7 +489,7 @@ export function createHttpErrorObservation() {
   let overflow = false;
   return {
     requests,
-    request(request) {
+    request(request, context) {
       if (requests.length >= 4096) {
         overflow = true;
         return;
@@ -499,9 +499,20 @@ export function createHttpErrorObservation() {
         method: request.method(),
         statuses: [],
         failed: false,
+        ...(context
+          ? {
+              stage: context.stage,
+              observationPhase: context.observationPhase,
+              resourceType: request.resourceType(),
+              navigation: request.isNavigationRequest(),
+            }
+          : {}),
       };
       requests.push(observation);
       byRequest.set(request, observation);
+    },
+    get(request) {
+      return byRequest.get(request);
     },
     response(response) {
       const observation = byRequest.get(response.request());
@@ -534,7 +545,14 @@ export function assertSingleExpectedHttpError(expected, requests, entries) {
     }
   };
   assert.deepEqual(
-    requests.filter((request) => matching(request.url)),
+    requests
+      .filter((request) => matching(request.url))
+      .map(({ url, method, statuses, failed }) => ({
+        url,
+        method,
+        statuses,
+        failed,
+      })),
     [
       {
         url: expected.url,
@@ -553,6 +571,106 @@ export function assertSingleExpectedHttpError(expected, requests, entries) {
   assert.equal(errors[0].observationPhase, "journey");
   assert.equal(errors[0].text, expected.text);
   return `${path}:${expected.status}`;
+}
+
+/** Repeated probes are expected only by validated response identity and load stage.
+ * Console events have no request handle, so exact URL + a unique stage provide
+ * unambiguous correlation. Validate the entire path group before allowing any.
+ */
+export function assertExpectedResponseHttpErrors(expected, requests, entries) {
+  const allowed = new Set();
+  const evidence = [];
+  const paths = new Set(expected.map((value) => new URL(value.url).pathname));
+  for (const path of paths) {
+    const matching = (url) => {
+      try {
+        return new URL(url).pathname === path;
+      } catch {
+        return false;
+      }
+    };
+    const group = expected.filter((value) => matching(value.url));
+    assert.equal(
+      new Set(group.map((value) => value.observation)).size,
+      group.length,
+      "A response identity cannot be registered twice",
+    );
+    assert.equal(
+      new Set(group.map((value) => value.stage)).size,
+      group.length,
+      "Each expected probe requires a distinct load stage",
+    );
+    const observed = requests.filter((value) => matching(value.url));
+    assert.equal(
+      observed.length,
+      group.length,
+      "No extra same-route requests are permitted",
+    );
+    const errors = entries.filter(
+      (value) => value.type === "error" && matching(value.url),
+    );
+    assert.equal(
+      errors.length,
+      group.length,
+      "No extra same-route console errors are permitted",
+    );
+    for (let index = 0; index < group.length; index++) {
+      const value = group[index];
+      assert.equal(value.category, "terminal-rerun-disabled");
+      assert.ok(
+        [
+          "copilot-history-create",
+          "copilot-history-reload",
+          "copilot-history-resume",
+        ].includes(value.stage),
+      );
+      assert.match(
+        path,
+        /^\/api\/v1\/projects\/[A-Za-z0-9_-]{1,128}\/copilot\/rerun-intents\/availability$/,
+      );
+      assert.strictEqual(
+        observed[index],
+        value.observation,
+        "Only the actual validated response request may be expected",
+      );
+      assert.ok(["xhr", "fetch"].includes(observed[index].resourceType));
+      assert.deepEqual(observed[index], {
+        url: value.url,
+        method: "GET",
+        statuses: [503],
+        failed: false,
+        stage: value.stage,
+        observationPhase: "journey",
+        resourceType: observed[index].resourceType,
+        navigation: false,
+      });
+      const events = errors.filter((entry) => entry.stage === value.stage);
+      assert.equal(
+        events.length,
+        1,
+        "Each probe requires exactly one native error in its load stage",
+      );
+      assert.equal(events[0].url, value.url);
+      assert.equal(events[0].observationPhase, "journey");
+      assert.equal(
+        events[0].text,
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+      );
+      allowed.add(`${path}:503`);
+      evidence.push({
+        category: "terminal-rerun-disabled",
+        stage: value.stage,
+        method: "GET",
+        status: 503,
+        bodyCode: 503,
+        envelope: "exact-default-off",
+        requestCount: 1,
+        responseCount: 1,
+        consoleErrorCount: 1,
+      });
+    }
+  }
+  return { allowed, evidence };
 }
 
 /** Upload only fixed classifications, never console arguments, URLs or identifiers. */
@@ -575,6 +693,27 @@ export function safeConsoleErrorEvidence(entries, requests, expected) {
           "project-settings",
         ],
         [/^\/api\/v1\/project\/[^/]+\/members(?:\/[^/]+)?$/, "project-members"],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/rerun-intents\/availability$/,
+          "copilot-rerun-availability",
+        ],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/rerun-intents(?:\/.*)?$/,
+          "copilot-rerun",
+        ],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/execution-intents(?:\/.*)?$/,
+          "copilot-retry-execution",
+        ],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/conversations(?:\/.*)?$/,
+          "copilot-history",
+        ],
+        [/^\/api\/v1\/projects\/[^/]+\/copilot\/status$/, "copilot-status"],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/runs\/[^/]+\/context$/,
+          "copilot-context",
+        ],
         [/^\/api\/v1\/pipelines(?:\/.*)?$/, "pipelines"],
         [/^\/api\/v1\/projects\/[^/]+\/artifacts(?:\/.*)?$/, "artifacts"],
       ];
@@ -825,6 +964,8 @@ export async function runBrowserTest(
   };
   const expectedHttpErrors = new Set();
   const singleHttpErrors = [];
+  const responseHttpErrors = [];
+  let verifiedHttpErrorEvidence = [];
   const httpObservation = createHttpErrorObservation();
   const consoleCollector = createConsoleCollector(diagnostics, sensitiveValues);
   let server;
@@ -940,7 +1081,10 @@ export async function runBrowserTest(
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (url.origin === base.origin && url.pathname.startsWith("/api/"))
-        httpObservation.request(request);
+        httpObservation.request(request, {
+          stage,
+          observationPhase: browserClosing ? "browser-closing" : "journey",
+        });
       if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
         diagnostics.artifactDownloadRequestCount++;
     });
@@ -1018,6 +1162,26 @@ export async function runBrowserTest(
       },
       expectHttpError: (path, status) =>
         expectedHttpErrors.add(`${path}:${status}`),
+      expectDisabledTerminalRerunResponse: (response) => {
+        assert.equal(kind, "actual-backend");
+        const observation = httpObservation.get(response.request());
+        assert.ok(
+          observation,
+          "Validated response requires its actual observed request",
+        );
+        const url = new URL(response.url());
+        assert.equal(url.origin, base.origin);
+        assert.equal(url.search, "");
+        assert.equal(url.hash, "");
+        assert.equal(response.request().method(), "GET");
+        assert.equal(response.status(), 503);
+        responseHttpErrors.push({
+          url: url.href,
+          observation,
+          stage,
+          category: "terminal-rerun-disabled",
+        });
+      },
       expectHttpErrorOnce: (path, status, method, text) => {
         const url = new URL(path, base);
         assert.equal(url.origin, base.origin);
@@ -1056,6 +1220,13 @@ export async function runBrowserTest(
           diagnostics.console,
         ),
       );
+    const correlated = assertExpectedResponseHttpErrors(
+      responseHttpErrors,
+      httpObservation.requests,
+      diagnostics.console,
+    );
+    for (const key of correlated.allowed) expectedHttpErrors.add(key);
+    verifiedHttpErrorEvidence = correlated.evidence;
     assert.equal(
       diagnostics.pageErrors.length,
       0,
@@ -1190,6 +1361,7 @@ export async function runBrowserTest(
             diagnostics.requests,
             expectedHttpErrors,
           ),
+          verifiedHttpErrorEvidence,
           ...runtimeEvidence,
           blockedRequestCount: diagnostics.blockedRequests.length,
           unhandledRouteCount: diagnostics.unhandledRoutes.length,

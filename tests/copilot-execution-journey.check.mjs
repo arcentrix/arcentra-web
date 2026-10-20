@@ -89,6 +89,8 @@ const disabledProbe = () => {
   const value = {
     url: `http://127.0.0.1:5174${path}`,
     method: "GET",
+    navigation: false,
+    resourceType: "xhr",
     status: 503,
     cache: "private, no-store",
     body: {
@@ -100,7 +102,12 @@ const disabledProbe = () => {
   };
   const response = {
     url: () => value.url,
-    request: () => ({ method: () => value.method }),
+    request: () => ({
+      method: () => value.method,
+      url: () => value.url,
+      isNavigationRequest: () => value.navigation,
+      resourceType: () => value.resourceType,
+    }),
     status: () => value.status,
     headerValue: async () => value.cache,
     json: async () => value.body,
@@ -141,6 +148,8 @@ for (const [name, mutate] of [
   ["query string", (v) => (v.url += "?unexpected=true")],
   ["foreign origin", (v) => (v.url = v.url.replace("127.0.0.1", "localhost"))],
   ["mutation method", (v) => (v.method = "POST")],
+  ["navigation request", (v) => (v.navigation = true)],
+  ["document resource", (v) => (v.resourceType = "document")],
   ["unexpected status", (v) => (v.status = 500)],
   ["cacheable response", (v) => (v.cache = "public, max-age=60")],
   ["wrong body code", (v) => (v.body.code = 500)],
