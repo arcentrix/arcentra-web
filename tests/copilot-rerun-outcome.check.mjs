@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   validateOutcomeContract,
+  validateOwnerOutcomeContract,
   assertApprovalEvidence,
   assertOriginalFailed,
   assertNewSucceeded,
@@ -13,7 +14,11 @@ import {
   assertDownloadedBytes,
   assertMutationTrace,
 } from "./copilot-rerun-outcome-contract.mjs";
-import { driveOutcome, remaining } from "./copilot-rerun-outcome-journey.mjs";
+import {
+  driveOutcome,
+  driveOwnerOutcome,
+  remaining,
+} from "./copilot-rerun-outcome-journey.mjs";
 import {
   assertFrontendCheckout,
   assertManagedFrontendSummary,
@@ -679,7 +684,7 @@ function environment(phase = "outcome") {
     ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT: "9".repeat(40),
     ARCENTRA_COPILOT_RERUN_PHASE: phase,
     ARCENTRA_COPILOT_RERUN_CONTRACT: JSON.stringify(
-      phase === "outcome" ? fixture() : fixture().scope,
+      phase === "prepare" ? fixture().scope : fixture(),
     ),
     ARCENTRA_COPILOT_RERUN_DEADLINE_UNIX_MILLI: String(
       fixture().deadlineUnixMilli,
@@ -693,8 +698,8 @@ function environment(phase = "outcome") {
 }
 test("entry is inert without explicit fixture inputs", () =>
   assert.throws(() => readEntryContract({}, "/synthetic/frontend", now)));
-test("both phase frames retain exact actor and parent deadline", () => {
-  for (const phase of ["prepare", "outcome"]) {
+test("all phase frames retain exact actor and parent deadline", () => {
+  for (const phase of ["prepare", "outcome", "owner-outcome"]) {
     const value = readEntryContract(
       environment(phase),
       "/synthetic/frontend",
@@ -972,5 +977,132 @@ test("summary parser rejects oversized or malformed input without echoing conten
     () =>
       parseManagedFrontendSummary(Buffer.from("PRIVATE_MARKER_invalid_json")),
     (error) => !String(error).includes("PRIVATE_MARKER"),
+  );
+});
+
+// Synthetic adapter checks cover orchestration only, not a browser or runtime pass.
+function ownerAdapter(overrides = {}) {
+  let result;
+  result = adapter({
+    verifyIdentity: async (actor) =>
+      assert.equal(actor, fixture().scope.actorId),
+    openApproval: async () =>
+      assert.fail("Owner must not open an approval vote"),
+    voteOnce: async () => assert.fail("Owner must not vote"),
+    inspectApproval: async () =>
+      assert.fail("Owner outcome must not claim independent review"),
+    closeApproval: async () => assert.fail("Owner has no approval dialog"),
+    counts: () => ({ mutations: [], downloads: result.calls.downloads }),
+    ...overrides,
+  });
+  return result;
+}
+test("original owner independently observes exact terminal output with no writes or vote", async () => {
+  const a = ownerAdapter();
+  const result = await driveOwnerOutcome(a.value, fixture());
+  assert.equal(result.phase, "browser-owner-output-observed");
+  assert.equal(result.ownerOutcomeComplete, true);
+  assert.equal(result.actorId, fixture().scope.actorId);
+  assert.equal(result.requesterId, fixture().scope.actorId);
+  assert.notEqual(result.actorId, fixture().actorId);
+  assert.equal(result.runtimeAcceptanceComplete, false);
+  assert.equal(result.browserOutcomeComplete, undefined);
+  assert.equal(result.approvalId, undefined);
+  assert.equal(result.claimId, undefined);
+  assert.equal(result.approvedCount, undefined);
+  assert.equal(result.newRunStatus, 3);
+  assert.equal(result.originalRunStatus, 4);
+  assert.equal(result.preparePosts, 0);
+  assert.equal(result.confirmPosts, 0);
+  assert.equal(result.approvalPosts, 0);
+  assert.equal(result.artifactDownloads, 1);
+  assert.equal(result.artifactSha256, hash);
+  assert.equal(a.calls.votes, 0);
+  assert.equal(a.calls.inspections, 0);
+  assert.equal(a.calls.rendered, 1);
+});
+for (const mutation of [
+  ...trace(),
+  {
+    method: "POST",
+    path: "/api/v1/projects/project/copilot/rerun-intents",
+    body: {},
+  },
+  {
+    method: "POST",
+    path: "/api/v1/projects/project/copilot/rerun-intents/fixed-intent/confirm",
+    body: {},
+  },
+])
+  test(`owner observation rejects any mutation ${mutation.path}`, async () => {
+    const a = ownerAdapter({
+      counts: () => ({ mutations: [mutation], downloads: 1 }),
+    });
+    await assert.rejects(
+      () => driveOwnerOutcome(a.value, fixture()),
+      /strictly read-only/,
+    );
+  });
+test("owner outcome cannot accept reviewer identity", async () => {
+  const a = ownerAdapter({
+    verifyIdentity: async (actor) => assert.equal(actor, fixture().actorId),
+  });
+  await assert.rejects(() => driveOwnerOutcome(a.value, fixture()));
+  assert.equal(a.calls.downloads, 0);
+});
+test("owner outcome still requires rendered logs and real downloaded bytes", async () => {
+  for (const override of [
+    { verifyRenderedOutcome: async () => assert.fail("no rendered log") },
+    { downloadOnce: async () => Buffer.alloc(bytes.length) },
+    { listNewArtifacts: async () => [artifact(), artifact()] },
+    { listOriginalArtifacts: async () => [artifact()] },
+  ])
+    await assert.rejects(() =>
+      driveOwnerOutcome(ownerAdapter(override).value, fixture()),
+    );
+});
+test("owner cannot claim successful outcome after a failed execution", async () => {
+  const r = execution();
+  r.run.status = 4;
+  const a = ownerAdapter({ readNewExecution: async () => r });
+  await assert.rejects(() => driveOwnerOutcome(a.value, fixture()));
+  assert.equal(a.calls.downloads, 0);
+});
+test("owner missing output stays bounded by unchanged parent deadline", async () => {
+  const r = execution();
+  r.logs.entries = [];
+  const a = ownerAdapter({ readNewExecution: async () => r });
+  await assert.rejects(
+    () => driveOwnerOutcome(a.value, fixture()),
+    /deadline exhausted/,
+  );
+  assert.equal(a.calls.votes, 0);
+  assert.equal(a.calls.downloads, 0);
+});
+test("owner may read after used approval expires but cannot expand parent deadline", () => {
+  const f = fixture();
+  f.target.approvalExpiresAtUnixMilli = now - 1;
+  validateOwnerOutcomeContract(f, now);
+  assert.throws(() => validateOutcomeContract(f, now));
+  f.deadlineUnixMilli = now;
+  assert.throws(() => validateOwnerOutcomeContract(f, now));
+});
+test("owner entry binds original-owner login even though approval contract names reviewer", () => {
+  const input = readEntryContract(
+    environment("owner-outcome"),
+    "/synthetic/frontend",
+    now,
+  );
+  assert.equal(input.actorId, fixture().scope.actorId);
+  assert.equal(input.contract.actorId, fixture().actorId);
+  assert.throws(() =>
+    readEntryContract(
+      {
+        ...environment("owner-outcome"),
+        ARCENTRA_ACCEPTANCE_USERNAME: fixture().actorId,
+      },
+      "/synthetic/frontend",
+      now,
+    ),
   );
 });

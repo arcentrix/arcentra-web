@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { isAbsolute, resolve } from "node:path";
 import {
   validateOutcomeContract,
+  validateOwnerOutcomeContract,
   validatePreparationScope,
 } from "./copilot-rerun-outcome-contract.mjs";
 
@@ -18,7 +19,9 @@ export function readEntryContract(env, cwd, now = Date.now()) {
     "UI_TEST_BASE_URL overrides are forbidden; serve the pinned checkout with managed Vite",
   );
   assert.ok(
-    ["prepare", "outcome"].includes(env.ARCENTRA_COPILOT_RERUN_PHASE),
+    ["prepare", "outcome", "owner-outcome"].includes(
+      env.ARCENTRA_COPILOT_RERUN_PHASE,
+    ),
     "Explicit rerun phase required",
   );
   assert.ok(
@@ -53,8 +56,10 @@ export function readEntryContract(env, cwd, now = Date.now()) {
     "The original Go deadline must remain live",
   );
   const phase = env.ARCENTRA_COPILOT_RERUN_PHASE;
-  if (phase === "outcome") {
-    validateOutcomeContract(contract, now);
+  if (phase !== "prepare") {
+    (phase === "owner-outcome"
+      ? validateOwnerOutcomeContract
+      : validateOutcomeContract)(contract, now);
     assert.equal(
       contract.deadlineUnixMilli,
       deadline,
@@ -78,7 +83,8 @@ export function readEntryContract(env, cwd, now = Date.now()) {
       backend.password === "",
     "Backend must be a plain loopback origin without credentials or query data",
   );
-  const actorId = contract.actorId;
+  const actorId =
+    phase === "owner-outcome" ? contract.scope.actorId : contract.actorId;
   assert.ok(
     typeof actorId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(actorId),
   );

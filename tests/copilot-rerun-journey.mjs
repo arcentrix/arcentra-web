@@ -3,6 +3,7 @@
  * real login and a separate independent-approver/runtime acceptance phase. */
 import assert from "node:assert/strict";
 import { assertControlReachable } from "./artifact-controls.mjs";
+import { withholdSuccessfulResponseAndReload } from "./rerun-response-loss.mjs";
 const id = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 const digest = (v) => typeof v === "string" && /^(?:v1:)?[a-f0-9]{64}$/.test(v);
 const sha = (v) =>
@@ -158,7 +159,16 @@ function responseFor(page, method, path) {
   void response.catch(() => {});
   return response;
 }
-export async function runRerunBrowserPreparation({ page, base, contract }) {
+export async function runRerunBrowserPreparation({
+  page,
+  base,
+  contract,
+  deadline,
+}) {
+  assert.ok(
+    Number.isSafeInteger(deadline) && deadline > Date.now(),
+    "Inherited live fixture deadline required",
+  );
   const f = validateRerunBrowserContract(contract);
   const origin = new URL(base);
   assert.ok(
@@ -168,8 +178,11 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
   assert.equal(origin.pathname, "/");
   const root = `/api/v1/projects/${f.projectId}/copilot/rerun-intents`;
   const mutations = [];
+  const reads = [];
+  let recoveredReloads = 0;
   const onRequest = (request) => {
     const path = new URL(request.url()).pathname;
+    if (request.method() === "GET") reads.push(path);
     if (
       path.startsWith("/api/") &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method())
@@ -189,20 +202,96 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
       f.actorId,
       "Real requester login must be current",
     );
-    await page.getByLabel("Project ID", { exact: true }).fill(f.projectId);
-    await page.getByLabel("Run ID", { exact: true }).fill(f.originalRunId);
-    const availableResponse = responseFor(page, "GET", `${root}/availability`);
-    await page
-      .getByRole("button", { name: "Load context choices", exact: true })
-      .click();
-    assert.deepEqual(await read(await availableResponse, true), {
-      available: true,
-      cancelNewExecutionAvailable: false,
-    });
     const section = page.getByRole("region", {
       name: "Whole-job new executions",
       exact: true,
     });
+    async function loadScope() {
+      await page.getByLabel("Project ID", { exact: true }).fill(f.projectId);
+      await page.getByLabel("Run ID", { exact: true }).fill(f.originalRunId);
+      const availableResponse = responseFor(
+        page,
+        "GET",
+        `${root}/availability`,
+      );
+      await page
+        .getByRole("button", { name: "Load context choices", exact: true })
+        .click();
+      assert.deepEqual(await read(await availableResponse, true), {
+        available: true,
+        cancelNewExecutionAvailable: false,
+      });
+      await section.waitFor();
+    }
+    let reloadedUser;
+    async function beforeReload(busyLabel) {
+      // Response headers may be observed, but the UI never receives the held body.
+      await section
+        .getByRole("status")
+        .filter({ hasText: busyLabel })
+        .waitFor();
+      assert.equal(await section.getByRole("article").count(), 0);
+      reloadedUser = responseFor(page, "GET", "/api/v1/users/fetch");
+    }
+    async function recover(path, previous, expectedPosts) {
+      assert.equal((await read(await reloadedUser)).userId, f.actorId);
+      await loadScope();
+      // Session storage was populated by the real UI, not the acceptance driver.
+      await section
+        .getByText(`Recovery request ID: ${previous.requestId}`, {
+          exact: false,
+        })
+        .waitFor();
+      assert.equal(await section.getByRole("article").count(), 0);
+      assert.equal(
+        await section
+          .getByRole("button", { name: "Prepare new execution", exact: true })
+          .count(),
+        0,
+      );
+      assert.equal(
+        await section
+          .getByRole("button", { name: "Confirm new execution", exact: true })
+          .count(),
+        0,
+      );
+      assert.equal(
+        mutations.length,
+        expectedPosts,
+        "Reload must not retry a mutation",
+      );
+      assert.equal(
+        reads.filter((value) => value === path).length,
+        0,
+        "Reload must not automatically inspect or retry recovery",
+      );
+      const inspectedResponse = responseFor(page, "GET", path);
+      const inspect = section.getByRole("button", {
+        name: "Inspect rerun request",
+        exact: true,
+      });
+      await assertControlReachable(inspect);
+      await inspect.click();
+      const inspected = assertRerunBrowserReceipt(
+        await read(await inspectedResponse, true),
+        f,
+        previous,
+      );
+      assert.equal(inspected.state, previous.state);
+      assert.equal(
+        reads.filter((value) => value === path).length,
+        1,
+        "One deliberate recovery GET required",
+      );
+      recoveredReloads++;
+      assert.equal(
+        mutations.length,
+        expectedPosts,
+        "Recovery must only inspect the fixed request",
+      );
+      return inspected;
+    }
+    await loadScope();
     await section
       .getByLabel("Original job ID", { exact: true })
       .fill(f.originalJobRunId);
@@ -218,15 +307,27 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
       0,
       "Eligibility and model context do not mutate",
     );
-    const prepareResponse = responseFor(page, "POST", root);
-    await section
-      .getByRole("button", { name: "Prepare new execution", exact: true })
-      .click();
-    const prepared = assertRerunBrowserReceipt(
-      await read(await prepareResponse, true),
-      f,
+    const preparedResponse = await withholdSuccessfulResponseAndReload({
+      page,
+      url: `${origin.origin}${root}`,
+      deadline,
+      click: () =>
+        section
+          .getByRole("button", { name: "Prepare new execution", exact: true })
+          .click(),
+      validateResponse: (value) => {
+        const receipt = assertRerunBrowserReceipt(value, f);
+        assert.equal(receipt.state, "prepared");
+        return receipt;
+      },
+      beforeReload: () => beforeReload("Preparing request…"),
+    });
+    // A lost Prepare response leaves only RequestID in the owner's browser.
+    const prepared = await recover(
+      `${root}/by-request/${preparedResponse.requestId}`,
+      preparedResponse,
+      1,
     );
-    assert.equal(prepared.state, "prepared");
     const article = section.getByRole("article", {
       name: `Whole-job re-execution ${prepared.intentId}`,
       exact: true,
@@ -263,19 +364,32 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
       false,
       "Mobile page must not overflow",
     );
-    const confirmResponse = responseFor(
+    const confirmedResponse = await withholdSuccessfulResponseAndReload({
       page,
-      "POST",
-      `${root}/${prepared.intentId}/confirm`,
+      url: `${origin.origin}${root}/${prepared.intentId}/confirm`,
+      deadline,
+      click: () => confirm.click(),
+      validateResponse: (value) => {
+        const receipt = assertRerunBrowserReceipt(value, f, prepared);
+        assert.equal(receipt.state, "confirmed");
+        return receipt;
+      },
+      beforeReload: () => beforeReload("Confirming request…"),
+    });
+    // Lost Confirm uses the fixed IntentID learned by the earlier read, not a new POST.
+    const confirmed = await recover(
+      `${root}/${prepared.intentId}`,
+      confirmedResponse,
+      2,
     );
-    await confirm.click();
-    const confirmed = assertRerunBrowserReceipt(
-      await read(await confirmResponse, true),
-      f,
-      prepared,
-    );
-    assert.equal(confirmed.state, "confirmed");
     await article.getByText("New execution created", { exact: true }).waitFor();
+    assert.equal(await article.getByRole("checkbox").count(), 0);
+    assert.equal(
+      await article
+        .getByRole("button", { name: "Confirm new execution", exact: true })
+        .count(),
+      0,
+    );
     assert.deepEqual(mutations[1], {
       method: "POST",
       path: `${root}/${prepared.intentId}/confirm`,
@@ -286,25 +400,11 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
         acknowledgeNewExecution: true,
       },
     });
-    const inspectedResponse = responseFor(
-      page,
-      "GET",
-      `${root}/${prepared.intentId}`,
+    assert.equal(
+      mutations.length,
+      2,
+      "Reload and inspection never resubmit or approve",
     );
-    const inspect = section.getByRole("button", {
-      name: "Inspect rerun request",
-      exact: true,
-    });
-    await assertControlReachable(inspect);
-    await inspect.click();
-    const inspected = assertRerunBrowserReceipt(
-      await read(await inspectedResponse, true),
-      f,
-      confirmed,
-    );
-    assert.equal(inspected.state, "confirmed");
-    await article.getByText("New execution created", { exact: true }).waitFor();
-    assert.equal(mutations.length, 2, "Inspection never resubmits or approves");
     const route = `/projects/${f.projectId}/pipelines?pipeline=${f.pipelineId}&run=`;
     assert.equal(
       await article
@@ -327,6 +427,24 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
         .count(),
       0,
     );
+    const responseRecovery = {
+      prepareResponseLost: true,
+      confirmResponseLost: true,
+      reloads: recoveredReloads,
+      prepareInspections: reads.filter(
+        (path) => path === `${root}/by-request/${prepared.requestId}`,
+      ).length,
+      confirmInspections: reads.filter(
+        (path) => path === `${root}/${prepared.intentId}`,
+      ).length,
+    };
+    assert.deepEqual(responseRecovery, {
+      prepareResponseLost: true,
+      confirmResponseLost: true,
+      reloads: 2,
+      prepareInspections: 1,
+      confirmInspections: 1,
+    });
     // This is explicitly an intermediate receipt, never overall acceptance.
     return {
       phase: "confirmed-awaiting-independent-approval",
@@ -335,6 +453,7 @@ export async function runRerunBrowserPreparation({ page, base, contract }) {
       preparePosts: 1,
       confirmPosts: 1,
       approvalPosts: 0,
+      responseRecovery,
       runtimeAcceptanceComplete: false,
     };
   } finally {

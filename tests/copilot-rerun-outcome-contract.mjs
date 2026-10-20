@@ -58,6 +58,14 @@ export function validatePreparationScope(scope) {
   return scope;
 }
 export function validateOutcomeContract(f, now = Date.now()) {
+  return validateContract(f, now, true);
+}
+
+// The owner only reads a completed outcome; an already-used approval may expire.
+export function validateOwnerOutcomeContract(f, now = Date.now()) {
+  return validateContract(f, now, false);
+}
+function validateContract(f, now, requireLiveApproval) {
   assert.ok(
     Buffer.byteLength(JSON.stringify(f)) <= 16384,
     "Bounded contract required",
@@ -125,7 +133,7 @@ export function validateOutcomeContract(f, now = Date.now()) {
   assert.ok(isDigest(f.target.evidenceHash));
   assert.ok(
     millis(f.target.approvalExpiresAtUnixMilli) &&
-      f.target.approvalExpiresAtUnixMilli > now,
+      (!requireLiveApproval || f.target.approvalExpiresAtUnixMilli > now),
     "Actual approval deadline must remain live",
   );
   assert.notEqual(f.target.runId, f.scope.originalRunId);

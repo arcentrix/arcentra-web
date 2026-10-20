@@ -7,6 +7,7 @@ import { basename } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   validateOutcomeContract,
+  validateOwnerOutcomeContract,
   assertApprovalEvidence,
   assertOriginalFailed,
   assertNewSucceeded,
@@ -60,6 +61,59 @@ export async function driveOutcome(adapter, contract) {
   }
   assertApprovalEvidence(approval, f, "approved");
   await adapter.closeApproval();
+  const output = await observeOutput(adapter, f, oldJob);
+  const counts = adapter.counts();
+  assertMutationTrace(counts.mutations, f);
+  assert.equal(counts.downloads, 1);
+  return {
+    ...output,
+    version: f.version,
+    phase: "browser-independent-approval-and-output-observed",
+    browserOutcomeComplete: true,
+    runtimeAcceptanceComplete: false,
+    actorId: f.actorId,
+    requesterId: f.scope.actorId,
+    firstApproverId: f.firstApproverId,
+    claimId: evidence.identity.claimId,
+    approvalId: approval.approvalId,
+    approvalEvidenceHash: approval.evidenceHash,
+    approvalStatus: approval.status,
+    approvedCount: approval.approvedCount,
+    approvalPosts: counts.mutations.length,
+    artifactDownloads: counts.downloads,
+    approvalResponseLost: voteResponse === null,
+  };
+}
+
+/** A fresh original-owner login observes the same completed output, with no vote
+ * or mutation. This is separate evidence, not a substitute for the reviewer phase. */
+export async function driveOwnerOutcome(adapter, contract) {
+  const f = validateOwnerOutcomeContract(contract, adapter.now());
+  await adapter.verifyIdentity(f.scope.actorId);
+  const original = await adapter.readOriginal();
+  const oldJob = assertOriginalFailed(original.run, original.jobs, f);
+  const output = await observeOutput(adapter, f, oldJob);
+  const counts = adapter.counts();
+  assert.deepEqual(
+    counts.mutations,
+    [],
+    "Owner observation is strictly read-only",
+  );
+  assert.equal(counts.downloads, 1);
+  return {
+    ...output,
+    version: f.version,
+    phase: "browser-owner-output-observed",
+    ownerOutcomeComplete: true,
+    runtimeAcceptanceComplete: false,
+    actorId: f.scope.actorId,
+    requesterId: f.scope.actorId,
+    approvalPosts: 0,
+    artifactDownloads: counts.downloads,
+  };
+}
+
+async function observeOutput(adapter, f, oldJob) {
   let result;
   for (;;) {
     remaining(f.deadlineUnixMilli, adapter.now());
@@ -110,17 +164,7 @@ export async function driveOutcome(adapter, contract) {
     "Original failed execution must still publish nothing",
   );
   remaining(f.deadlineUnixMilli, adapter.now());
-  const counts = adapter.counts();
-  assertMutationTrace(counts.mutations, f);
-  assert.equal(counts.downloads, 1);
   return {
-    version: f.version,
-    phase: "browser-independent-approval-and-output-observed",
-    browserOutcomeComplete: true,
-    runtimeAcceptanceComplete: false,
-    actorId: f.actorId,
-    requesterId: f.scope.actorId,
-    firstApproverId: f.firstApproverId,
     projectId: f.scope.projectId,
     pipelineId: f.scope.pipelineId,
     originalRunId: f.scope.originalRunId,
@@ -131,11 +175,6 @@ export async function driveOutcome(adapter, contract) {
     intentId: f.target.intentId,
     newRunId: f.target.runId,
     newJobRunId: f.target.jobRunId,
-    claimId: evidence.identity.claimId,
-    approvalId: approval.approvalId,
-    approvalEvidenceHash: approval.evidenceHash,
-    approvalStatus: approval.status,
-    approvedCount: approval.approvedCount,
     sourceCommit: newJob.sourceResolvedCommit,
     newRunStatus: result.run.status,
     newJobStatus: newJob.status,
@@ -147,9 +186,6 @@ export async function driveOutcome(adapter, contract) {
     artifactSha256: downloaded.sha256,
     preparePosts: 0,
     confirmPosts: 0,
-    approvalPosts: counts.mutations.length,
-    artifactDownloads: counts.downloads,
-    approvalResponseLost: voteResponse === null,
   };
 }
 
@@ -158,10 +194,14 @@ export async function runRerunBrowserOutcome({
   page,
   base,
   contract,
+  ownerOnly = false,
   assertControlReachable,
   applyArtifactRunFilter,
 }) {
-  const f = validateOutcomeContract(contract);
+  assert.equal(typeof ownerOnly, "boolean");
+  const f = ownerOnly
+    ? validateOwnerOutcomeContract(contract)
+    : validateOutcomeContract(contract);
   assert.equal(typeof assertControlReachable, "function");
   assert.equal(typeof applyArtifactRunFilter, "function");
   const origin = new URL(base);
@@ -274,7 +314,7 @@ export async function runRerunBrowserOutcome({
   let downloadClicked = false;
   page.on("request", onRequest);
   try {
-    return await driveOutcome(
+    return await (ownerOnly ? driveOwnerOutcome : driveOutcome)(
       {
         now: () => Date.now(),
         async verifyIdentity(actorId) {
@@ -283,7 +323,9 @@ export async function runRerunBrowserOutcome({
           assert.equal(
             (await read(await user)).userId,
             actorId,
-            "Separate actual candidate login required",
+            ownerOnly
+              ? "Separate actual original-owner login required"
+              : "Separate actual candidate login required",
           );
           assert.equal(mutations.length, 0);
         },
@@ -367,7 +409,9 @@ export async function runRerunBrowserOutcome({
           );
         },
         async readNewExecution() {
-          return readRun(f.target.runId, false);
+          const navigate =
+            new URL(page.url()).searchParams.get("run") !== f.target.runId;
+          return readRun(f.target.runId, navigate);
         },
         async verifyRenderedOutcome(job) {
           const logs = page.getByLabel("Execution logs", { exact: true });

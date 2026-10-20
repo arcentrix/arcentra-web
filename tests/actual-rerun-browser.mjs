@@ -105,11 +105,13 @@ await runBrowserTest(
             page,
             base,
             contract: input.contract,
+            deadline: input.deadline,
           })
         : await runRerunBrowserOutcome({
             page,
             base,
             contract: input.contract,
+            ownerOnly: input.phase === "owner-outcome",
             ...controls,
           });
     remaining(input.deadline);
@@ -162,7 +164,7 @@ assert.ok(
   "Bounded phase receipt required",
 );
 await writeFile(
-  `${input.outputDirectory}/copilot-rerun-${input.phase === "prepare" ? "preparation" : "outcome"}-receipt.json`,
+  `${input.outputDirectory}/copilot-rerun-${input.phase === "prepare" ? "preparation" : input.phase}-receipt.json`,
   encoded,
   { mode: 0o600, flag: "wx" },
 );
