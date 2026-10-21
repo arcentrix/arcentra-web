@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   validateExecutionBrowserContract,
   assertExecutionBrowserIdentity,
+  assertDisabledTerminalRerunProbe,
 } from "./copilot-execution-journey.mjs";
 const valid = () => ({
   version: "copilot-execution-browser-v1",
@@ -82,3 +83,89 @@ test("browser rejects confirmation at or after expiry", () => {
     assertExecutionBrowserIdentity(value, valid(), "submitted"),
   );
 });
+
+const disabledProbe = () => {
+  const path = "/api/v1/projects/project/copilot/rerun-intents/availability";
+  const value = {
+    url: `http://127.0.0.1:5174${path}`,
+    method: "GET",
+    navigation: false,
+    resourceType: "xhr",
+    status: 503,
+    cache: "private, no-store",
+    body: {
+      code: 503,
+      errMsg: "Whole-job new execution is temporarily unavailable",
+      path,
+      timestamp: 1792474000,
+    },
+  };
+  const response = {
+    url: () => value.url,
+    request: () => ({
+      method: () => value.method,
+      url: () => value.url,
+      isNavigationRequest: () => value.navigation,
+      resourceType: () => value.resourceType,
+    }),
+    status: () => value.status,
+    headerValue: async () => value.cache,
+    json: async () => value.body,
+  };
+  return { value, response, path };
+};
+test("retry-vote browser requires the exact disabled terminal-rerun envelope", async () => {
+  const { response, path } = disabledProbe();
+  assert.equal(
+    await assertDisabledTerminalRerunProbe(
+      response,
+      "http://127.0.0.1:5174",
+      "project",
+    ),
+    path,
+  );
+});
+for (const [name, mutate] of [
+  [
+    "enabled response",
+    (v) => {
+      v.status = 200;
+      v.body = { code: 200, detail: { available: true } };
+    },
+  ],
+  [
+    "unrelated route",
+    (v) =>
+      (v.url = v.url.replace(
+        "rerun-intents/availability",
+        "execution-intents/intent/confirm",
+      )),
+  ],
+  [
+    "another project",
+    (v) => (v.url = v.url.replace("projects/project/", "projects/other/")),
+  ],
+  ["query string", (v) => (v.url += "?unexpected=true")],
+  ["foreign origin", (v) => (v.url = v.url.replace("127.0.0.1", "localhost"))],
+  ["mutation method", (v) => (v.method = "POST")],
+  ["navigation request", (v) => (v.navigation = true)],
+  ["document resource", (v) => (v.resourceType = "document")],
+  ["unexpected status", (v) => (v.status = 500)],
+  ["cacheable response", (v) => (v.cache = "public, max-age=60")],
+  ["wrong body code", (v) => (v.body.code = 500)],
+  ["generic service failure", (v) => (v.body.errMsg = "Internal server error")],
+  ["body path mismatch", (v) => (v.body.path += "/other")],
+  ["unexpected body detail", (v) => (v.body.detail = { available: true })],
+  ["invalid timestamp", (v) => (v.body.timestamp = "unknown")],
+])
+  test(`disabled terminal-rerun probe rejects ${name}`, async () => {
+    const { response, value } = disabledProbe();
+    mutate(value);
+    await assert.rejects(() =>
+      assertDisabledTerminalRerunProbe(
+        response,
+        "http://127.0.0.1:5174",
+        "project",
+      ),
+    );
+  });

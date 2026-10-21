@@ -1,4 +1,5 @@
 import { copilotHistoryStages } from "./copilot-history-journey.mjs";
+import { rerunPreparationStages } from "./copilot-rerun-journey.mjs";
 import { personalInboxStages } from "./personal-inbox-journey.mjs";
 import {
   visualCIConfig,
@@ -17,6 +18,11 @@ import {
 /** Shared diagnostics for local-only official Playwright Chromium acceptance. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import {
+  remainingManagedBrowserBudget,
+  spawnManagedFrontend,
+  stopManagedFrontend,
+} from "./managed-frontend.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -26,12 +32,15 @@ const acceptanceStages = new Set([
   ...visualCIStages,
   ...personalInboxStages,
   ...copilotHistoryStages,
+  ...rerunPreparationStages,
   ...organizationManagementStages,
   ...projectSecretStages,
   "setup",
   "login",
   "copilot-execution-confirm",
   "copilot-execution-observe",
+  "copilot-rerun-outcome",
+  "copilot-rerun-owner-outcome",
   "first-build-preflight-evidence",
   "first-build-status",
   "first-build-refresh",
@@ -295,6 +304,12 @@ export function safeFailureEvidence(stage, error) {
     "actual-copilot-execution-acceptance.mjs",
     "copilot-execution-journey.mjs",
     "copilot-history-journey.mjs",
+    "actual-rerun-browser.mjs",
+    "copilot-rerun-journey.mjs",
+    "copilot-rerun-entry-contract.mjs",
+    "copilot-rerun-outcome-contract.mjs",
+    "copilot-rerun-outcome-journey.mjs",
+    "rerun-response-loss.mjs",
     "inbox-auth-guard.mjs",
     "personal-inbox-journey.mjs",
     "ui-fixture-smoke.mjs",
@@ -477,6 +492,197 @@ export function expectedResourceError(message, expected) {
   }
 }
 
+/** Bound request correlation independently of the existing public diagnostics. */
+export function createHttpErrorObservation() {
+  const requests = [];
+  const byRequest = new WeakMap();
+  let overflow = false;
+  return {
+    requests,
+    request(request, context) {
+      if (requests.length >= 4096) {
+        overflow = true;
+        return;
+      }
+      const observation = {
+        url: request.url(),
+        method: request.method(),
+        statuses: [],
+        failed: false,
+        ...(context
+          ? {
+              stage: context.stage,
+              observationPhase: context.observationPhase,
+              resourceType: request.resourceType(),
+              navigation: request.isNavigationRequest(),
+            }
+          : {}),
+      };
+      requests.push(observation);
+      byRequest.set(request, observation);
+    },
+    get(request) {
+      return byRequest.get(request);
+    },
+    response(response) {
+      const observation = byRequest.get(response.request());
+      if (!observation) return;
+      if (observation.statuses.length) overflow = true;
+      else observation.statuses.push(response.status());
+    },
+    failed(request) {
+      const observation = byRequest.get(request);
+      if (observation) observation.failed = true;
+    },
+    assertClean() {
+      assert.equal(
+        overflow,
+        false,
+        "HTTP error correlation exceeded its bounded observation",
+      );
+    },
+  };
+}
+
+/** A one-off failure must correlate to one real request and one native console event. */
+export function assertSingleExpectedHttpError(expected, requests, entries) {
+  const path = new URL(expected.url).pathname;
+  const matching = (url) => {
+    try {
+      return new URL(url).pathname === path;
+    } catch {
+      return false;
+    }
+  };
+  assert.deepEqual(
+    requests
+      .filter((request) => matching(request.url))
+      .map(({ url, method, statuses, failed }) => ({
+        url,
+        method,
+        statuses,
+        failed,
+      })),
+    [
+      {
+        url: expected.url,
+        method: expected.method,
+        statuses: [expected.status],
+        failed: false,
+      },
+    ],
+    "Expected error must come from exactly one completed, exact request",
+  );
+  const errors = entries.filter(
+    (entry) => entry.type === "error" && matching(entry.url),
+  );
+  assert.equal(errors.length, 1, "Expected exactly one native resource error");
+  assert.equal(errors[0].url, expected.url);
+  assert.equal(errors[0].observationPhase, "journey");
+  assert.equal(errors[0].text, expected.text);
+  return `${path}:${expected.status}`;
+}
+
+/** Repeated probes are expected only by validated response identity and load stage.
+ * Console events have no request handle, so exact URL + a unique stage provide
+ * unambiguous correlation. Validate the entire path group before allowing any.
+ */
+export function assertExpectedResponseHttpErrors(expected, requests, entries) {
+  const allowed = new Set();
+  const evidence = [];
+  const paths = new Set(expected.map((value) => new URL(value.url).pathname));
+  for (const path of paths) {
+    const matching = (url) => {
+      try {
+        return new URL(url).pathname === path;
+      } catch {
+        return false;
+      }
+    };
+    const group = expected.filter((value) => matching(value.url));
+    assert.equal(
+      new Set(group.map((value) => value.observation)).size,
+      group.length,
+      "A response identity cannot be registered twice",
+    );
+    assert.equal(
+      new Set(group.map((value) => value.stage)).size,
+      group.length,
+      "Each expected probe requires a distinct load stage",
+    );
+    const observed = requests.filter((value) => matching(value.url));
+    assert.equal(
+      observed.length,
+      group.length,
+      "No extra same-route requests are permitted",
+    );
+    const errors = entries.filter(
+      (value) => value.type === "error" && matching(value.url),
+    );
+    assert.equal(
+      errors.length,
+      group.length,
+      "No extra same-route console errors are permitted",
+    );
+    for (let index = 0; index < group.length; index++) {
+      const value = group[index];
+      assert.equal(value.category, "terminal-rerun-disabled");
+      assert.ok(
+        [
+          "copilot-history-create",
+          "copilot-history-reload",
+          "copilot-history-resume",
+        ].includes(value.stage),
+      );
+      assert.match(
+        path,
+        /^\/api\/v1\/projects\/[A-Za-z0-9_-]{1,128}\/copilot\/rerun-intents\/availability$/,
+      );
+      assert.strictEqual(
+        observed[index],
+        value.observation,
+        "Only the actual validated response request may be expected",
+      );
+      assert.ok(["xhr", "fetch"].includes(observed[index].resourceType));
+      assert.deepEqual(observed[index], {
+        url: value.url,
+        method: "GET",
+        statuses: [503],
+        failed: false,
+        stage: value.stage,
+        observationPhase: "journey",
+        resourceType: observed[index].resourceType,
+        navigation: false,
+      });
+      const events = errors.filter((entry) => entry.stage === value.stage);
+      assert.equal(
+        events.length,
+        1,
+        "Each probe requires exactly one native error in its load stage",
+      );
+      assert.equal(events[0].url, value.url);
+      assert.equal(events[0].observationPhase, "journey");
+      assert.equal(
+        events[0].text,
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+      );
+      allowed.add(`${path}:503`);
+      evidence.push({
+        category: "terminal-rerun-disabled",
+        stage: value.stage,
+        method: "GET",
+        status: 503,
+        bodyCode: 503,
+        envelope: "exact-default-off",
+        requestCount: 1,
+        responseCount: 1,
+        consoleErrorCount: 1,
+      });
+    }
+  }
+  return { allowed, evidence };
+}
+
 /** Upload only fixed classifications, never console arguments, URLs or identifiers. */
 export function safeConsoleErrorEvidence(entries, requests, expected) {
   const route = (value) => {
@@ -497,6 +703,27 @@ export function safeConsoleErrorEvidence(entries, requests, expected) {
           "project-settings",
         ],
         [/^\/api\/v1\/project\/[^/]+\/members(?:\/[^/]+)?$/, "project-members"],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/rerun-intents\/availability$/,
+          "copilot-rerun-availability",
+        ],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/rerun-intents(?:\/.*)?$/,
+          "copilot-rerun",
+        ],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/execution-intents(?:\/.*)?$/,
+          "copilot-retry-execution",
+        ],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/conversations(?:\/.*)?$/,
+          "copilot-history",
+        ],
+        [/^\/api\/v1\/projects\/[^/]+\/copilot\/status$/, "copilot-status"],
+        [
+          /^\/api\/v1\/projects\/[^/]+\/copilot\/runs\/[^/]+\/context$/,
+          "copilot-context",
+        ],
         [/^\/api\/v1\/pipelines(?:\/.*)?$/, "pipelines"],
         [/^\/api\/v1\/projects\/[^/]+\/artifacts(?:\/.*)?$/, "artifacts"],
       ];
@@ -608,6 +835,7 @@ export function safeBrowserRuntimeEvidence(events, lifecycle, log) {
         lifecycle.managed === true ? "vite-development" : "external-unknown",
       managed: lifecycle.managed === true,
       ready: lifecycle.ready === true,
+      listeningWitness: lifecycle.listeningWitness === true,
       readyAfterMs: boundedMs(lifecycle.readyAfterMs),
       observedForMs: boundedMs(lifecycle.observedForMs),
       exitCodeBeforeCleanup:
@@ -698,9 +926,18 @@ export async function runBrowserTest(
     projectSecretEvidence,
     visualEvidence,
     sensitiveValues = [],
+    requireManagedFrontend = false,
   } = {},
 ) {
   assert.ok(["simulated-transport", "actual-backend"].includes(kind));
+  assert.equal(typeof requireManagedFrontend, "boolean");
+  if (requireManagedFrontend) {
+    assert.equal(kind, "actual-backend");
+    assert.ok(
+      !Object.hasOwn(process.env, "UI_TEST_BASE_URL"),
+      "Strict frontend provenance forbids an external UI origin",
+    );
+  }
   const timeoutMs =
     totalTimeoutMs ?? (kind === "actual-backend" ? 300_000 : 180_000);
   assert.ok(
@@ -736,8 +973,13 @@ export async function runBrowserTest(
     unhandledRoutes: [],
   };
   const expectedHttpErrors = new Set();
+  const singleHttpErrors = [];
+  const responseHttpErrors = [];
+  let verifiedHttpErrorEvidence = [];
+  const httpObservation = createHttpErrorObservation();
   const consoleCollector = createConsoleCollector(diagnostics, sensitiveValues);
   let server;
+  let managedFrontend;
   let serverError;
   let serverLog = "";
   let browser;
@@ -753,47 +995,69 @@ export async function runBrowserTest(
   let runtimeEvidence;
   try {
     if (!process.env.UI_TEST_BASE_URL) {
-      server = spawn(
-        process.execPath,
-        [
-          "node_modules/vite/bin/vite.js",
-          "--host",
-          base.hostname,
-          "--port",
-          base.port,
-          "--strictPort",
-        ],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
+      if (requireManagedFrontend) {
+        const managed = spawnManagedFrontend({
+          host: base.hostname,
+          port: Number(base.port),
+          timeoutMs: Math.min(30_000, timeoutMs),
           env: {
             ...process.env,
             VITE_API_CLIENT_URL: "/api/v1",
             VITE_API_URL: backend || "http://127.0.0.1:1",
           },
-        },
-      );
+        });
+        server = managed.child;
+        managedFrontend = managed.observation;
+      } else
+        server = spawn(
+          process.execPath,
+          [
+            "node_modules/vite/bin/vite.js",
+            "--host",
+            base.hostname,
+            "--port",
+            base.port,
+            "--strictPort",
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            env: {
+              ...process.env,
+              VITE_API_CLIENT_URL: "/api/v1",
+              VITE_API_URL: backend || "http://127.0.0.1:1",
+            },
+          },
+        );
       server.on("error", (error) => (serverError = error));
       const log = (data) => (serverLog = `${serverLog}${data}`.slice(-100_000));
       server.stdout.on("data", log);
       server.stderr.on("data", log);
     }
+    if (managedFrontend) await managedFrontend.ready;
     let ready = false;
     for (let i = 0; i < 150; i++) {
+      managedFrontend?.assertAlive();
       if (serverError) throw serverError;
       if (server && server.exitCode !== null)
         throw new Error(`Vite exited (${server.exitCode}): ${serverLog}`);
       try {
-        const response = await fetch(base, {
+        const request = fetch(base, {
           redirect: "error",
           signal: AbortSignal.timeout(1_000),
         });
+        const response = await (managedFrontend
+          ? Promise.race([request, managedFrontend.failed])
+          : request);
+        managedFrontend?.assertAlive();
         if (response.ok) {
           ready = true;
           serverReady = true;
           readyAfterMs = Date.now() - serverStartedAt;
           break;
         }
-      } catch {}
+      } catch {
+        managedFrontend?.assertAlive();
+      }
       await delay(200);
     }
     assert.ok(ready, "Local Vite server did not become ready");
@@ -825,6 +1089,12 @@ export async function runBrowserTest(
     });
     page = await context.newPage();
     page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.origin === base.origin && url.pathname.startsWith("/api/"))
+        httpObservation.request(request, {
+          stage,
+          observationPhase: browserClosing ? "browser-closing" : "journey",
+        });
       if (isArtifactDownload(request.method(), new URL(request.url()).pathname))
         diagnostics.artifactDownloadRequestCount++;
     });
@@ -837,6 +1107,7 @@ export async function runBrowserTest(
     page.on("console", onConsole);
     page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
     page.on("requestfailed", (request) => {
+      httpObservation.failed(request);
       const url = new URL(request.url());
       if (url.origin === base.origin && !url.pathname.startsWith("/api/"))
         diagnostics.staticResourceEvents.push({
@@ -853,6 +1124,7 @@ export async function runBrowserTest(
       });
     });
     page.on("response", (response) => {
+      httpObservation.response(response);
       const url = new URL(response.url());
       if (
         url.origin === base.origin &&
@@ -874,6 +1146,10 @@ export async function runBrowserTest(
           status: response.status(),
         });
     });
+    managedFrontend?.assertAlive();
+    const observationTimeoutMs = requireManagedFrontend
+      ? remainingManagedBrowserBudget(timeoutMs, serverStartedAt)
+      : timeoutMs;
     const test = callback({
       page,
       context,
@@ -896,10 +1172,39 @@ export async function runBrowserTest(
       },
       expectHttpError: (path, status) =>
         expectedHttpErrors.add(`${path}:${status}`),
+      expectDisabledTerminalRerunResponse: (response) => {
+        assert.equal(kind, "actual-backend");
+        const observation = httpObservation.get(response.request());
+        assert.ok(
+          observation,
+          "Validated response requires its actual observed request",
+        );
+        const url = new URL(response.url());
+        assert.equal(url.origin, base.origin);
+        assert.equal(url.search, "");
+        assert.equal(url.hash, "");
+        assert.equal(response.request().method(), "GET");
+        assert.equal(response.status(), 503);
+        responseHttpErrors.push({
+          url: url.href,
+          observation,
+          stage,
+          category: "terminal-rerun-disabled",
+        });
+      },
+      expectHttpErrorOnce: (path, status, method, text) => {
+        const url = new URL(path, base);
+        assert.equal(url.origin, base.origin);
+        assert.equal(url.pathname, path);
+        singleHttpErrors.push({ url: url.href, status, method, text });
+      },
     });
     await withBrowserDeadline(
       async () => {
-        await test;
+        await (managedFrontend
+          ? Promise.race([test, managedFrontend.failed])
+          : test);
+        managedFrontend?.assertAlive();
         // Keep observing through browser close. A callback return is not an event
         // cutoff: late console calls or failed handle inspection must fail closed.
         await finalizeConsoleObservation(consoleCollector, async () => {
@@ -909,9 +1214,29 @@ export async function runBrowserTest(
         });
         page.off("console", onConsole);
       },
-      timeoutMs,
+      observationTimeoutMs,
       `${kind} browser test exceeded its total timeout`,
     );
+    // Validate only after close and final console drain, so duplicate or late
+    // same-route failures cannot inherit a one-off allowance.
+    httpObservation.assertClean();
+    // Do not suppress diagnostics unless final correlation passed. A duplicate,
+    // malformed or late error remains unexpected in the failure summary.
+    for (const expected of singleHttpErrors)
+      expectedHttpErrors.add(
+        assertSingleExpectedHttpError(
+          expected,
+          httpObservation.requests,
+          diagnostics.console,
+        ),
+      );
+    const correlated = assertExpectedResponseHttpErrors(
+      responseHttpErrors,
+      httpObservation.requests,
+      diagnostics.console,
+    );
+    for (const key of correlated.allowed) expectedHttpErrors.add(key);
+    verifiedHttpErrorEvidence = correlated.evidence;
     assert.equal(
       diagnostics.pageErrors.length,
       0,
@@ -951,6 +1276,7 @@ export async function runBrowserTest(
       true,
       "No synthetic credential may appear in browser diagnostics",
     );
+    managedFrontend?.assertAlive();
     diagnostics.status = "passed";
   } catch (error) {
     failure = error;
@@ -992,6 +1318,7 @@ export async function runBrowserTest(
       {
         managed: !!server,
         ready: serverReady,
+        listeningWitness: managedFrontend?.witnessed === true,
         readyAfterMs,
         observedForMs: Date.now() - serverStartedAt,
         exitCode: server?.exitCode,
@@ -999,7 +1326,16 @@ export async function runBrowserTest(
       },
       serverLog,
     );
-    server?.kill("SIGTERM");
+    if (managedFrontend) {
+      try {
+        await stopManagedFrontend(server, managedFrontend);
+      } catch {
+        failure ??= new Error(
+          "Owned managed frontend cleanup did not complete",
+        );
+        diagnostics.status = "failed";
+      }
+    } else server?.kill("SIGTERM");
     await writeFile(
       `${output}/diagnostics.json`,
       `${redactDiagnosticText(JSON.stringify(diagnostics, null, 2), sensitiveValues)}\n`,
@@ -1035,6 +1371,7 @@ export async function runBrowserTest(
             diagnostics.requests,
             expectedHttpErrors,
           ),
+          verifiedHttpErrorEvidence,
           ...runtimeEvidence,
           blockedRequestCount: diagnostics.blockedRequests.length,
           unhandledRouteCount: diagnostics.unhandledRoutes.length,

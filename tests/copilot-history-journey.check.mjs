@@ -91,6 +91,11 @@ test("real entrypoint does not fall back to mocked routes, browser storage seedi
   assert.match(entry, /ARCENTRA_REAL_STACK/);
   assert.match(entry, /actualBackendConfig\(\)/);
   assert.match(entry, /observeInboxLogin/);
+  assert.match(entry, /expectDisabledTerminalRerunResponse/);
+  assert.ok(
+    journey.indexOf("await assertDisabledTerminalRerunProbe(response") <
+      journey.indexOf("expectDisabledTerminalRerunResponse(response)"),
+  );
   assert.doesNotMatch(
     entry,
     /page\.screenshot|safeFailureScreenshot|setSensitiveFormOpen\(false\)/,
@@ -105,7 +110,7 @@ test("real entrypoint does not fall back to mocked routes, browser storage seedi
 
 // Unit-only interface doubles exercise every create/resume branch of the real
 // journey. They are not used by the real entrypoint or as browser/API evidence.
-test("create and resume invoke the real mobile helper with a Locator and preserve full journey contracts", async () => {
+async function checkHistoryJourneyInterface(requireDisabledProbe) {
   const base = "http://127.0.0.1:4173";
   const prefix = "/api/v1/projects/project/copilot/conversations";
   const conversation = { ...contract, conversationId: "conversation" };
@@ -114,6 +119,8 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
   const waiters = [];
   const stages = [];
   const reachability = [];
+  const probes = [];
+  let lastProbe;
   let question = "";
   let historyTurnIds = [];
   let consent = false;
@@ -139,7 +146,9 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
     };
   };
   const emit = (method, suffix, detail, input) => {
-    const value = response(method, suffix, detail, input);
+    emitResponse(response(method, suffix, detail, input));
+  };
+  const emitResponse = (value) => {
     for (const listener of listeners) listener(value.request());
     const index = waiters.findIndex((waiter) => waiter.predicate(value));
     assert.notEqual(
@@ -220,6 +229,7 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
           : `${turn.question}\n${turn.text}`;
       },
       async count() {
+        if (role === "region" && name === "Whole-job new executions") return 0;
         assert.equal(role, "selector");
         assert.ok(
           ["a, img, script, iframe", "script, img, iframe"].includes(name),
@@ -251,8 +261,30 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
           return;
         }
         switch (name) {
-          case "Load context choices":
-            return;
+          case "Load context choices": {
+            if (!requireDisabledProbe) return;
+            const path =
+              "/api/v1/projects/project/copilot/rerun-intents/availability";
+            const request = {
+              url: () => `${base}${path}`,
+              method: () => "GET",
+              isNavigationRequest: () => false,
+              resourceType: () => "xhr",
+            };
+            lastProbe = {
+              url: request.url,
+              request: () => request,
+              status: () => 503,
+              headerValue: async () => "private, no-store",
+              json: async () => ({
+                code: 503,
+                path,
+                timestamp: 1792474000,
+                errMsg: "Whole-job new execution is temporarily unavailable",
+              }),
+            };
+            return emitResponse(lastProbe);
+          }
           case "Create private conversation · 30 days":
             return emit("POST", "", conversation, {
               acknowledgeRetention: true,
@@ -387,6 +419,14 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
       elementFromPoint: () => element,
     };
     const input = {
+      ...(requireDisabledProbe
+        ? {
+            expectDisabledTerminalRerunResponse: (value) => {
+              assert.strictEqual(value, lastProbe);
+              probes.push(stages.at(-1));
+            },
+          }
+        : {}),
       page,
       base,
       profileResponse: response("GET", "/profile", {
@@ -416,6 +456,16 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
       "evaluate",
       "trial-click",
     ]);
+    assert.deepEqual(
+      probes,
+      requireDisabledProbe
+        ? [
+            "copilot-history-create",
+            "copilot-history-reload",
+            "copilot-history-resume",
+          ]
+        : [],
+    );
     assert.equal(waiters.length, 0);
     assert.equal(listeners.size, 0);
     for (const stage of copilotHistoryStages) assert.ok(stages.includes(stage));
@@ -425,4 +475,101 @@ test("create and resume invoke the real mobile helper with a Locator and preserv
       else delete globalThis[key];
     }
   }
-});
+}
+for (const requireDisabledProbe of [false, true])
+  test(`create and resume preserve full journey contracts with default-off probes ${requireDisabledProbe}`, () =>
+    checkHistoryJourneyInterface(requireDisabledProbe));
+
+for (const [name, change] of [
+  [
+    "wrong body code",
+    (value) => {
+      value.body.code = 500;
+    },
+  ],
+  [
+    "foreign body path",
+    (value) => {
+      value.body.path += "/PRIVATE";
+    },
+  ],
+  [
+    "extra private field",
+    (value) => {
+      value.body.PRIVATE = "PRIVATE";
+    },
+  ],
+  [
+    "enabled execution controls",
+    (value) => {
+      value.controls = 1;
+    },
+  ],
+])
+  test(`actual history never registers a probe allowance after ${name}`, async () => {
+    const base = "http://127.0.0.1:5174";
+    const path = "/api/v1/projects/project/copilot/rerun-intents/availability";
+    const value = {
+      controls: 0,
+      body: {
+        code: 503,
+        path,
+        timestamp: 1792474000,
+        errMsg: "Whole-job new execution is temporarily unavailable",
+      },
+    };
+    change(value);
+    const request = {
+      method: () => "GET",
+      url: () => `${base}${path}`,
+      isNavigationRequest: () => false,
+      resourceType: () => "xhr",
+    };
+    const response = {
+      request: () => request,
+      url: request.url,
+      status: () => 503,
+      headerValue: async () => "private, no-store",
+      json: async () => value.body,
+    };
+    let registered = 0;
+    let detached = false;
+    const page = {
+      on: () => {},
+      off: () => {
+        detached = true;
+      },
+      goto: async () => {},
+      getByLabel: () => ({ fill: async () => {} }),
+      getByRole: (role, { name }) => {
+        if (role === "region" && name === "Whole-job new executions")
+          return { count: async () => value.controls };
+        assert.equal(name, "Load context choices");
+        return { click: async () => {} };
+      },
+      waitForResponse: async (predicate) => {
+        assert.equal(predicate(response), true);
+        return response;
+      },
+    };
+    await assert.rejects(() =>
+      runCopilotHistoryJourney({
+        page,
+        base,
+        contract,
+        profileResponse: {
+          status: () => 200,
+          json: async () => ({
+            code: 200,
+            detail: { userId: contract.actorId },
+          }),
+        },
+        setStage: () => {},
+        expectDisabledTerminalRerunResponse: () => {
+          registered++;
+        },
+      }),
+    );
+    assert.equal(registered, 0);
+    assert.equal(detached, true);
+  });

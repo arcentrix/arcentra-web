@@ -61,11 +61,46 @@ export function assertExecutionBrowserIdentity(value, contract, state) {
   }
 }
 
+/** Read-only legacy fixtures leave independent terminal execution disabled. */
+export async function assertDisabledTerminalRerunProbe(
+  response,
+  base,
+  projectId,
+) {
+  const path = `/api/v1/projects/${projectId}/copilot/rerun-intents/availability`;
+  assert.equal(response.url(), new URL(path, base).href);
+  assert.equal(response.request().url(), response.url());
+  assert.equal(response.request().method(), "GET");
+  assert.equal(response.request().isNavigationRequest(), false);
+  assert.ok(["xhr", "fetch"].includes(response.request().resourceType()));
+  assert.equal(response.status(), 503);
+  assert.equal(
+    await response.headerValue("cache-control"),
+    "private, no-store",
+  );
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), [
+    "code",
+    "errMsg",
+    "path",
+    "timestamp",
+  ]);
+  assert.equal(body.code, 503);
+  assert.equal(
+    body.errMsg,
+    "Whole-job new execution is temporarily unavailable",
+  );
+  assert.equal(body.path, path);
+  assert.ok(Number.isSafeInteger(body.timestamp) && body.timestamp > 0);
+  return path;
+}
+
 export async function runExecutionBrowserJourney({
   page,
   base,
   contract,
   setStage,
+  expectHttpErrorOnce,
 }) {
   const f = validateExecutionBrowserContract(contract);
   const prefix = `/api/v1/projects/${f.projectId}/copilot`;
@@ -95,10 +130,35 @@ export async function runExecutionBrowserJourney({
   await page.getByLabel("Project ID", { exact: true }).fill(f.projectId);
   await page.getByLabel("Run ID", { exact: true }).fill(f.runId);
   const statusResponse = responseFor("GET", `${prefix}/status`);
+  const disabledRerunResponse = responseFor(
+    "GET",
+    `${prefix}/rerun-intents/availability`,
+  );
+  disabledRerunResponse.catch(() => {});
   await page
     .getByRole("button", { name: "Load context choices", exact: true })
     .click();
   const status = await read(await statusResponse);
+  // This is the separate default-off capability probe, not a failed approval
+  // confirmation or a deliberately lost response. Validate its actual envelope
+  // before expecting its one native Chromium resource error.
+  const disabledRerunPath = await assertDisabledTerminalRerunProbe(
+    await disabledRerunResponse,
+    base,
+    f.projectId,
+  );
+  expectHttpErrorOnce(
+    disabledRerunPath,
+    503,
+    "GET",
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+  );
+  assert.equal(
+    await page
+      .getByRole("region", { name: "Whole-job new executions", exact: true })
+      .count(),
+    0,
+  );
   assert.equal(status.retryExecutionAvailable, true);
   assert.equal(
     status.configured,
@@ -193,6 +253,20 @@ export async function runExecutionBrowserJourney({
     mutations.length,
     1,
     "Status observation must not re-submit or trigger jobs",
+  );
+  assert.equal(
+    mutations.filter((entry) =>
+      entry.path.startsWith(`${prefix}/rerun-intents`),
+    ).length,
+    0,
+    "The disabled terminal capability must never introduce a new-execution mutation",
+  );
+  assert.equal(
+    await page
+      .getByRole("region", { name: "Whole-job new executions", exact: true })
+      .count(),
+    0,
+    "Disabled terminal execution controls must remain absent after approval completes",
   );
   return {
     version: f.version,

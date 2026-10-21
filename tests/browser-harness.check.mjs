@@ -43,6 +43,9 @@ import {
   preflightStepsFromSummary,
   artifactDownloadEvidence,
   expectedResourceError,
+  assertSingleExpectedHttpError,
+  assertExpectedResponseHttpErrors,
+  createHttpErrorObservation,
   safeConsoleErrorEvidence,
   safeBrowserRuntimeEvidence,
   isNativeOptionDisabled,
@@ -390,6 +393,54 @@ test("failure evidence only includes allowlisted stage, source basename and nume
         stage: "unknown",
       },
     );
+});
+
+test("terminal rerun failures retain bounded stage and original helper location, never raw diagnostic content", async () => {
+  const { rerunPreparationStages } =
+    await import("./copilot-rerun-journey.mjs");
+  const source = await readFile(
+    new URL("./copilot-rerun-journey.mjs", import.meta.url),
+    "utf8",
+  );
+  const emitted = [...source.matchAll(/setStage\("([^"]+)"\)/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(
+    [...new Set(emitted)].sort(),
+    [...rerunPreparationStages].sort(),
+  );
+  for (const stage of [
+    ...rerunPreparationStages,
+    "copilot-rerun-outcome",
+    "copilot-rerun-owner-outcome",
+  ])
+    assert.equal(safeFailureEvidence(stage, null).stage, stage);
+  const wrapper = new URL("./browser-harness.mjs", import.meta.url).href;
+  for (const file of [
+    "actual-rerun-browser.mjs",
+    "copilot-rerun-journey.mjs",
+    "copilot-rerun-entry-contract.mjs",
+    "copilot-rerun-outcome-contract.mjs",
+    "copilot-rerun-outcome-journey.mjs",
+    "rerun-response-loss.mjs",
+  ]) {
+    const actual = new URL(file, import.meta.url).href;
+    assert.deepEqual(
+      safeFailureEvidence("copilot-rerun-load-scope", {
+        stack: `Error: PRIVATE-BODY token=PRIVATE-SECRET https://private.example\n    at callback (${actual}:23:9)\n    at async ${wrapper}:1194:9`,
+      }),
+      {
+        stage: "copilot-rerun-load-scope",
+        failureSite: { file, line: 23, column: 9 },
+      },
+    );
+    assert.deepEqual(
+      safeFailureEvidence("copilot-rerun-PRIVATE-SECRET", {
+        stack: `Error: PRIVATE-BODY\n    at callback (/untrusted/${file}:23:9)`,
+      }),
+      { stage: "unknown" },
+    );
+  }
 });
 
 test("missing persisted-log diagnostics allow only fixed marker categories, never log text", () => {
@@ -2713,4 +2764,422 @@ test("initial project inventory admits only the configured visual fixture and no
       }),
     /genuine build contract/,
   );
+});
+
+const oneOffProbe = () => {
+  const url =
+    "http://127.0.0.1:5174/api/v1/projects/project/copilot/rerun-intents/availability";
+  const text =
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)";
+  return {
+    expected: { url, method: "GET", status: 503, text },
+    requests: [{ url, method: "GET", statuses: [503], failed: false }],
+    entries: [{ url, type: "error", text, observationPhase: "journey" }],
+  };
+};
+test("one-off HTTP allowance requires one exact completed request and native error", () => {
+  const { expected, requests, entries } = oneOffProbe();
+  assertSingleExpectedHttpError(expected, requests, entries);
+});
+for (const [name, mutate] of [
+  ["missing request", (v) => v.requests.splice(0)],
+  ["duplicate request", (v) => v.requests.push({ ...v.requests[0] })],
+  ["mutation instead of GET", (v) => (v.requests[0].method = "POST")],
+  ["uncompleted response", (v) => v.requests[0].statuses.splice(0)],
+  ["different HTTP status", (v) => (v.requests[0].statuses[0] = 500)],
+  ["duplicate response", (v) => v.requests[0].statuses.push(503)],
+  ["failed transport", (v) => (v.requests[0].failed = true)],
+  ["query drift", (v) => (v.requests[0].url += "?unexpected=true")],
+  [
+    "origin drift",
+    (v) =>
+      (v.requests[0].url = v.requests[0].url.replace("127.0.0.1", "localhost")),
+  ],
+  ["missing console event", (v) => v.entries.splice(0)],
+  ["duplicate console event", (v) => v.entries.push({ ...v.entries[0] })],
+  ["different error text", (v) => (v.entries[0].text = "Application crashed")],
+  [
+    "different console status",
+    (v) => (v.entries[0].text = v.entries[0].text.replace("503", "500")),
+  ],
+  ["console query drift", (v) => (v.entries[0].url += "?unexpected=true")],
+  [
+    "console origin drift",
+    (v) =>
+      (v.entries[0].url = v.entries[0].url.replace("127.0.0.1", "localhost")),
+  ],
+  ["console source drift", (v) => (v.entries[0].url += "/confirm")],
+  [
+    "browser-closing error",
+    (v) => (v.entries[0].observationPhase = "browser-closing"),
+  ],
+])
+  test(`one-off HTTP allowance rejects ${name}`, () => {
+    const value = oneOffProbe();
+    mutate(value);
+    assert.throws(() =>
+      assertSingleExpectedHttpError(
+        value.expected,
+        value.requests,
+        value.entries,
+      ),
+    );
+  });
+test("disabled capability allowance leaves other API and application errors unexpected", () => {
+  const { expected, entries } = oneOffProbe();
+  const allowed = new Set([`${new URL(expected.url).pathname}:503`]);
+  assert.equal(expectedResourceError(entries[0], allowed), true);
+  for (const entry of [
+    {
+      ...entries[0],
+      url: expected.url.replace(
+        "rerun-intents/availability",
+        "execution-intents/intent/confirm",
+      ),
+    },
+    {
+      ...entries[0],
+      url: expected.url.replace("project/copilot", "other-project/copilot"),
+    },
+    { ...entries[0], text: entries[0].text.replace("503", "500") },
+    { ...entries[0], text: "Application crashed" },
+  ])
+    assert.equal(expectedResourceError(entry, allowed), false);
+});
+
+const httpProbeRequest = () => ({
+  url: () => oneOffProbe().expected.url,
+  method: () => "GET",
+});
+test("bounded HTTP observer correlates response and failed transport by request identity", () => {
+  const observer = createHttpErrorObservation();
+  const request = httpProbeRequest();
+  observer.request(request);
+  observer.response({ request: () => httpProbeRequest(), status: () => 500 });
+  assert.deepEqual(observer.requests[0].statuses, []);
+  observer.response({ request: () => request, status: () => 503 });
+  observer.assertClean();
+  const { expected, entries } = oneOffProbe();
+  assertSingleExpectedHttpError(expected, observer.requests, entries);
+  observer.failed(request);
+  assert.throws(() =>
+    assertSingleExpectedHttpError(expected, observer.requests, entries),
+  );
+});
+test("bounded HTTP observer rejects overflow without retaining extra requests", () => {
+  const observer = createHttpErrorObservation();
+  for (let i = 0; i < 4096; i++) observer.request(httpProbeRequest());
+  observer.assertClean();
+  observer.request(httpProbeRequest());
+  assert.equal(observer.requests.length, 4096);
+  assert.throws(() => observer.assertClean(), /bounded observation/);
+});
+test("bounded HTTP observer rejects duplicate responses without retaining extra statuses", () => {
+  const observer = createHttpErrorObservation();
+  const request = httpProbeRequest();
+  observer.request(request);
+  const response = { request: () => request, status: () => 503 };
+  observer.response(response);
+  observer.assertClean();
+  for (let i = 0; i < 10; i++) observer.response(response);
+  assert.deepEqual(observer.requests[0].statuses, [503]);
+  assert.throws(() => observer.assertClean(), /bounded observation/);
+});
+
+test("rejected one-off correlation never suppresses the unexpected console counter", () => {
+  const { expected, requests, entries } = oneOffProbe();
+  entries.push({ ...entries[0] });
+  const allowed = new Set();
+  assert.throws(() =>
+    allowed.add(assertSingleExpectedHttpError(expected, requests, entries)),
+  );
+  assert.equal(allowed.size, 0);
+  assert.equal(
+    entries.filter(
+      (entry) =>
+        entry.type === "error" && !expectedResourceError(entry, allowed),
+    ).length,
+    2,
+  );
+});
+
+const historyProbes = () => {
+  const url =
+    "http://127.0.0.1:5174/api/v1/projects/PRIVATE_PROJECT/copilot/rerun-intents/availability";
+  const stages = ["copilot-history-create", "copilot-history-reload"];
+  const requests = stages.map((stage) => ({
+    url,
+    method: "GET",
+    statuses: [503],
+    failed: false,
+    stage,
+    observationPhase: "journey",
+    resourceType: "xhr",
+    navigation: false,
+  }));
+  const expected = requests.map((observation) => ({
+    url,
+    observation,
+    stage: observation.stage,
+    category: "terminal-rerun-disabled",
+  }));
+  const entries = stages.map((stage) => ({
+    url,
+    stage,
+    type: "error",
+    observationPhase: "journey",
+    text: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+  }));
+  return { expected, requests, entries };
+};
+test("history allows only separately validated response identities and load-stage native errors", () => {
+  const { expected, requests, entries } = historyProbes();
+  const result = assertExpectedResponseHttpErrors(expected, requests, entries);
+  assert.deepEqual(
+    [...result.allowed],
+    ["/api/v1/projects/PRIVATE_PROJECT/copilot/rerun-intents/availability:503"],
+  );
+  assert.deepEqual(
+    result.evidence,
+    ["copilot-history-create", "copilot-history-reload"].map((stage) => ({
+      category: "terminal-rerun-disabled",
+      stage,
+      method: "GET",
+      status: 503,
+      bodyCode: 503,
+      envelope: "exact-default-off",
+      requestCount: 1,
+      responseCount: 1,
+      consoleErrorCount: 1,
+    })),
+  );
+  assert.equal(
+    JSON.stringify(result.evidence).includes("PRIVATE_PROJECT"),
+    false,
+  );
+});
+for (const [name, mutate] of [
+  ["missing request", (v) => v.requests.pop()],
+  ["extra same-route request", (v) => v.requests.push({ ...v.requests[0] })],
+  [
+    "unvalidated equal request object",
+    (v) => {
+      v.requests[0] = { ...v.requests[0] };
+    },
+  ],
+  ["duplicate registration", (v) => v.expected.push(v.expected[0])],
+  [
+    "reused request identity",
+    (v) => {
+      v.expected[1].observation = v.expected[0].observation;
+    },
+  ],
+  [
+    "uncompleted response",
+    (v) => {
+      v.requests[0].statuses = [];
+    },
+  ],
+  ["duplicate response", (v) => v.requests[0].statuses.push(503)],
+  [
+    "500 response",
+    (v) => {
+      v.requests[0].statuses = [500];
+    },
+  ],
+  [
+    "failed transport",
+    (v) => {
+      v.requests[0].failed = true;
+    },
+  ],
+  [
+    "POST response",
+    (v) => {
+      v.requests[0].method = "POST";
+    },
+  ],
+  [
+    "navigation response",
+    (v) => {
+      v.requests[0].navigation = true;
+    },
+  ],
+  [
+    "document resource",
+    (v) => {
+      v.requests[0].resourceType = "document";
+    },
+  ],
+  [
+    "request query drift",
+    (v) => {
+      v.requests[0].url += "?PRIVATE=1";
+    },
+  ],
+  [
+    "request origin drift",
+    (v) => {
+      v.requests[0].url = v.requests[0].url.replace("127.0.0.1", "localhost");
+    },
+  ],
+  [
+    "late request",
+    (v) => {
+      v.requests[0].observationPhase = "browser-closing";
+    },
+  ],
+  [
+    "request stage drift",
+    (v) => {
+      v.requests[0].stage = "copilot-history-send";
+    },
+  ],
+  ["missing console", (v) => v.entries.pop()],
+  ["extra console", (v) => v.entries.push({ ...v.entries[0] })],
+  [
+    "application console",
+    (v) => {
+      v.entries[0].text = "Application crashed PRIVATE";
+    },
+  ],
+  [
+    "500 native console",
+    (v) => {
+      v.entries[0].text = v.entries[0].text.replace("503", "500");
+    },
+  ],
+  [
+    "console query drift",
+    (v) => {
+      v.entries[0].url += "?PRIVATE=1";
+    },
+  ],
+  [
+    "console origin drift",
+    (v) => {
+      v.entries[0].url = v.entries[0].url.replace("127.0.0.1", "localhost");
+    },
+  ],
+  [
+    "console stage drift",
+    (v) => {
+      v.entries[0].stage = "copilot-history-plan";
+    },
+  ],
+  [
+    "late native console",
+    (v) => {
+      v.entries[0].observationPhase = "browser-closing";
+    },
+  ],
+  [
+    "duplicate console in one stage",
+    (v) => {
+      v.entries[1].stage = v.entries[0].stage;
+    },
+  ],
+  [
+    "unapproved stage",
+    (v) => {
+      v.expected[0].stage = "copilot-history-send";
+    },
+  ],
+  [
+    "unapproved category",
+    (v) => {
+      v.expected[0].category = "PRIVATE";
+    },
+  ],
+])
+  test(`history response allowance rejects ${name} without suppressing diagnostics`, () => {
+    const value = historyProbes();
+    mutate(value);
+    const allowed = new Set();
+    assert.throws(() => {
+      const result = assertExpectedResponseHttpErrors(
+        value.expected,
+        value.requests,
+        value.entries,
+      );
+      for (const key of result.allowed) allowed.add(key);
+    });
+    assert.equal(allowed.size, 0);
+    assert.equal(
+      safeConsoleErrorEvidence(value.entries, [], allowed).consoleErrorEvidence
+        .length,
+      value.entries.length,
+    );
+  });
+test("validated history probes cannot hide other APIs, failed navigation or application errors", () => {
+  const { expected, requests, entries } = historyProbes();
+  const unrelated = [
+    {
+      ...entries[0],
+      url: entries[0].url.replace(
+        "rerun-intents/availability",
+        "conversations/PRIVATE/turns",
+      ),
+    },
+    {
+      ...entries[0],
+      url: entries[0].url.replace(
+        "rerun-intents/availability",
+        "execution-intents/PRIVATE/confirm",
+      ),
+    },
+    { ...entries[0], url: "http://127.0.0.1:5174/workspace/Copilot/chat" },
+    {
+      ...entries[0],
+      url: "http://127.0.0.1:5174/src/PRIVATE.tsx",
+      text: "Application crashed PRIVATE",
+    },
+  ];
+  const result = assertExpectedResponseHttpErrors(expected, requests, [
+    ...entries,
+    ...unrelated,
+  ]);
+  for (const entry of unrelated)
+    assert.equal(expectedResourceError(entry, result.allowed), false);
+  assert.equal(
+    safeConsoleErrorEvidence([...entries, ...unrelated], [], result.allowed)
+      .consoleErrorEvidence.length,
+    4,
+  );
+});
+test("Copilot route diagnostics distinguish availability, history and mutations without raw identifiers", () => {
+  for (const [suffix, source] of [
+    ["rerun-intents/availability", "copilot-rerun-availability"],
+    ["rerun-intents/PRIVATE/confirm", "copilot-rerun"],
+    ["execution-intents/PRIVATE/confirm", "copilot-retry-execution"],
+    ["conversations/PRIVATE/turns", "copilot-history"],
+    ["status", "copilot-status"],
+    ["runs/PRIVATE/context", "copilot-context"],
+  ]) {
+    const entry = {
+      ...historyProbes().entries[0],
+      url: `https://PRIVATE.invalid/api/v1/projects/PRIVATE/copilot/${suffix}?token=PRIVATE`,
+    };
+    const result = safeConsoleErrorEvidence([entry], [], new Set());
+    assert.equal(result.consoleErrorEvidence[0].source, source);
+    assert.equal(JSON.stringify(result).includes("PRIVATE"), false);
+    assert.equal(expectedResourceError(entry, new Set()), false);
+  }
+});
+test("runtime request context preserves the original one-off probe correlation", () => {
+  const observer = createHttpErrorObservation();
+  const request = {
+    ...httpProbeRequest(),
+    resourceType: () => "xhr",
+    isNavigationRequest: () => false,
+  };
+  observer.request(request, {
+    stage: "copilot-execution-confirm",
+    observationPhase: "journey",
+  });
+  observer.response({ request: () => request, status: () => 503 });
+  const { expected, entries } = oneOffProbe();
+  assertSingleExpectedHttpError(expected, observer.requests, entries);
+  assert.strictEqual(observer.get(request), observer.requests[0]);
+  assert.equal(observer.get(httpProbeRequest()), undefined);
 });

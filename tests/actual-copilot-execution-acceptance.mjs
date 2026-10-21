@@ -33,6 +33,7 @@ await runBrowserTest(
     setStage,
     setSensitiveFormOpen,
     protectSensitiveValue,
+    expectHttpErrorOnce,
   }) => {
     outputDirectory = output;
     setStage("login");
@@ -71,6 +72,7 @@ await runBrowserTest(
       base,
       contract,
       setStage,
+      expectHttpErrorOnce,
     });
     setStage("journey-complete");
   },

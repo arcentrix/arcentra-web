@@ -27,6 +27,7 @@ import {
 } from "@/api/copilot/history";
 import { CopilotHistory } from "./copilot-history";
 import { CopilotExecutionActions } from "./copilot-execution-actions";
+import { CopilotRerunActions } from "./copilot-rerun-actions";
 import type { RetryActionCandidate } from "./copilot-execution-actions";
 import { CopilotPlanReview } from "./copilot-plan-review";
 import { useCopilotHistory } from "./use-copilot-history";
@@ -106,6 +107,7 @@ export function CopilotConsole() {
 }
 
 function ScopedCopilotConsole() {
+  const { userinfo, effectiveActions } = userStore.useState();
   const [retryCandidate, setRetryCandidate] = useState<RetryActionCandidate>();
   const [projectId, setProjectId] = useState("");
   const [runId, setRunId] = useState("");
@@ -736,6 +738,14 @@ function ScopedCopilotConsole() {
             ? retryCandidate
             : undefined
         }
+        disabled={!!busy || history.busy}
+      />
+      <CopilotRerunActions
+        projectId={projectId}
+        originalRunId={runId}
+        ownerId={userinfo?.userId ?? ""}
+        authorizationRevision={[...effectiveActions].sort().join(":")}
+        enabled={status !== null}
         disabled={!!busy || history.busy}
       />
       {mode === "private" && !history.conversation && (

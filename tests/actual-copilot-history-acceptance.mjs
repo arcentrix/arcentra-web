@@ -26,6 +26,7 @@ await runBrowserTest(
     setStage,
     setSensitiveFormOpen,
     protectSensitiveValue,
+    expectDisabledTerminalRerunResponse,
   }) => {
     outputDirectory = output;
     setStage("login");
@@ -67,6 +68,9 @@ await runBrowserTest(
       contract,
       profileResponse: await profileResponse,
       setStage,
+      // The disposable history fixture enables model/history only, never the
+      // independent terminal-rerun capability. Every load must prove default-off.
+      expectDisabledTerminalRerunResponse,
     });
     // Hash-only receipts and strict diagnostics are the evidence. No success or
     // failure screenshot may capture a redaction failure before backend checks.
