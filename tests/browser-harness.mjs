@@ -1,4 +1,5 @@
 import { copilotHistoryStages } from "./copilot-history-journey.mjs";
+import { rerunPreparationStages } from "./copilot-rerun-journey.mjs";
 import { personalInboxStages } from "./personal-inbox-journey.mjs";
 import {
   visualCIConfig,
@@ -31,12 +32,15 @@ const acceptanceStages = new Set([
   ...visualCIStages,
   ...personalInboxStages,
   ...copilotHistoryStages,
+  ...rerunPreparationStages,
   ...organizationManagementStages,
   ...projectSecretStages,
   "setup",
   "login",
   "copilot-execution-confirm",
   "copilot-execution-observe",
+  "copilot-rerun-outcome",
+  "copilot-rerun-owner-outcome",
   "first-build-preflight-evidence",
   "first-build-status",
   "first-build-refresh",
@@ -300,6 +304,12 @@ export function safeFailureEvidence(stage, error) {
     "actual-copilot-execution-acceptance.mjs",
     "copilot-execution-journey.mjs",
     "copilot-history-journey.mjs",
+    "actual-rerun-browser.mjs",
+    "copilot-rerun-journey.mjs",
+    "copilot-rerun-entry-contract.mjs",
+    "copilot-rerun-outcome-contract.mjs",
+    "copilot-rerun-outcome-journey.mjs",
+    "rerun-response-loss.mjs",
     "inbox-auth-guard.mjs",
     "personal-inbox-journey.mjs",
     "ui-fixture-smoke.mjs",

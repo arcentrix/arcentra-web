@@ -99,21 +99,27 @@ await runBrowserTest(
     assert.equal(value.detail.userId, input.actorId);
     await page.waitForURL((url) => url.pathname !== "/login");
     remaining(input.deadline);
-    const observed =
-      input.phase === "prepare"
-        ? await preparation.runRerunBrowserPreparation({
-            page,
-            base,
-            contract: input.contract,
-            deadline: input.deadline,
-          })
-        : await runRerunBrowserOutcome({
-            page,
-            base,
-            contract: input.contract,
-            ownerOnly: input.phase === "owner-outcome",
-            ...controls,
-          });
+    let observed;
+    if (input.phase === "prepare") {
+      observed = await preparation.runRerunBrowserPreparation({
+        page,
+        base,
+        contract: input.contract,
+        deadline: input.deadline,
+        setStage,
+      });
+    } else {
+      if (input.phase === "owner-outcome")
+        setStage("copilot-rerun-owner-outcome");
+      else setStage("copilot-rerun-outcome");
+      observed = await runRerunBrowserOutcome({
+        page,
+        base,
+        contract: input.contract,
+        ownerOnly: input.phase === "owner-outcome",
+        ...controls,
+      });
+    }
     remaining(input.deadline);
     assert.equal(observed.runtimeAcceptanceComplete, false);
     receipt = { ...observed, frontendCommit };

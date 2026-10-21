@@ -8,6 +8,15 @@ const id = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 const digest = (v) => typeof v === "string" && /^(?:v1:)?[a-f0-9]{64}$/.test(v);
 const sha = (v) =>
   typeof v === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(v);
+export const rerunPreparationStages = [
+  "copilot-rerun-open",
+  "copilot-rerun-load-scope",
+  "copilot-rerun-eligibility",
+  "copilot-rerun-prepare",
+  "copilot-rerun-prepare-recovery",
+  "copilot-rerun-confirm",
+  "copilot-rerun-confirm-recovery",
+];
 export const rerunAcknowledgement =
   "Create a new run of the whole job. The original run remains unchanged. Preparation may start after confirmation; a new independent approval is required before user commands.";
 export function validateRerunBrowserContract(value) {
@@ -164,6 +173,7 @@ export async function runRerunBrowserPreparation({
   base,
   contract,
   deadline,
+  setStage = () => {},
 }) {
   assert.ok(
     Number.isSafeInteger(deadline) && deadline > Date.now(),
@@ -195,6 +205,7 @@ export async function runRerunBrowserPreparation({
   };
   page.on("request", onRequest);
   try {
+    setStage("copilot-rerun-open");
     const userResponse = responseFor(page, "GET", "/api/v1/users/fetch");
     await page.goto(`${origin.origin}/workspace/Copilot/chat`);
     assert.equal(
@@ -207,8 +218,14 @@ export async function runRerunBrowserPreparation({
       exact: true,
     });
     async function loadScope() {
+      setStage("copilot-rerun-load-scope");
       await page.getByLabel("Project ID", { exact: true }).fill(f.projectId);
       await page.getByLabel("Run ID", { exact: true }).fill(f.originalRunId);
+      const statusResponse = responseFor(
+        page,
+        "GET",
+        `/api/v1/projects/${f.projectId}/copilot/status`,
+      );
       const availableResponse = responseFor(
         page,
         "GET",
@@ -217,6 +234,9 @@ export async function runRerunBrowserPreparation({
       await page
         .getByRole("button", { name: "Load context choices", exact: true })
         .click();
+      // Status gates the real UI's availability request. Fail at this exact
+      // observed HTTP response, not a later wait for an unreachable control.
+      await read(await statusResponse, true);
       assert.deepEqual(await read(await availableResponse, true), {
         available: true,
         cancelNewExecutionAvailable: false,
@@ -236,6 +256,9 @@ export async function runRerunBrowserPreparation({
     async function recover(path, previous, expectedPosts) {
       assert.equal((await read(await reloadedUser)).userId, f.actorId);
       await loadScope();
+      if (previous.state === "prepared")
+        setStage("copilot-rerun-prepare-recovery");
+      else setStage("copilot-rerun-confirm-recovery");
       // Session storage was populated by the real UI, not the acceptance driver.
       await section
         .getByText(`Recovery request ID: ${previous.requestId}`, {
@@ -292,6 +315,7 @@ export async function runRerunBrowserPreparation({
       return inspected;
     }
     await loadScope();
+    setStage("copilot-rerun-eligibility");
     await section
       .getByLabel("Original job ID", { exact: true })
       .fill(f.originalJobRunId);
@@ -307,6 +331,7 @@ export async function runRerunBrowserPreparation({
       0,
       "Eligibility and model context do not mutate",
     );
+    setStage("copilot-rerun-prepare");
     const preparedResponse = await withholdSuccessfulResponseAndReload({
       page,
       url: `${origin.origin}${root}`,
@@ -364,6 +389,7 @@ export async function runRerunBrowserPreparation({
       false,
       "Mobile page must not overflow",
     );
+    setStage("copilot-rerun-confirm");
     const confirmedResponse = await withholdSuccessfulResponseAndReload({
       page,
       url: `${origin.origin}${root}/${prepared.intentId}/confirm`,

@@ -4,6 +4,7 @@ import {
   assertIndependentRerunApproval,
   assertRerunBrowserReceipt,
   assertRerunBrowserReview,
+  runRerunBrowserPreparation,
   validateRerunBrowserContract,
 } from "./copilot-rerun-journey.mjs";
 const valid = () => ({
@@ -194,3 +195,80 @@ test("confirmed receipt rejects cancellation timestamp", () =>
       prepared(),
     ),
   ));
+
+for (const status of [401, 403, 409, 500, 503])
+  test(`scope loading rejects the exact Copilot status HTTP ${status} before waiting for availability`, async () => {
+    const stages = [];
+    const observedPaths = [];
+    let availabilityRead = false;
+    let listenerRemoved = false;
+    const root = "http://127.0.0.1:4173";
+    const response = (path, code, detail) => ({
+      request: () => ({ method: () => "GET" }),
+      url: () => `${root}${path}`,
+      status: () => code,
+      headerValue: async () => "private, no-store",
+      json: async () => ({ code, detail }),
+    });
+    const page = {
+      on(event) {
+        assert.equal(event, "request");
+      },
+      off(event) {
+        assert.equal(event, "request");
+        listenerRemoved = true;
+      },
+      goto: async () => {},
+      waitForResponse(predicate) {
+        const profile = response("/api/v1/users/fetch", 200, {
+          userId: valid().actorId,
+        });
+        const configuration = response(
+          "/api/v1/projects/project/copilot/status",
+          status,
+          {},
+        );
+        for (const candidate of [profile, configuration])
+          if (predicate(candidate)) {
+            observedPaths.push(new URL(candidate.url()).pathname);
+            return Promise.resolve(candidate);
+          }
+        return new Promise(() => {}); // Unreachable UI never requests availability.
+      },
+      getByLabel: () => ({ fill: async () => {} }),
+      getByRole(role) {
+        if (role === "region")
+          return {
+            waitFor() {
+              availabilityRead = true;
+              throw new Error("unreachable control");
+            },
+          };
+        assert.equal(role, "button");
+        return { click: async () => {} };
+      },
+    };
+    await assert.rejects(
+      runRerunBrowserPreparation({
+        page,
+        base: root,
+        contract: valid(),
+        deadline: Date.now() + 10_000,
+        setStage: (stage) => stages.push(stage),
+      }),
+      (error) =>
+        error.code === "ERR_ASSERTION" &&
+        error.actual === status &&
+        error.expected === 200,
+    );
+    assert.deepEqual(stages, [
+      "copilot-rerun-open",
+      "copilot-rerun-load-scope",
+    ]);
+    assert.deepEqual(observedPaths, [
+      "/api/v1/users/fetch",
+      "/api/v1/projects/project/copilot/status",
+    ]);
+    assert.equal(availabilityRead, false);
+    assert.equal(listenerRemoved, true);
+  });

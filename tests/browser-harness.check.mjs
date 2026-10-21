@@ -395,6 +395,54 @@ test("failure evidence only includes allowlisted stage, source basename and nume
     );
 });
 
+test("terminal rerun failures retain bounded stage and original helper location, never raw diagnostic content", async () => {
+  const { rerunPreparationStages } =
+    await import("./copilot-rerun-journey.mjs");
+  const source = await readFile(
+    new URL("./copilot-rerun-journey.mjs", import.meta.url),
+    "utf8",
+  );
+  const emitted = [...source.matchAll(/setStage\("([^"]+)"\)/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(
+    [...new Set(emitted)].sort(),
+    [...rerunPreparationStages].sort(),
+  );
+  for (const stage of [
+    ...rerunPreparationStages,
+    "copilot-rerun-outcome",
+    "copilot-rerun-owner-outcome",
+  ])
+    assert.equal(safeFailureEvidence(stage, null).stage, stage);
+  const wrapper = new URL("./browser-harness.mjs", import.meta.url).href;
+  for (const file of [
+    "actual-rerun-browser.mjs",
+    "copilot-rerun-journey.mjs",
+    "copilot-rerun-entry-contract.mjs",
+    "copilot-rerun-outcome-contract.mjs",
+    "copilot-rerun-outcome-journey.mjs",
+    "rerun-response-loss.mjs",
+  ]) {
+    const actual = new URL(file, import.meta.url).href;
+    assert.deepEqual(
+      safeFailureEvidence("copilot-rerun-load-scope", {
+        stack: `Error: PRIVATE-BODY token=PRIVATE-SECRET https://private.example\n    at callback (${actual}:23:9)\n    at async ${wrapper}:1194:9`,
+      }),
+      {
+        stage: "copilot-rerun-load-scope",
+        failureSite: { file, line: 23, column: 9 },
+      },
+    );
+    assert.deepEqual(
+      safeFailureEvidence("copilot-rerun-PRIVATE-SECRET", {
+        stack: `Error: PRIVATE-BODY\n    at callback (/untrusted/${file}:23:9)`,
+      }),
+      { stage: "unknown" },
+    );
+  }
+});
+
 test("missing persisted-log diagnostics allow only fixed marker categories, never log text", () => {
   for (const category of [
     "baseline",
